@@ -8,7 +8,7 @@ from src.bot.handlers import register_bot_handlers
 from src.database.db_manager import init_db
 
 # 🎛️ تنظیمات سوئیچ: True برای وب‌هوک (سرور واقعی) | False برای پولینگ (تست لوکال)
-USE_WEBHOOK = False  
+USE_WEBHOOK = True  
 
 # 🌐 تنظیمات سرور وب‌هوک (زمانی که USE_WEBHOOK = True باشد)
 WEBHOOK_HOST = "your_domain.com"  # آیدی دامنه یا آی‌پي سرور شما (بدون https)
