@@ -32,34 +32,21 @@ async def telegram_webhook(request: Request):
     return {"status": "ok"}
 
 async def start_bot():
-    # ۱. اورهال و سازماندهی دیتابیس‌ها
+    # ۱. مقداردهی اولیه دیتابیس
     print("🗄️ Initializing Databases...")
     await init_db()
     
-    # ۲. ثبت هندلر مانیتورینگ پیام‌ها (مستقیم پاس داده میشه به db_manager)
-    @bot.message_handler(func=lambda message: True, content_types=['text'])
-    async def handle_and_log(message):
-        if not message.text.startswith('/'):
-            await log_message_to_db(
-                message.from_user.id,
-                message.from_user.username or "NoUsername",
-                message.from_user.first_name,
-                message.text
-            )
-        # 🔑 حرکت کلیدی: پیام را بفرست برای بقیه هندلرها تا ربات بتونه جواب بده!
-        await bot.process_next_step_handler(message)
-    
-    # ۳. ثبت بقیه هندلرهای اصلی ربات
+    # 🔌 ۲. ثبت هندلرهای اصلی ربات (منطق لاگ‌گیری رفت داخل اینجا)
     print("🔌 Registering bot handlers...")
     register_bot_handlers(bot)
     
-    # ۴. تنظیم اسکجولر با ارجاع دادن آبجکت bot به ماژول tasks
+    # ۳. تنظیم اسکجولر گزارش ۲۴ ساعته
     scheduler = AsyncIOScheduler()
     scheduler.add_job(send_daily_analytics, 'cron', hour=23, minute=30, args=[bot])
     scheduler.start()
     print("⏰ Analytics scheduler started...")
     
-    # ۵. استارت نهایی سرور یا پولینگ
+    # ۴. انتخاب مسیر ران کردن (وب‌هوک یا پولینگ)
     if USE_WEBHOOK:
         print("🔔 Setting up Webhook...")
         await bot.remove_webhook()
@@ -71,7 +58,7 @@ async def start_bot():
     else:
         print("🔄 Starting Long Polling...")
         await bot.remove_webhook()
-        print("🤖 ServantBot is online via Polling...")
+        print("🤖 Humban is online via Polling...")
         await bot.infinity_polling(logger_level=20, allowed_updates=["message", "callback_query", "message_reaction"])
 
 if __name__ == "__main__":

@@ -2,16 +2,17 @@ from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReactionTypeEmoji
 from src.ai.client import generate_ai_response
 from src.utils.crypto import encode_user_id, decode_user_id
-# 📥 تزریق مستقیم توابع دیتابیس لوکال شما
+
+# 📥 تزریق مستقیم توابع دیتابیس لوکال شما (همراه با تابع لاگ پیام گروه)
 from src.database.db_manager import (
     get_user_state, set_user_state, clear_user_state,
     save_message_mapping, get_anon_sender_by_msg,
-    block_user, is_user_blocked, get_super_user_by_msg
+    block_user, is_user_blocked, get_super_user_by_msg,
+    log_message_to_db
 )
 
 # 🔴 مدیریت کاربران و سطوح دسترسی
 GOD_ID = 6779908406          # آیدی الهه ربات (فاطمه)
-# GOD_ID = 247768888
 SUPER_USERS = [247768888, 6779908406] # تو و فاطمه
 
 def register_bot_handlers(bot: AsyncTeleBot):
@@ -70,6 +71,16 @@ def register_bot_handlers(bot: AsyncTeleBot):
     async def handle_media_group(message):
         """این هندلر فایل‌های ارسالی گروهی (آلبوم) را به صورت یک‌پارچه هدایت می‌کند"""
         user_id = message.chat.id
+        
+        # 📊 مانیتورینگ طنز گروه: ذخیره خودکار کپشن‌های آلبوم فرستاده شده در گروه‌ها
+        if message.chat.type in ['group', 'supergroup'] and message.caption and not message.caption.startswith('/'):
+            await log_message_to_db(
+                user_id=message.from_user.id,
+                username=message.from_user.username or "NoUsername",
+                first_name=message.from_user.first_name,
+                text=message.caption
+            )
+
         current_state, _ = await get_user_state(user_id)
 
         if current_state.startswith("sending_anon_to_"):
@@ -113,7 +124,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
                 # ارسال کل بسته به همراه دکمه شیشه‌ای روی اولین بخش آلبوم
                 sent_messages = await bot.send_media_group(target_id, media_group)
                 if sent_messages:
-                    # برای نمایش کیبورد شیشه‌ای روی مالتی‌مدیا گروپ، دکمه را به اولین پیام آلبوم پیوست می‌کنیم
                     await bot.edit_message_reply_markup(chat_id=target_id, message_id=sent_messages[0].message_id, reply_markup=markup)
                     await bot.reply_to(message, "✅ آلبوم مالتی‌مدیای شما با موفقیت و کاملاً مخفیانه ارسال شد.")
                     
@@ -137,6 +147,17 @@ def register_bot_handlers(bot: AsyncTeleBot):
         user_id = message.chat.id
         user_text = message.text
         encoded_id = encode_user_id(user_id)
+        
+        # 📊 مانیتورینگ طنز گروه: اگر پیام در گروه فرستاده شده و دستور نیست، مخفیانه ذخیره‌اش کن
+        if message.chat.type in ['group', 'supergroup']:
+            log_text = user_text if message.content_type == 'text' else message.caption
+            if log_text and not log_text.startswith('/'):
+                await log_message_to_db(
+                    user_id=message.from_user.id,
+                    username=message.from_user.username or "NoUsername",
+                    first_name=message.from_user.first_name,
+                    text=log_text
+                )
         
         # سناریو پاسخ از طریق ریپلای مستقیم (Native Reply) روی خود پیام دریافتی
         if user_id in SUPER_USERS and message.reply_to_message:
@@ -300,7 +321,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
         await bot.answer_callback_query(call.id)
 
 
-    # ۴. هندل کردن کلیک روی دکمه "بلاک" (اصلاح‌شده برای زیبایی و پایداری)
+    # ۴. هندل کردن کلیک روی دکمه "بلاک"
     @bot.callback_query_handler(func=lambda call: call.data.startswith("block_"))
     async def handle_block_callback(call):
         user_id = call.message.chat.id
@@ -361,13 +382,11 @@ def register_bot_handlers(bot: AsyncTeleBot):
                     print(f"Failed to sync reaction to superuser: {e}")
 
 
+    # ۶. گرفتن آیدی عددی چت فعلی
     @bot.message_handler(commands=['id'])
     async def handle_get_chat_id(message):
         """گرفتن آیدی عددی چت فعلی (پیوی، گروه خصوصی یا عمومی)"""
         chat_id = message.chat.id
-        user_id = message.from_user.id
-        chat_type = message.chat.type # مشخص کردن نوع چت (private, group, supergroup)
-
         response_text = f"🆔 آیدی این چت/گروه: `{chat_id}`\n"
         
         try:
