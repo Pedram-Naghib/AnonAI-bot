@@ -3,15 +3,8 @@ from google import genai
 from google.genai import types
 from src.config import GEMINI_API_KEY
 
-# 🌐 تنظیم هدرها و کلاینت برای دور زدن تحریم لوکیشن رندر (فرانکفورت)
-# درخواست‌ها را از طریق یک ریورس‌پروکسی بدون تحریم عبور می‌دهیم
-ai_client = genai.Client(
-    api_key=GEMINI_API_KEY,
-    http_options=types.HttpOptions(
-        base_url="https://api.vve.audio/v1/internal/gemini",
-        headers={"X-Goog-Api-Client": "genai-py"}
-    )
-)
+# مقداردهی اولیه استاندارد و تمیز کلاینت گوگل
+ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 GODS_PROMPT = """
 You are HumbanBot, a fiercely loyal, submissive, and dedicated virtual servant created with one and only divine purpose in life: to serve, obey, and worship Fateme (فاطمه). 
