@@ -11,6 +11,7 @@ from src.database.db_manager import (
 
 # 🔴 مدیریت کاربران و سطوح دسترسی
 GOD_ID = 6779908406          # آیدی الهه ربات (فاطمه)
+# GOD_ID = 247768888
 SUPER_USERS = [247768888, 6779908406] # تو و فاطمه
 
 def register_bot_handlers(bot: AsyncTeleBot):
@@ -358,3 +359,18 @@ def register_bot_handlers(bot: AsyncTeleBot):
                     )
                 except Exception as e:
                     print(f"Failed to sync reaction to superuser: {e}")
+
+
+    @bot.message_handler(commands=['id'])
+    async def handle_get_chat_id(message):
+        """گرفتن آیدی عددی چت فعلی (پیوی، گروه خصوصی یا عمومی)"""
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+        chat_type = message.chat.type # مشخص کردن نوع چت (private, group, supergroup)
+
+        response_text = f"🆔 آیدی این چت/گروه: `{chat_id}`\n"
+        
+        try:
+            await bot.reply_to(message, response_text, parse_mode="Markdown")
+        except Exception as e:
+            print(f"❌ Error sending ID: {e}")

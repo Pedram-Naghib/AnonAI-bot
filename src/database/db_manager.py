@@ -1,9 +1,10 @@
 import aiosqlite
+from datetime import datetime, timedelta
 
 DB_PATH = "servant_bot.db"
 
 async def init_db():
-    """ساخت جداول مورد نیاز ربات در صورت عدم وجود"""
+    """ساخت جداول مورد نیاز ربات در صورت عدم وجود (پروژه اصلی + سیستم مانیتورینگ روزانه)"""
     async with aiosqlite.connect(DB_PATH) as db:
         
         # ۱. جدول وضعیت کاربران و ردیابی هدف‌های ریپلای (FSM)
@@ -15,7 +16,7 @@ async def init_db():
             )
         """)
         
-        # ۲. جدول نگاشت پیام‌ها برای انتقال ری‌آکشن‌ها (با متغیرهای اختصاصی خودت)
+        # ۲. جدول نگاشت پیام‌ها برای انتقال ری‌آکشن‌ها
         await db.execute("""
             CREATE TABLE IF NOT EXISTS message_map (
                 user_chat_id INTEGER,
@@ -32,6 +33,17 @@ async def init_db():
                 owner_id INTEGER,
                 blocked_id INTEGER,
                 PRIMARY KEY (owner_id, blocked_id)
+            )
+        """)
+        
+        # 📊 ۴. جدول مانیتورینگ طنز رفتارهای اعضا (سیستم آنالیز ۲۴ ساعته)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS group_logs (
+                user_id INTEGER,
+                username TEXT,
+                first_name TEXT,
+                message_text TEXT,
+                timestamp DATETIME
             )
         """)
         
@@ -94,8 +106,7 @@ async def get_anon_sender_by_msg(user_chat_id: int, user_msg_id: int):
             FROM message_map 
             WHERE user_chat_id = ? AND user_msg_id = ?
         """, (user_chat_id, user_msg_id)) as cursor:
-            return await cursor.fetchone()  # خروجی به صورت یک Tuple شامل (anon_sender_id, anon_msg_id) است
-
+            return await cursor.fetchone()
 
 async def get_super_user_by_msg(anon_sender_id: int, anon_msg_id: int):
     """پیدا کردن اطلاعات پیام صاحب لینک (سوپریوزر) بر اساس پیام شخص غریبه"""
@@ -105,7 +116,8 @@ async def get_super_user_by_msg(anon_sender_id: int, anon_msg_id: int):
             FROM message_map 
             WHERE anon_sender_id = ? AND anon_msg_id = ?
         """, (anon_sender_id, anon_msg_id)) as cursor:
-            return await cursor.fetchone()  # خروجی: (user_chat_id, user_msg_id)
+            return await cursor.fetchone()
+
 
 # ────────────────────────────────────────────────────────
 # 🚫 توابع مدیریت لیست سیاه (Block List)
@@ -129,3 +141,34 @@ async def is_user_blocked(owner_id: int, blocked_id: int) -> bool:
         """, (owner_id, blocked_id)) as cursor:
             row = await cursor.fetchone()
             return row is not None
+
+
+# ────────────────────────────────────────────────────────
+# 📊 توابع جدید ناهمگام (Async) سیستم مانیتورینگ طنز رفتارهای اعضا
+# ────────────────────────────────────────────────────────
+
+async def log_message_to_db(user_id: int, username: str, first_name: str, text: str):
+    """ذخیره ناهمگام چت‌های عادی اعضای گروه درون جدول اختصاصی آمارگیری"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO group_logs VALUES (?, ?, ?, ?, ?)",
+            (user_id, username, first_name, text, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        )
+        await db.commit()
+
+async def get_daily_group_logs():
+    """استخراج ناهمگام پیام‌های ۲۴ ساعت گذشته گروه جهت پردازش توسط جمینای"""
+    one_day_ago = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT first_name, username, message_text FROM group_logs WHERE timestamp > ?", 
+            (one_day_ago,)
+        ) as cursor:
+            return await cursor.fetchall()
+
+async def clean_old_logs():
+    """حذف اتوماتیک پیام‌های قدیمی گروه برای بهینه‌سازی دیسک سرور Render"""
+    two_days_ago = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d %H:%M:%S')
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM group_logs WHERE timestamp < ?", (two_days_ago,))
+        await db.commit()
