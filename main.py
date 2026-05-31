@@ -1,3 +1,4 @@
+import os
 import asyncio
 import uvicorn
 from fastapi import FastAPI, Request
@@ -11,8 +12,8 @@ from src.database.db_manager import init_db
 USE_WEBHOOK = True  
 
 # 🌐 تنظیمات سرور وب‌هوک (زمانی که USE_WEBHOOK = True باشد)
-WEBHOOK_HOST = "your_domain.com"  # آیدی دامنه یا آی‌پي سرور شما (بدون https)
-WEBHOOK_PORT = 8000
+WEBHOOK_HOST = "anonai-bot.onrender.com"  # آیدی دامنه یا آی‌پي سرور شما (بدون https)
+WEBHOOK_PORT = int(os.environ.get("PORT", 8000))
 WEBHOOK_URL = f"https://{WEBHOOK_HOST}/webhook/{TELEGRAM_BOT_TOKEN}"
 
 # مقداردهی اولیه ربات
