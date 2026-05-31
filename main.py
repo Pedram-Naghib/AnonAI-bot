@@ -16,9 +16,15 @@ WEBHOOK_HOST = "anonai-bot.onrender.com"  # آیدی دامنه یا آی‌پي
 WEBHOOK_PORT = int(os.environ.get("PORT", 8000))
 WEBHOOK_URL = f"https://{WEBHOOK_HOST}/webhook/{TELEGRAM_BOT_TOKEN}"
 
-# مقداردهی اولیه ربات
+# مقداردهی اولیه ربات و سرور
 bot = AsyncTeleBot(TELEGRAM_BOT_TOKEN)
 app = FastAPI()
+
+# 🟢 سیستم هلت‌چک (Health Check) برای بیدار نگه داشتن سرور توسط UptimeRobot
+@app.get("/")
+async def health_check():
+    """پاسخ به پینگ‌های UptimeRobot برای جلوگیری از خواب رفتن رندر"""
+    return {"status": "alive", "message": "AnonAI Bot is running perfectly!"}
 
 # تعریف مسیر دریافت آپدیت‌ها برای وب‌هوک تلگرام
 @app.post(f"/webhook/{TELEGRAM_BOT_TOKEN}")
