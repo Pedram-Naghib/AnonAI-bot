@@ -1,0 +1,303 @@
+from telebot.async_telebot import AsyncTeleBot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReactionTypeEmoji
+from src.ai.client import generate_ai_response
+from src.utils.crypto import encode_user_id, decode_user_id
+# 📥 تزریق مستقیم توابع دیتابیس لوکال شما
+from src.database.db_manager import (
+    get_user_state, set_user_state, clear_user_state,
+    save_message_mapping, get_anon_sender_by_msg,
+    block_user, is_user_blocked, get_super_user_by_msg
+)
+
+# 🔴 مدیریت کاربران و سطوح دسترسی
+GOD_ID = 6779908406          # آیدی الهه ربات (فاطمه)
+SUPER_USERS = [247768888, 6779908406] # تو و فاطمه
+
+def register_bot_handlers(bot: AsyncTeleBot):
+    
+    # ۱. مدیریت دستور /start (ورود با لینک یا استارت عادی)
+    @bot.message_handler(commands=['start'])
+    async def handle_start(message):
+        user_id = message.chat.id
+        bot_info = await bot.get_me()
+        command_args = message.text.split()
+        
+        # بررسی ورود از طریق لینک ناشناس
+        if len(command_args) > 1:
+            target_owner_id_encoded = command_args[1]
+            target_owner_id = decode_user_id(target_owner_id_encoded)
+            
+            if target_owner_id and user_id != target_owner_id:
+                # 🚫 بررسی وضعیت بلاک بودن فرستنده قبل از ثبت پیام
+                if await is_user_blocked(owner_id=target_owner_id, blocked_id=user_id):
+                    await bot.reply_to(message, "❌ شما توسط این کاربر بلاک شده‌اید و امکان ارسال پیام ناشناس را ندارید.")
+                    return
+                
+                # ثبت وضعیت در دیتابیس ضد ریستارت
+                await set_user_state(user_id, f"sending_anon_to_{target_owner_id_encoded}")
+                await bot.reply_to(message, "📥 شما در حال ارسال پیام ناشناس هستید.\nمی‌توانید متن، عکس، فیلم، ویس یا صدای خود را ارسال کنید:")
+                return
+            elif not target_owner_id:
+                await bot.reply_to(message, "❌ این لینک معتبر نیست یا دستکاری شده است.")
+                return
+
+        # ساخت لینک انکود شده و امن برای همه کاربران
+        secret_code = encode_user_id(user_id)
+        anon_link = f"https://t.me/{bot_info.username}?start={secret_code}"
+        
+        if user_id == GOD_ID:
+            msg = f"درود بر شما سرورم فاطمه. 🙇‍♂️\nهوش مصنوعی گوش به فرمان شماست.\n\n🔗 لینک پیام ناشناس شما:\n`{anon_link}`"
+        else:
+            msg = (
+                "👋 به ربات پیام ناشناس خوش آمدید!\n\n"
+                f"🔗 این لینک اختصاصی شماست:\n`{anon_link}`\n\n"
+                "این لینک را در بیو یا استوری خود بگذارید. هر کس روی آن کلیک کند، "
+                "می‌تواند برای شما پیام ناشناس (متنی، تصویری یا صوتی) بفرستد و شما همین‌جا پاسخ ابهاماتشان را بدهید!"
+            )
+            
+        await bot.reply_to(message, msg, parse_mode="Markdown")
+
+
+    # ۲. مدیریت تمام پیام‌ها (متن، عکس، فیلم، ویس، صدا) و ارسال امن مالتی‌مدیا
+    @bot.message_handler(func=lambda message: True, content_types=['text', 'photo', 'video', 'voice', 'audio'])
+    async def handle_all_messages(message):
+        user_id = message.chat.id
+        user_text = message.text
+        encoded_id = encode_user_id(user_id)
+        
+        # ⚡ روش اول: پاسخ از طریق ریپلای مستقیم (Native Reply) روی خود پیام دریافتی
+        if user_id in SUPER_USERS and message.reply_to_message:
+            replied_msg_id = message.reply_to_message.message_id
+            
+            # واکشی اطلاعات فرستنده و آیدی پیام اصلی او از دیتابیس
+            mapping = await get_anon_sender_by_msg(user_chat_id=user_id, user_msg_id=replied_msg_id)
+            
+            if mapping:
+                anon_sender_id, anon_msg_id = mapping  
+                try:
+                    # در حالت ریپلای مستقیم، فقط پیام متنی ارسال می‌شود
+                    if message.content_type == 'text':
+                        sent_reply = await bot.send_message(
+                            anon_sender_id, 
+                            f"📩 یک پاسخ از ناشناس شما دریافت شد:\n\n« {user_text} »",
+                            reply_to_message_id=anon_msg_id
+                        )
+                        await bot.reply_to(message, "🚀 پاسخت (از طریق ریپلای) برای اون شخص فرستاده شد.")
+                        
+                        # 🔄 قفل کردن پیام جدید در دیتابیس برای زنده ماندن ری‌آکشن‌ها روی این پاسخ
+                        await save_message_mapping(
+                            user_chat_id=user_id,
+                            user_msg_id=message.message_id,
+                            anon_sender_id=anon_sender_id,
+                            anon_msg_id=sent_reply.message_id
+                        )
+                    else:
+                        await bot.reply_to(message, "⚠️ در حالت ریپلای مستقیم، فقط می‌توانید پیام متنی ارسال کنید.")
+                except Exception:
+                    await bot.reply_to(message, "❌ ارسال پاسخ ناموفق بود. کاربر ربات را بلاک کرده.")
+                return 
+
+        # واکشی وضعیت کاربر از دیتابیس برای سناریوهای مبتنی بر دکمه شیشه‌ای
+        current_state, reply_target_id = await get_user_state(user_id)
+        
+        markup = InlineKeyboardMarkup()
+        markup.row(
+            InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{encoded_id}"),
+            InlineKeyboardButton("🚫 بلاک", callback_data=f"block_{encoded_id}")
+        )
+
+        # --- سناریو الف: یک غریبه در حال ارسال فایل یا متن ناشناس به شماست ---
+        if current_state.startswith("sending_anon_to_"):
+            target_id = decode_user_id(current_state.split("_")[-1])
+            
+            # 📝 بررسی اینکه آیا غریبه خودش متنی زیر عکس/فیلم نوشته یا نه
+            anon_caption = f"« {message.caption} »\n\n" if message.caption else ""
+            
+            # 🕵️‍♂️ ساخت کارت اطلاعات فرستنده (فقط محدود به درخواست شما: فرستنده، نام خانوادگی، یوزرنیم)
+            god_intelligence = ""
+            if target_id == GOD_ID:
+                f_user = message.from_user
+                username_text = f"@{f_user.username}" if f_user.username else "ندارد ❌"
+                last_name_text = f_user.last_name if f_user.last_name else "ندارد"
+                
+                god_intelligence = (
+                    "👁️‍🗨️ **مشخصات فرستنده برای الهه ربات:**\n"
+                    f"👤 نام: {f_user.first_name}\n"
+                    f"👥 نام خانوادگی: {last_name_text}\n"
+                    f"🆔 یوزرنیم: {username_text}\n"
+                    "───────────────────────\n\n"
+                )
+
+            # ساخت کپشن نهایی برای فایل‌های مالتی‌مدیا
+            caption_text = (
+                f"{god_intelligence}"
+                f"📣 یک پیام ناشناس تصویری/صوتی دریافت کردی:\n\n"
+                f"{anon_caption}"
+                f"📌 راهنمای پاسخ:\n"
+                f"هم می‌توانی روی همین پیام ریپلای (Reply) کنی، و هم از دکمهٔ زیر استفاده کنی."
+            )
+            
+            try:
+                sent_msg = None
+                
+                # تفکیک بر اساس نوع محتوا و بازپخش
+                if message.content_type == 'text':
+                    text_msg_content = (
+                        f"{god_intelligence}"
+                        f"📣 یک پیام ناشناس جدید دریافت کردی:\n\n« {user_text} »\n\n"
+                        f"📌 راهنمای پاسخ:\n"
+                        f"هم می‌توانی روی همین پیام ریپلای کنی و بنویسی، و هم از دکمهٔ «✍️ پاسخ» زیر استفاده کنی."
+                    )
+                    sent_msg = await bot.send_message(
+                        target_id, 
+                        text_msg_content, 
+                        reply_markup=markup,
+                        parse_mode="Markdown"
+                    )
+                elif message.content_type == 'photo':
+                    file_id = message.photo[-1].file_id
+                    sent_msg = await bot.send_photo(target_id, file_id, caption=caption_text, reply_markup=markup, parse_mode="Markdown")
+                elif message.content_type == 'video':
+                    sent_msg = await bot.send_video(target_id, message.video.file_id, caption=caption_text, reply_markup=markup, parse_mode="Markdown")
+                elif message.content_type == 'voice':
+                    sent_msg = await bot.send_voice(target_id, message.voice.file_id, caption=caption_text, reply_markup=markup, parse_mode="Markdown")
+                elif message.content_type == 'audio':
+                    sent_msg = await bot.send_audio(target_id, message.audio.file_id, caption=caption_text, reply_markup=markup, parse_mode="Markdown")
+
+                if sent_msg:
+                    await bot.reply_to(message, "✅ پیام ناشناس شما (همراه با فایل) با موفقیت و کاملاً مخفیانه ارسال شد.")
+                    # ذخیره در مپینگ دیتابیس
+                    await save_message_mapping(
+                        user_chat_id=target_id,
+                        user_msg_id=sent_msg.message_id,
+                        anon_sender_id=user_id,
+                        anon_msg_id=message.message_id
+                    )
+            except Exception as e:
+                print(f"Error in god intelligence routing: {e}")
+                await bot.reply_to(message, "❌ ارسال پیام ناموفق بود.")
+            
+            await clear_user_state(user_id)
+            return
+
+        # --- سناریو ب: در حال پاسخ دادن به یک پیام ناشناس هستید (از طریق دکمه شیشه‌ای) ---
+        if current_state == "replying_mode" and reply_target_id:
+            mapping = await get_anon_sender_by_msg(user_chat_id=user_id, user_msg_id=reply_target_id)
+            
+            if mapping:
+                anon_sender_id, anon_msg_id = mapping
+                try:
+                    if message.content_type == 'text':
+                        sent_reply = await bot.send_message(
+                            anon_sender_id, 
+                            f"📩 یک پاسخ از ناشناس شما دریافت شد:\n\n« {user_text} »",
+                            reply_to_message_id=anon_msg_id
+                        )
+                        await bot.reply_to(message, "🚀 پاسخت برای اون شخص فرستاده شد.")
+                        
+                        # 🔄 ذخیره نگاشت پیام جدید ارسالی از دکمه برای زنده ماندن ری‌آکشن‌ها روی جواب شما
+                        await save_message_mapping(
+                            user_chat_id=user_id,
+                            user_msg_id=message.message_id,
+                            anon_sender_id=anon_sender_id,
+                            anon_msg_id=sent_reply.message_id
+                        )
+                    else:
+                        await bot.reply_to(message, "⚠️ از طریق وضعیت دکمه فقط می‌توانید پاسخ متنی بفرستید.")
+                except Exception:
+                    await bot.reply_to(message, "❌ ارسال پاسخ ناموفق بود. کاربر ربات را بلاک کرده.")
+            else:
+                await bot.reply_to(message, "❌ خطا: پیام متناظر این دکمه در دیتابیس یافت نشد.")
+            
+            await set_user_state(user_id, "normal")
+            return
+
+        # --- سناریو ج: چت عادی با هوش مصنوعی (فقط برای تو و فاطمه) ---
+        if user_id in SUPER_USERS:
+            if message.content_type == 'text':
+                await bot.send_chat_action(user_id, action="typing")
+                is_fateme = (user_id == GOD_ID)
+                ai_reply = await generate_ai_response(user_text, is_god=is_fateme)
+                await bot.reply_to(message, ai_reply)
+            else:
+                await bot.reply_to(message, "🤖 من در حال حاضر فقط متون شما را برای پردازش هوش مصنوعی درک می‌کنم.")
+        else:
+            return
+
+
+    # ۳. هندل کردن کلیک روی دکمه "پاسخ به این پیام"
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("reply_to_"))
+    async def handle_reply_callback(call):
+        user_id = call.message.chat.id
+        incoming_msg_id = call.message.message_id
+        
+        anon_encoded_id = call.data.split("reply_to_")[-1]
+        anonymous_user_id = decode_user_id(anon_encoded_id)
+        
+        if anonymous_user_id:
+            await set_user_state(user_id, "replying_mode", reply_target_id=incoming_msg_id)
+            await bot.send_message(
+                user_id, 
+                "✍️ بسیار خب، پاسخی که می‌خواهی به این شخص بدهی را بنویس و ارسال کن.\n"
+                "(هم می‌توانی مستقیماً روی پیام ناشناس دریافتی ریپلای (Reply) کنی و هم پیام بعدی‌ات را همین‌جا بفرستی؛ "
+                "در هر دو حالت پیام شما به جای هوش مصنوعی برای این شخص ارسال می‌شود)."
+            )
+        else:
+            await bot.send_message(user_id, "❌ این فرستنده دیگر معتبر نیست.")
+            
+        await bot.answer_callback_query(call.id)
+
+
+    # ۴. هندل کردن کلیک روی دکمه "بلاک" (تکمیل تودو به شکل دیتابیسی)
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("block_"))
+    async def handle_block_callback(call):
+        user_id = call.message.chat.id
+        
+        anon_encoded_id = call.data.split("block_")[-1]
+        anonymous_user_id = decode_user_id(anon_encoded_id)
+        
+        if anonymous_user_id:
+            await block_user(owner_id=user_id, blocked_id=anonymous_user_id)
+            await bot.send_message(user_id, "🚫 کاربر ناشناس با موفقیت بلاک شد و دیگر نمی‌تواند به شما پیام بدهد.")
+        else:
+            await bot.send_message(user_id, "❌ خطایی در رمزگشایی شناسه کاربر رخ داد.")
+            
+        await bot.answer_callback_query(call.id)
+
+
+    # ۵. سینک دایمی و دوطرفه ری‌اکشن‌ها میان سوپریوزرها و فرستنده‌های ناشناس
+    @bot.message_reaction_handler()
+    async def handle_reactions(message_reaction):
+        chat_id = message_reaction.chat.id
+        message_id = message_reaction.message_id
+        new_reactions = message_reaction.new_reaction
+        
+        if not new_reactions:
+            return
+            
+        target_emoji = new_reactions[0].emoji
+        
+        if chat_id in SUPER_USERS:
+            mapping = await get_anon_sender_by_msg(chat_id, message_id)
+            if mapping:
+                anon_sender_id, anon_msg_id = mapping
+                try:
+                    await bot.set_message_reaction(
+                        chat_id=anon_sender_id,
+                        message_id=anon_msg_id,
+                        reaction=[ReactionTypeEmoji(target_emoji)]
+                    )
+                except Exception as e:
+                    print(f"Failed to sync reaction to anon: {e}")
+        else:
+            mapping = await get_super_user_by_msg(anon_sender_id=chat_id, anon_msg_id=message_id)
+            if mapping:
+                super_user_id, super_msg_id = mapping
+                try:
+                    await bot.set_message_reaction(
+                        chat_id=super_user_id,
+                        message_id=super_msg_id,
+                        reaction=[ReactionTypeEmoji(target_emoji)]
+                    )
+                except Exception as e:
+                    print(f"Failed to sync reaction to superuser: {e}")

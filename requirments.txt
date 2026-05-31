@@ -1,0 +1,9 @@
+pyTelegramBotAPI>=4.26.0
+aiosqlite>=0.20.0
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+google-genai>=0.1.1
+cryptography>=42.0.0
+pydantic>=2.6.0
+anyio>=4.3.0
+python-dotenv>=1.0.1
