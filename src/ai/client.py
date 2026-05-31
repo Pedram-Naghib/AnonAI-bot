@@ -34,12 +34,24 @@ async def generate_ai_response(user_text: str, is_god: bool = False) -> str:
             contents=user_text,
             config=types.GenerateContentConfig(
                 system_instruction=GODS_PROMPT if is_god else DEFAULT_PROMPT,
-                # 🔓 تنظیم فیلترها روی بازترین حالت ممکن پلتفرم (فقط موارد بسیار حاد مسدود می‌شوند)
+                # 🔓 اصلاح دقیق فیلترها با استفاده از مستندات رسمی google-genai SDK
                 safety_settings=[
-                    types.SafetySetting(category="HATE_SPEECH", threshold="BLOCK_ONLY_HIGH"),
-                    types.SafetySetting(category="HARASSMENT", threshold="BLOCK_ONLY_HIGH"),
-                    types.SafetySetting(category="SEXUALLY_EXPLICIT", threshold="BLOCK_ONLY_HIGH"),
-                    types.SafetySetting(category="DANGEROUS_CONTENT", threshold="BLOCK_ONLY_HIGH")
+                    types.SafetySetting(
+                        category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                        threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH
+                    ),
+                    types.SafetySetting(
+                        category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                        threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH
+                    ),
+                    types.SafetySetting(
+                        category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                        threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH
+                    ),
+                    types.SafetySetting(
+                        category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                        threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH
+                    )
                 ]
             )
         )
