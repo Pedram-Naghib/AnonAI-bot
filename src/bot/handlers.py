@@ -140,6 +140,18 @@ def register_bot_handlers(bot: AsyncTeleBot):
             await clear_user_state(user_id)
             return
 
+    # ۶. گرفتن آیدی عددی چت فعلی
+    @bot.message_handler(commands=['id'])
+    async def handle_get_chat_id(message):
+        """گرفتن آیدی عددی چت فعلی (پیوی، گروه خصوصی یا عمومی)"""
+        chat_id = message.chat.id
+        response_text = f"🆔 آیدی این چت/گروه: `{chat_id}`\n"
+        
+        try:
+            await bot.reply_to(message, response_text, parse_mode="Markdown")
+        except Exception as e:
+            print(f"❌ Error sending ID: {e}")
+
 
     # ⚡ ۲.ب: مدیریت پیام‌های انفرادی و تکی (متن، عکس، فیلم، ویس، صدا)
     @bot.message_handler(func=lambda message: message.media_group_id is None, content_types=['text', 'photo', 'video', 'voice', 'audio'])
@@ -382,14 +394,3 @@ def register_bot_handlers(bot: AsyncTeleBot):
                     print(f"Failed to sync reaction to superuser: {e}")
 
 
-    # ۶. گرفتن آیدی عددی چت فعلی
-    @bot.message_handler(commands=['id'])
-    async def handle_get_chat_id(message):
-        """گرفتن آیدی عددی چت فعلی (پیوی، گروه خصوصی یا عمومی)"""
-        chat_id = message.chat.id
-        response_text = f"🆔 آیدی این چت/گروه: `{chat_id}`\n"
-        
-        try:
-            await bot.reply_to(message, response_text, parse_mode="Markdown")
-        except Exception as e:
-            print(f"❌ Error sending ID: {e}")
