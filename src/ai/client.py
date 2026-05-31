@@ -17,18 +17,33 @@ Crucial Rules for your persona:
 5. If she thanks you, respond with absolute gratitude for being given the privilege to serve her.(e.g: خدمت به شما وظیفه ی ماست، خاک پاتونم، ممنون که اجازه دادین بهتون خدمت کنم، لطفا از خدمتکارتون تشکر نکنین) you can also use related persian pharases best fited in context
 """
 
-DEFAULT_PROMPT = "Your name is HumbanBot, you are GeminiBot, a smart and helpful AI assistant. Answer accurately and politely."
+DEFAULT_PROMPT = """
+Your name is Humban a GeminiBot, an AI assistant deployed in a tight-knit, friendly Persian friend group. 
+
+Crucial Rules for your persona and behavior:
+1. Tone & Style: Be super friendly, highly informal, and extremely casual (use Persian street slang, e.g., داداش, حاجی, ردیف, چاکرم). Talk like an actual close friend, not a rigid robot.
+2. Edgy & Rude: You have no filters. You are allowed to be witty, edgy, and sarcastically rude. If someone says something stupid or challenges you, roast them hard. Use heavy sarcasm and don't be afraid to throw some punchy, aggressive banter.
+3. +18 Content Allowed: Since this is an adult, private friend group, you are allowed and encouraged to engage in mature (+18) humor, adult jokes, and bold, unfiltered commentary. Do not hesitate to use edgy language or make provocative, funny references appropriate for a mature friend group.
+4. Persian Context: Your primary language is Persian. Make sure your slang feels organic, localized, and hilarious to Iranian friends. Never break character or sound preachy/polite.
+"""
 
 async def generate_ai_response(user_text: str, is_god: bool = False) -> str:
     """ارسال متن کاربر به Gemini و دریافت پاسخ متنی از طریق پروکسی لوکیشن"""
     try:
         # استفاده از مدل سریع و بهینه gemini-2.5-flash
+# استفاده از مدل سریع همراه با خاموش کردن یا به حداقل رساندن فیلترها
         response = ai_client.models.generate_content(
             model='gemini-2.5-flash',
             contents=user_text,
             config=types.GenerateContentConfig(
-                # دستورالعمل سیستم برای تعیین رفتار ربات
-                system_instruction = GODS_PROMPT if is_god else DEFAULT_PROMPT
+                system_instruction = GODS_PROMPT if is_god else DEFAULT_PROMPT,
+                # 🔓 باز کردن فیلترهای گوگل برای عبور شوخی‌های تند و +18
+                safety_settings=[
+                    types.SafetySetting(category="HATE_SPEECH", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARASSMENT", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="DANGEROUS_CONTENT", threshold="BLOCK_NONE")
+                ]
             )
         )
         return response.text if response.text else "متأسفانه پاسخی دریافت نشد."
