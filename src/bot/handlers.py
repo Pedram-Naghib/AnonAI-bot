@@ -96,14 +96,14 @@ def register_bot_handlers(bot: AsyncTeleBot):
                 InlineKeyboardButton("🚫 بلاک", callback_data=f"block_{encoded_id}")
             )
 
-            # الصاق اطلاعات فرستنده صرفاً برای الهه ربات
+            # الصاق اطلاعات فرستنده صرفاً برای الهه ربات (HTML شده)
             god_intelligence = ""
             if target_id == GOD_ID:
                 f_user = message.from_user
                 username_text = f"@{f_user.username}" if f_user.username else "ندارد ❌"
                 last_name_text = f_user.last_name if f_user.last_name else "ندارد"
                 god_intelligence = (
-                    "👁️‍🗨️ **مشخصات فرستندهٔ آلبوم برای الهه ربات:**\n"
+                    "👁️‍🗨️ <b>مشخصات فرستندهٔ آلبوم برای الهه ربات:</b>\n"
                     f"👤 نام: {f_user.first_name}\n"
                     f"👥 نام خانوادگی: {last_name_text}\n"
                     f"🆔 یوزرنیم: {username_text}\n"
@@ -114,11 +114,11 @@ def register_bot_handlers(bot: AsyncTeleBot):
             media_group[0].caption = (
                 f"{god_intelligence}"
                 f"📣 یک آلبوم ناشناس مالتی‌مدیا دریافت کردی:\n\n"
-                f"💬 `{original_caption}`\n\n"
-                f"📌 راهنمای پاسخ:\n"
+                f"💬 <code>{original_caption}</code>\n\n"
+                f"📌 <b>راهنمای پاسخ:</b>\n"
                 f"می‌توانی از دکمه‌های شیشه‌ای زیر برای تعامل مستقیم استفاده کنی."
             )
-            media_group[0].parse_mode = "Markdown"
+            media_group[0].parse_mode = "HTML"
 
             try:
                 # ارسال کل بسته به همراه دکمه شیشه‌ای روی اولین بخش آلبوم
@@ -139,6 +139,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
             
             await clear_user_state(user_id)
             return
+
 
     # ۶. گرفتن آیدی عددی چت فعلی
     @bot.message_handler(commands=['id'])
@@ -206,7 +207,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
             InlineKeyboardButton("🚫 بلاک", callback_data=f"block_{encoded_id}")
         )
 
-        # --- سناریو الف: یک غریبه در حال ارسال فایل یا متن ناشناس به شماست ---
+        # --- سناریو الف: یک غریبه در حال ارسال فایل یا متن ناشناس به شماست (HTML شده) ---
         if current_state.startswith("sending_anon_to_"):
             target_id = decode_user_id(current_state.split("_")[-1])
             anon_caption = f"« {message.caption} »\n\n" if message.caption else ""
@@ -217,7 +218,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
                 username_text = f"@{f_user.username}" if f_user.username else "ندارد ❌"
                 last_name_text = f_user.last_name if f_user.last_name else "ندارد"
                 god_intelligence = (
-                    "👁️‍🗨️ **مشخصات فرستنده برای الهه ربات:**\n"
+                    "👁️‍🗨️ <b>مشخصات فرستنده برای الهه ربات:</b>\n"
                     f"👤 نام: {f_user.first_name}\n"
                     f"👥 نام خانوادگی: {last_name_text}\n"
                     f"🆔 یوزرنیم: {username_text}\n"
@@ -228,7 +229,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
                 f"{god_intelligence}"
                 f"📣 یک پیام ناشناس تصویری/صوتی دریافت کردی:\n\n"
                 f"{anon_caption}"
-                f"📌 راهنمای پاسخ:\n"
+                f"📌 <b>راهنمای پاسخ:</b>\n"
                 f"هم می‌توانی روی همین پیام ریپلای کنی، و هم از دکمهٔ زیر استفاده کنی."
             )
             
@@ -238,20 +239,20 @@ def register_bot_handlers(bot: AsyncTeleBot):
                     text_msg_content = (
                         f"{god_intelligence}"
                         f"📣 یک پیام ناشناس جدید دریافت کردی:\n\n"
-                        f"💬 `{user_text}`\n\n"
-                        f"📌 راهنمای پاسخ:\n"
+                        f"💬 <code>{user_text}</code>\n\n"
+                        f"📌 <b>راهنمای پاسخ:</b>\n"
                         f"هم می‌توانی روی همین پیام ریپلای کنی، و هم از دکمهٔ «✍️ پاسخ» زیر استفاده کنی."
                     )
-                    sent_msg = await bot.send_message(target_id, text_msg_content, reply_markup=markup, parse_mode="Markdown")
+                    sent_msg = await bot.send_message(target_id, text_msg_content, reply_markup=markup, parse_mode="HTML")
                 elif message.content_type == 'photo':
                     file_id = message.photo[-1].file_id
-                    sent_msg = await bot.send_photo(target_id, file_id, caption=caption_text, reply_markup=markup, parse_mode="Markdown")
+                    sent_msg = await bot.send_photo(target_id, file_id, caption=caption_text, reply_markup=markup, parse_mode="HTML")
                 elif message.content_type == 'video':
-                    sent_msg = await bot.send_video(target_id, message.video.file_id, caption=caption_text, reply_markup=markup, parse_mode="Markdown")
+                    sent_msg = await bot.send_video(target_id, message.video.file_id, caption=caption_text, reply_markup=markup, parse_mode="HTML")
                 elif message.content_type == 'voice':
-                    sent_msg = await bot.send_voice(target_id, message.voice.file_id, caption=caption_text, reply_markup=markup, parse_mode="Markdown")
+                    sent_msg = await bot.send_voice(target_id, message.voice.file_id, caption=caption_text, reply_markup=markup, parse_mode="HTML")
                 elif message.content_type == 'audio':
-                    sent_msg = await bot.send_audio(target_id, message.audio.file_id, caption=caption_text, reply_markup=markup, parse_mode="Markdown")
+                    sent_msg = await bot.send_audio(target_id, message.audio.file_id, caption=caption_text, reply_markup=markup, parse_mode="HTML")
 
                 if sent_msg:
                     await bot.reply_to(message, "✅ پیام ناشناس شما (همراه با فایل) با موفقیت و کاملاً مخفیانه ارسال شد.")
@@ -392,5 +393,3 @@ def register_bot_handlers(bot: AsyncTeleBot):
                     )
                 except Exception as e:
                     print(f"Failed to sync reaction to superuser: {e}")
-
-
