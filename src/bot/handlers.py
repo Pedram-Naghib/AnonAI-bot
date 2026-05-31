@@ -47,7 +47,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
         
         if user_id == GOD_ID:
             msg = (
-                f"سلام و درود ارباب. 🙇‍♂️\n"
+                f"سلام و درود ارباب فاطمه. 🙇‍♂️\n"
                 f"هوش مصنوعی گوش به فرمان شماست.\n\n"
                 f"👁️‍🗨️ **دسترسی ارشد ویژه:**\n"
                 f"شما برخلاف کاربران عادی، توانایی مشاهدهٔ اطلاعات دقیق فرستندهٔ پیام‌ها را دارید.\n\n"
@@ -64,24 +64,87 @@ def register_bot_handlers(bot: AsyncTeleBot):
         await bot.reply_to(message, msg, parse_mode="Markdown")
 
 
-    # ۲. مدیریت تمام پیام‌ها (متن، عکس، فیلم، ویس، صدا) و ارسال امن مالتی‌مدیا
-    @bot.message_handler(func=lambda message: True, content_types=['text', 'photo', 'video', 'voice', 'audio'])
+    # 📸 ۲.الف: مدیریت آلبوم‌ها و فایل‌های دسته‌جمعی (Media Groups)
+    @bot.message_handler(func=lambda message: message.media_group_id is not None, content_types=['photo', 'video', 'audio'])
+    async def handle_media_group(message):
+        """این هندلر فایل‌های ارسالی گروهی (آلبوم) را به صورت یک‌پارچه هدایت می‌کند"""
+        user_id = message.chat.id
+        current_state, _ = await get_user_state(user_id)
+
+        if current_state.startswith("sending_anon_to_"):
+            target_id = decode_user_id(current_state.split("_")[-1])
+            encoded_id = encode_user_id(user_id)
+            
+            # واکشی کل ساختار آلبوم از تلگرام
+            media_group = await bot.get_media_group(message.chat.id, message.media_group_id)
+            
+            markup = InlineKeyboardMarkup()
+            markup.row(
+                InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{encoded_id}"),
+                InlineKeyboardButton("🚫 بلاک", callback_data=f"block_{encoded_id}")
+            )
+
+            # الصاق اطلاعات فرستنده صرفاً برای الهه ربات
+            god_intelligence = ""
+            if target_id == GOD_ID:
+                f_user = message.from_user
+                username_text = f"@{f_user.username}" if f_user.username else "ندارد ❌"
+                last_name_text = f_user.last_name if f_user.last_name else "ندارد"
+                god_intelligence = (
+                    "👁️‍🗨️ **مشخصات فرستندهٔ آلبوم برای الهه ربات:**\n"
+                    f"👤 نام: {f_user.first_name}\n"
+                    f"👥 نام خانوادگی: {last_name_text}\n"
+                    f"🆔 یوزرنیم: {username_text}\n"
+                    "───────────────────────\n\n"
+                )
+
+            original_caption = media_group[0].caption if media_group[0].caption else ""
+            media_group[0].caption = (
+                f"{god_intelligence}"
+                f"📣 یک آلبوم ناشناس مالتی‌مدیا دریافت کردی:\n\n"
+                f"💬 `{original_caption}`\n\n"
+                f"📌 راهنمای پاسخ:\n"
+                f"می‌توانی از دکمه‌های شیشه‌ای زیر برای تعامل مستقیم استفاده کنی."
+            )
+            media_group[0].parse_mode = "Markdown"
+
+            try:
+                # ارسال کل بسته به همراه دکمه شیشه‌ای روی اولین بخش آلبوم
+                sent_messages = await bot.send_media_group(target_id, media_group)
+                if sent_messages:
+                    # برای نمایش کیبورد شیشه‌ای روی مالتی‌مدیا گروپ، دکمه را به اولین پیام آلبوم پیوست می‌کنیم
+                    await bot.edit_message_reply_markup(chat_id=target_id, message_id=sent_messages[0].message_id, reply_markup=markup)
+                    await bot.reply_to(message, "✅ آلبوم مالتی‌مدیای شما با موفقیت و کاملاً مخفیانه ارسال شد.")
+                    
+                    await save_message_mapping(
+                        user_chat_id=target_id,
+                        user_msg_id=sent_messages[0].message_id,
+                        anon_sender_id=user_id,
+                        anon_msg_id=message.message_id
+                    )
+            except Exception as e:
+                print(f"Error in media group routing: {e}")
+                await bot.reply_to(message, "❌ ارسال آلبوم ناموفق بود.")
+            
+            await clear_user_state(user_id)
+            return
+
+
+    # ⚡ ۲.ب: مدیریت پیام‌های انفرادی و تکی (متن، عکس، فیلم، ویس، صدا)
+    @bot.message_handler(func=lambda message: message.media_group_id is None, content_types=['text', 'photo', 'video', 'voice', 'audio'])
     async def handle_all_messages(message):
         user_id = message.chat.id
         user_text = message.text
         encoded_id = encode_user_id(user_id)
         
-        # ⚡ روش اول: پاسخ از طریق ریپلای مستقیم (Native Reply) روی خود پیام دریافتی
+        # سناریو پاسخ از طریق ریپلای مستقیم (Native Reply) روی خود پیام دریافتی
         if user_id in SUPER_USERS and message.reply_to_message:
             replied_msg_id = message.reply_to_message.message_id
-            
-            # واکشی اطلاعات فرستنده و آیدی پیام اصلی او از دیتابیس
             mapping = await get_anon_sender_by_msg(user_chat_id=user_id, user_msg_id=replied_msg_id)
             
             if mapping:
                 anon_sender_id, anon_msg_id = mapping  
                 try:
-                    # در حالت ریپلای مستقیم، فقط پیام متنی ارسال می‌شود
                     if message.content_type == 'text':
                         sent_reply = await bot.send_message(
                             anon_sender_id, 
@@ -89,8 +152,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
                             reply_to_message_id=anon_msg_id
                         )
                         await bot.reply_to(message, "🚀 پاسخت (از طریق ریپلای) برای اون شخص فرستاده شد.")
-                        
-                        # 🔄 قفل کردن پیام جدید در دیتابیس برای زنده ماندن ری‌آکشن‌ها روی این پاسخ
                         await save_message_mapping(
                             user_chat_id=user_id,
                             user_msg_id=message.message_id,
@@ -103,7 +164,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
                     await bot.reply_to(message, "❌ ارسال پاسخ ناموفق بود. کاربر ربات را بلاک کرده.")
                 return 
 
-        # واکشی وضعیت کاربر از دیتابیس برای سناریوهای مبتنی بر دکمه شیشه‌ای
         current_state, reply_target_id = await get_user_state(user_id)
         
         markup = InlineKeyboardMarkup()
@@ -115,17 +175,13 @@ def register_bot_handlers(bot: AsyncTeleBot):
         # --- سناریو الف: یک غریبه در حال ارسال فایل یا متن ناشناس به شماست ---
         if current_state.startswith("sending_anon_to_"):
             target_id = decode_user_id(current_state.split("_")[-1])
-            
-            # 📝 بررسی اینکه آیا غریبه خودش متنی زیر عکس/فیلم نوشته یا نه
             anon_caption = f"« {message.caption} »\n\n" if message.caption else ""
             
-            # 🕵️‍♂️ ساخت کارت اطلاعات فرستنده (فقط محدود به درخواست شما: فرستنده، نام خانوادگی، یوزرنیم)
             god_intelligence = ""
             if target_id == GOD_ID:
                 f_user = message.from_user
                 username_text = f"@{f_user.username}" if f_user.username else "ندارد ❌"
                 last_name_text = f_user.last_name if f_user.last_name else "ندارد"
-                
                 god_intelligence = (
                     "👁️‍🗨️ **مشخصات فرستنده برای الهه ربات:**\n"
                     f"👤 نام: {f_user.first_name}\n"
@@ -134,35 +190,25 @@ def register_bot_handlers(bot: AsyncTeleBot):
                     "───────────────────────\n\n"
                 )
 
-            # ساخت کپشن نهایی برای فایل‌های مالتی‌مدیا
             caption_text = (
                 f"{god_intelligence}"
                 f"📣 یک پیام ناشناس تصویری/صوتی دریافت کردی:\n\n"
                 f"{anon_caption}"
                 f"📌 راهنمای پاسخ:\n"
-                f"هم می‌توانی روی همین پیام ریپلای (Reply) کنی، و هم از دکمهٔ زیر استفاده کنی."
+                f"هم می‌توانی روی همین پیام ریپلای کنی، و هم از دکمهٔ زیر استفاده کنی."
             )
             
             try:
                 sent_msg = None
-                
-                # تفکیک بر اساس نوع محتوا و بازپخش
-                # بخشی از سناریو الف: زمانی که غریبه پیام متنی می‌فرستد (اصلاح مارک‌داون برای جلوگیری از کرش)
                 if message.content_type == 'text':
-                    # برای اینکه مشخصات فاطمه مارک‌داون بماند ولی متن غریبه آسیب نزند، متن غریبه را داخل کدهای مونواسپیس قرنطینه می‌کنیم
                     text_msg_content = (
                         f"{god_intelligence}"
                         f"📣 یک پیام ناشناس جدید دریافت کردی:\n\n"
-                        f"💬 `{user_text}`\n\n"  # استفاده از Backtick برای قرنطینه کردن تداخل‌های مارک‌داون
+                        f"💬 `{user_text}`\n\n"
                         f"📌 راهنمای پاسخ:\n"
                         f"هم می‌توانی روی همین پیام ریپلای کنی، و هم از دکمهٔ «✍️ پاسخ» زیر استفاده کنی."
                     )
-                    sent_msg = await bot.send_message(
-                        target_id, 
-                        text_msg_content, 
-                        reply_markup=markup,
-                        parse_mode="Markdown"
-                    )
+                    sent_msg = await bot.send_message(target_id, text_msg_content, reply_markup=markup, parse_mode="Markdown")
                 elif message.content_type == 'photo':
                     file_id = message.photo[-1].file_id
                     sent_msg = await bot.send_photo(target_id, file_id, caption=caption_text, reply_markup=markup, parse_mode="Markdown")
@@ -175,7 +221,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
 
                 if sent_msg:
                     await bot.reply_to(message, "✅ پیام ناشناس شما (همراه با فایل) با موفقیت و کاملاً مخفیانه ارسال شد.")
-                    # ذخیره در مپینگ دیتابیس
                     await save_message_mapping(
                         user_chat_id=target_id,
                         user_msg_id=sent_msg.message_id,
@@ -183,7 +228,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
                         anon_msg_id=message.message_id
                     )
             except Exception as e:
-                print(f"Error in god intelligence routing: {e}")
+                print(f"Error in single message routing: {e}")
                 await bot.reply_to(message, "❌ ارسال پیام ناموفق بود.")
             
             await clear_user_state(user_id)
@@ -203,8 +248,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
                             reply_to_message_id=anon_msg_id
                         )
                         await bot.reply_to(message, "🚀 پاسخت برای اون شخص فرستاده شد.")
-                        
-                        # 🔄 ذخیره نگاشت پیام جدید ارسالی از دکمه برای زنده ماندن ری‌آکشن‌ها روی جواب شما
                         await save_message_mapping(
                             user_chat_id=user_id,
                             user_msg_id=message.message_id,
@@ -239,7 +282,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
     async def handle_reply_callback(call):
         user_id = call.message.chat.id
         incoming_msg_id = call.message.message_id
-        
         anon_encoded_id = call.data.split("reply_to_")[-1]
         anonymous_user_id = decode_user_id(anon_encoded_id)
         
@@ -257,12 +299,11 @@ def register_bot_handlers(bot: AsyncTeleBot):
         await bot.answer_callback_query(call.id)
 
 
-# ۴. هندل کردن کلیک روی دکمه "بلاک" (اصلاح‌شده برای زیبایی و پایداری)
+    # ۴. هندل کردن کلیک روی دکمه "بلاک" (اصلاح‌شده برای زیبایی و پایداری)
     @bot.callback_query_handler(func=lambda call: call.data.startswith("block_"))
     async def handle_block_callback(call):
         user_id = call.message.chat.id
         message_id = call.message.message_id
-        
         anon_encoded_id = call.data.split("block_")[-1]
         anonymous_user_id = decode_user_id(anon_encoded_id)
         
@@ -270,7 +311,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
             await block_user(owner_id=user_id, blocked_id=anonymous_user_id)
             await bot.answer_callback_query(call.id, "کاربر با موفقیت بلاک شد! 🛑")
             
-            # ویرایش پیام قبلی: حذف دکمه‌ها و اضافه کردن مهرِ بلاک شد
             current_text = call.message.text if call.message.text else call.message.caption
             updated_text = f"{current_text}\n\n❌ **این فرستنده توسط شما بلاک شد.**"
             
