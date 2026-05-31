@@ -11,7 +11,7 @@ from src.bot.handlers import register_bot_handlers
 from src.bot.tasks import send_daily_analytics
 from src.database.db_manager import init_db, log_message_to_db
 
-USE_WEBHOOK = False  
+USE_WEBHOOK = True  
 
 WEBHOOK_HOST = "anonai-bot.onrender.com"
 WEBHOOK_PORT = int(os.environ.get("PORT", 8000))
