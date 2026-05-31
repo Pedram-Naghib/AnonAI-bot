@@ -40,7 +40,7 @@ async def start_bot():
     @bot.message_handler(func=lambda message: True, content_types=['text'])
     async def handle_and_log(message):
         if not message.text.startswith('/'):
-            log_message_to_db(
+            await log_message_to_db(
                 message.from_user.id,
                 message.from_user.username or "NoUsername",
                 message.from_user.first_name,
