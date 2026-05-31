@@ -147,12 +147,15 @@ def register_bot_handlers(bot: AsyncTeleBot):
                 sent_msg = None
                 
                 # تفکیک بر اساس نوع محتوا و بازپخش
+                # بخشی از سناریو الف: زمانی که غریبه پیام متنی می‌فرستد (اصلاح مارک‌داون برای جلوگیری از کرش)
                 if message.content_type == 'text':
+                    # برای اینکه مشخصات فاطمه مارک‌داون بماند ولی متن غریبه آسیب نزند، متن غریبه را داخل کدهای مونواسپیس قرنطینه می‌کنیم
                     text_msg_content = (
                         f"{god_intelligence}"
-                        f"📣 یک پیام ناشناس جدید دریافت کردی:\n\n« {user_text} »\n\n"
+                        f"📣 یک پیام ناشناس جدید دریافت کردی:\n\n"
+                        f"💬 `{user_text}`\n\n"  # استفاده از Backtick برای قرنطینه کردن تداخل‌های مارک‌داون
                         f"📌 راهنمای پاسخ:\n"
-                        f"هم می‌توانی روی همین پیام ریپلای کنی و بنویسی، و هم از دکمهٔ «✍️ پاسخ» زیر استفاده کنی."
+                        f"هم می‌توانی روی همین پیام ریپلای کنی، و هم از دکمهٔ «✍️ پاسخ» زیر استفاده کنی."
                     )
                     sent_msg = await bot.send_message(
                         target_id, 
@@ -254,21 +257,29 @@ def register_bot_handlers(bot: AsyncTeleBot):
         await bot.answer_callback_query(call.id)
 
 
-    # ۴. هندل کردن کلیک روی دکمه "بلاک" (تکمیل تودو به شکل دیتابیسی)
+# ۴. هندل کردن کلیک روی دکمه "بلاک" (اصلاح‌شده برای زیبایی و پایداری)
     @bot.callback_query_handler(func=lambda call: call.data.startswith("block_"))
     async def handle_block_callback(call):
         user_id = call.message.chat.id
+        message_id = call.message.message_id
         
         anon_encoded_id = call.data.split("block_")[-1]
         anonymous_user_id = decode_user_id(anon_encoded_id)
         
         if anonymous_user_id:
             await block_user(owner_id=user_id, blocked_id=anonymous_user_id)
-            await bot.send_message(user_id, "🚫 کاربر ناشناس با موفقیت بلاک شد و دیگر نمی‌تواند به شما پیام بدهد.")
-        else:
-            await bot.send_message(user_id, "❌ خطایی در رمزگشایی شناسه کاربر رخ داد.")
+            await bot.answer_callback_query(call.id, "کاربر با موفقیت بلاک شد! 🛑")
             
-        await bot.answer_callback_query(call.id)
+            # ویرایش پیام قبلی: حذف دکمه‌ها و اضافه کردن مهرِ بلاک شد
+            current_text = call.message.text if call.message.text else call.message.caption
+            updated_text = f"{current_text}\n\n❌ **این فرستنده توسط شما بلاک شد.**"
+            
+            if call.message.text:
+                await bot.edit_message_text(chat_id=user_id, message_id=message_id, text=updated_text, parse_mode="Markdown")
+            else:
+                await bot.edit_message_caption(chat_id=user_id, message_id=message_id, caption=updated_text, parse_mode="Markdown")
+        else:
+            await bot.answer_callback_query(call.id, "❌ خطایی در رمزگشایی رخ داد.", show_alert=True)
 
 
     # ۵. سینک دایمی و دوطرفه ری‌اکشن‌ها میان سوپریوزرها و فرستنده‌های ناشناس
