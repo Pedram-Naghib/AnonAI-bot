@@ -9,7 +9,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from src.config import TELEGRAM_BOT_TOKEN
 from src.bot.handlers import register_bot_handlers
 from src.bot.tasks import send_daily_analytics
-from src.database.db_manager import init_db, init_analytics_db, log_message_to_db
+from src.database.db_manager import init_db, log_message_to_db
 
 USE_WEBHOOK = False  
 
@@ -35,7 +35,6 @@ async def start_bot():
     # ۱. اورهال و سازماندهی دیتابیس‌ها
     print("🗄️ Initializing Databases...")
     await init_db()
-    init_analytics_db()
     
     # ۲. ثبت هندلر مانیتورینگ پیام‌ها (مستقیم پاس داده میشه به db_manager)
     @bot.message_handler(func=lambda message: True, content_types=['text'])
