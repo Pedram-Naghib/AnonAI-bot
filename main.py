@@ -46,6 +46,8 @@ async def start_bot():
                 message.from_user.first_name,
                 message.text
             )
+        # 🔑 حرکت کلیدی: پیام را بفرست برای بقیه هندلرها تا ربات بتونه جواب بده!
+        await bot.process_next_step_handler(message)
     
     # ۳. ثبت بقیه هندلرهای اصلی ربات
     print("🔌 Registering bot handlers...")
