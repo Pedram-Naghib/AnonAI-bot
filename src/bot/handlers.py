@@ -21,9 +21,12 @@ def register_bot_handlers(bot: AsyncTeleBot):
     # ─── ۱. مدیریت دستور /start با کیبورد منوی آماده ───
     @bot.message_handler(commands=['start'])
     async def handle_start(message):
-        user_id = message.chat.id
         bot_info = await bot.get_me()
         command_args = message.text.split()
+
+        if message.chat.type != "private":
+            return # ToDo
+        user_id = message.chat.id
         
         # 🎛 ساخت کیبورد منوی اصلی ربات (سنجاق شده به پایین صفحه)
         main_keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
@@ -150,6 +153,28 @@ def register_bot_handlers(bot: AsyncTeleBot):
             await bot.reply_to(message, response_text, parse_mode="Markdown")
         except Exception as e:
             print(f"❌ Error sending ID: {e}")
+
+
+    # هندلر فعال‌سازی با پیام متنی "📊 آمار من" در پیوی ربات
+    @bot.message_handler(func=lambda message: message.text == "📊 آمار من" and message.chat.type == "private")
+    async def handle_my_stats(message):
+        user_id = message.chat.id
+        first_name = message.from_user.first_name
+        
+        # استخراج آمار زنده از دیتابیس
+        stats = await get_user_profile_stats(user_id)
+        
+        # چیدمان دقیق قالب درخواستی پدرام
+        response_text = (
+            f"📊 **آمار من**\n\n"
+            f"👤 | نام : {first_name}\n"
+            f"🪪 | ایدی : `{user_id}`\n"
+            f"✍ | تعداد پیام‌های ارسالی گروه : {stats['sent']}\n"
+            f"📬 | تعداد پیام‌های ناشناس دریافتی : {stats['received']}\n"
+            f"⛔️ | تعداد افراد بلاک شده : {stats['blocked']}"
+        )
+        
+        await bot.reply_to(message, response_text, parse_mode="Markdown")
 
     # ─── ۲.ب: مدیریت پیام‌های انفرادی و تکی ───
     @bot.message_handler(func=lambda message: message.media_group_id is None, content_types=['text', 'photo', 'video', 'voice', 'audio'])
@@ -427,25 +452,3 @@ def register_bot_handlers(bot: AsyncTeleBot):
                     )
                 except Exception as e:
                     print(f"Failed to sync reaction to superuser: {e}")
-
-
-    # هندلر فعال‌سازی با پیام متنی "📊 آمار من" در پیوی ربات
-    @bot.message_handler(func=lambda message: message.text == "📊 آمار من" and message.chat.type == "private")
-    async def handle_my_stats(message):
-        user_id = message.chat.id
-        first_name = message.from_user.first_name
-        
-        # استخراج آمار زنده از دیتابیس
-        stats = await get_user_profile_stats(user_id)
-        
-        # چیدمان دقیق قالب درخواستی پدرام
-        response_text = (
-            f"📊 **آمار من**\n\n"
-            f"👤 | نام : {first_name}\n"
-            f"🪪 | ایدی : `{user_id}`\n"
-            f"✍ | تعداد پیام‌های ارسالی گروه : {stats['sent']}\n"
-            f"📬 | تعداد پیام‌های ناشناس دریافتی : {stats['received']}\n"
-            f"⛔️ | تعداد افراد بلاک شده : {stats['blocked']}"
-        )
-        
-        await bot.reply_to(message, response_text, parse_mode="Markdown")
