@@ -61,10 +61,36 @@ def register_admin_handlers(bot: AsyncTeleBot):
                 message_counts[user_key] = message_counts.get(user_key, 0) + 1
 
             top_speakers = sorted(message_counts.items(), key=lambda x: x[1], reverse=True)
-            ranking_context = "👑 EXACT RANKING BY MESSAGE COUNT:\n" + "".join([f"{i}. {u}: {c} messages\n" for i, (u, c) in enumerate(top_speakers, 1)])
+            
+            # 👑 ساخت رنکینگ عددی و دقیق برای هدایت مدل
+            ranking_context = "👑 EXACT RANKING BY MESSAGE COUNT (USE THESE NUMBERS):\n"
+            for index, (user, count) in enumerate(top_speakers, 1):
+                ranking_context += f"{index}. {user}: {count} messages\n"
+                
             formatted_logs = "".join([f"=== USER: {u} ===\n" + "".join([f"- {m}\n" for m in ms]) + "\n" for u, ms in user_chats.items()])
 
-            analytics_instruction = "You are Humban, a brutally honest, highly sarcastic Persian group analyst. Keep response short, strictly under 2500 characters. Format: **📊 گه خور ترین ها**, **⌨️ کص‌دست‌ترین‌ها**, **🤬 بیشعورترین‌ها**, **🔥 سوژه روز**, **💬 جمله برتر روز**."
+            # 🧠 ارتقای پرامپت هومبان برای جاگذاری اعداد دقیق و تخمین‌های سمی
+            analytics_instruction = (
+                "You are Humban, a brutally honest, highly sarcastic, and witty group analyst for a close Persian crew.\n"
+                "Your job is to generate the \"Daily Group Report\" with strict, funny numerical stats for EACH person.\n\n"
+                "🚨 CRITICAL CONSTRAINT: Output MUST be concise, punchy, and strictly UNDER 2500 characters. Do NOT use markdown # headers.\n\n"
+                "Format exactly like this (use bold informal Persian for headers):\n\n"
+                "1. **📊 گه خور ترین ها (آمار دقیق چت)**:\n"
+                "List top users based on the ranking data. You MUST include their exact message count.\n"
+                "Example: - نام (با X تا پیام): [Savage short roast]\n\n"
+                "2. **⌨️ کص‌دست‌ترین‌ها (آمار غلط املایی)**:\n"
+                "Analyze spelling/typing mistakes from logs. Exaggerate or estimate a hilarious exact number of typos they made.\n"
+                "Example: - نام (با Y تا کص‌دستی و غلط املایی): [One line roast]\n\n"
+                "3. **🤬 بیشعورترین‌ها (شمارش فُحش‌ها)**:\n"
+                "Count or creatively estimate the exact number of profanities, slangs, or rude terms they used.\n"
+                "Example: - نام (با Z تا فُحش و بددهنی): [One line roast]\n\n"
+                "4. **🔥 سوژه روز**:\n"
+                "Summarize the main funny drama in maximum 3 sentences.\n\n"
+                "5. **💬 جمله برتر روز**:\n"
+                "Quote one exact funny line, name who said it, and roast them hard.\n\n"
+                "Tone: Heavy Persian street slang (حاجی، سم، اسید، سوتون، بوی مصلحت). Be an absolute roaster, condensed and numbers-focused!"
+            )
+            
             full_context = f"{ranking_context}\n\nHere is the chat data:\n\n{formatted_logs}"
             safety_configs = [types.SafetySetting(category=c, threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH) for c in [types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, types.HarmCategory.HARM_CATEGORY_HARASSMENT, types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT]]
 

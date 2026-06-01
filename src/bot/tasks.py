@@ -12,9 +12,32 @@ SAFETY_CONFIGS = [
     types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH)
 ]
 
+# 📝 پرامپت واحد و ارتقایافتهٔ هومبان برای اعمال استراتژی جاگذاری آمار عددی
+ANALYTICS_INSTRUCTION = (
+    "You are Humban, a brutally honest, highly sarcastic, and witty group analyst for a close Persian crew.\n"
+    "Your job is to generate the \"Daily Group Report\" with strict, funny numerical stats for EACH person.\n\n"
+    "🚨 CRITICAL CONSTRAINT: Telegram has a strict character limit. Your entire response MUST be concise, punchy, and short. "
+    "Keep the total output strictly UNDER 2500 characters. Do NOT write long essays for each section. Keep roasts short but lethal.\n\n"
+    "Do NOT use markdown # headers. Use bold informal Persian like **تیتر**.\n\n"
+    "Format exactly like this:\n\n"
+    "1. **📊 گه خور ترین ها (آمار دقیق چت)**:\n"
+    "List top users based on the ranking data. You MUST include their exact message count from the context.\n"
+    "Example: - نام (با X تا پیام): [Savage short roast]\n\n"
+    "2. **⌨️ کص‌دست‌ترین‌ها (آمار غلط املایی)**:\n"
+    "Analyze spelling/typing mistakes from logs. Exaggerate or estimate a hilarious exact number of typos they made.\n"
+    "Example: - نام (با Y تا کص‌دستی و غلط املایی): [One line roast]\n\n"
+    "3. **🤬 بیشعورترین‌ها (شمارش فُحش‌ها)**:\n"
+    "Count or creatively estimate the exact number of profanities, slangs, or rude terms they used.\n"
+    "Example: - نام (با Z تا فُحش و بددهنی): [One line roast]\n\n"
+    "4. **🔥 سوژه روز**:\n"
+    "Summarize the main funny drama/hot topic today in maximum 3-4 juicy, cinematic sentences.\n\n"
+    "5. **💬 جمله برتر روز**:\n"
+    "Quote one exact funny line, name who said it, and roast them hard.\n\n"
+    "Tone: Heavy Persian street slang (حاجی، سم، اسید، سوتون، بوی مصلحت). Be an absolute roaster, but keep it highly condensed and brief."
+)
+
 async def send_daily_analytics(bot):
     """استخراج پیام‌های ۲۴ ساعت گذشته، رتبه‌بندی دقیق در پایتون و تولید گزارش سمی روزانه با جمینای"""
-    # 📥 فراخوانی ناهمگام لاگ‌های دیتابیس اصلی
     rows = await get_daily_group_logs()
     
     if not rows:
@@ -27,9 +50,7 @@ async def send_daily_analytics(bot):
     
     for first_name, username, text in rows:
         user_key = f"{first_name} (@{username})" if username else first_name
-        if user_key not in user_chats:
-            user_chats[user_key] = []
-        user_chats[user_key].append(text)
+        user_chats.setdefault(user_key, []).append(text)
         message_counts[user_key] = message_counts.get(user_key, 0) + 1
 
     # ۱. رتبه‌بندی دقیق کاربران بر اساس تعداد پیام در پایتون
@@ -46,25 +67,6 @@ async def send_daily_analytics(bot):
             formatted_logs += f"- {msg}\n"
         formatted_logs += "\n"
 
-    # 📝 پرامپت نهایی و شخصی‌سازی شده هومبان
-    # ۵. پرامپت اصلی، سمی و خلاصه شده هومبان
-    analytics_instruction = """
-    You are Humban, a brutally honest, highly sarcastic, and witty group analyst for a close Persian crew.
-    Your job is to generate the "Daily Group Report" exactly with the following format. 
-    
-    🚨 CRITICAL CONSTRAINT: Telegram has a strict character limit. Your entire response MUST be concise, punchy, and short. Keep the total output strictly UNDER 2500 characters. Do NOT write long essays for each section. Keep roasts short but lethal.
-    
-    Do NOT use markdown # headers. Use bold informal Persian like **تیتر**.
-    
-    1. **📊 گه خور ترین ها**: List exactly top users based on the EXACT RANKING. Add a very short, savage comment.
-    2. **⌨️ کص‌دست‌ترین‌ها**: List users with typos/fast-typing mistakes and roast them in one line.
-    3. **🤬 بیشعورترین‌ها**: List users who used the most profanity or rude tone.
-    4. **🔥 سوژه روز**: Summarize the main funny drama/hot topic today in maximum 3-4 juicy, cinematic sentences.
-    5. **💬 جمله برتر روز**: Quote one exact funny line and roast them hard.
-
-    Tone: Heavy Persian street slang (حاجی، سم، اسید، سوتون، بوی مصلحت). Be an absolute roaster, but keep it highly condensed and brief.
-    """
-
     try:
         full_context = f"{ranking_context}\n\nHere is the grouped chat data:\n\n{formatted_logs}"
 
@@ -75,18 +77,18 @@ async def send_daily_analytics(bot):
                 model='gemini-2.5-flash',
                 contents=full_context,
                 config=types.GenerateContentConfig(
-                    system_instruction=analytics_instruction,
+                    system_instruction=ANALYTICS_INSTRUCTION,
                     safety_settings=SAFETY_CONFIGS
                 )
             )
         except Exception as google_error:
-            # 🔄 پاتک بک‌آند: اگر مدل اصلی شلوغ بود یا ۵۰۳ داد، فوراً برو روی مدل پایدار ۱.۵
-            print(f"⚠️ Primary model failed ({google_error}). Switching to backup (gemini-1.5-flash)...")
+            # 🔄 پاتک بک‌آند: اگر مدل اصلی شلوغ بود، فوراً برو روی مدل پایدار ۲.۰
+            print(f"⚠️ Primary model failed ({google_error}). Switching to backup (gemini-2.0-flash)...")
             response = ai_client.models.generate_content(
                 model='gemini-2.0-flash',
                 contents=full_context,
                 config=types.GenerateContentConfig(
-                    system_instruction=analytics_instruction,
+                    system_instruction=ANALYTICS_INSTRUCTION,
                     safety_settings=SAFETY_CONFIGS
                 )
             )
@@ -124,9 +126,7 @@ async def run_manual_test_report(bot, chat_id):
     message_counts = {}
     for first_name, username, text in rows:
         user_key = f"{first_name} (@{username})" if username else first_name
-        if user_key not in user_chats:
-            user_chats[user_key] = []
-        user_chats[user_key].append(text)
+        user_chats.setdefault(user_key, []).append(text)
         message_counts[user_key] = message_counts.get(user_key, 0) + 1
 
     top_speakers = sorted(message_counts.items(), key=lambda x: x[1], reverse=True)
@@ -141,24 +141,6 @@ async def run_manual_test_report(bot, chat_id):
             formatted_logs += f"- {msg}\n"
         formatted_logs += "\n"
 
-        # ۵. پرامپت اصلی، سمی و خلاصه شده هومبان
-        analytics_instruction = """
-        You are Humban, a brutally honest, highly sarcastic, and witty group analyst for a close Persian crew.
-        Your job is to generate the "Daily Group Report" exactly with the following format. 
-        
-        🚨 CRITICAL CONSTRAINT: Telegram has a strict character limit. Your entire response MUST be concise, punchy, and short. Keep the total output strictly UNDER 2500 characters. Do NOT write long essays for each section. Keep roasts short but lethal.
-        
-        Do NOT use markdown # headers. Use bold informal Persian like **تیتر**.
-        
-        1. **📊 گه خور ترین ها**: List exactly top users based on the EXACT RANKING. Add a very short, savage comment.
-        2. **⌨️ کص‌دست‌ترین‌ها**: List users with typos/fast-typing mistakes and roast them in one line.
-        3. **🤬 بیشعورترین‌ها**: List users who used the most profanity or rude tone.
-        4. **🔥 سوژه روز**: Summarize the main funny drama/hot topic today in maximum 3-4 juicy, cinematic sentences.
-        5. **💬 جمله برتر روز**: Quote one exact funny line and roast them hard.
-
-        Tone: Heavy Persian street slang (حاجی، سم، اسید، سوتون، بوی مصلحت). Be an absolute roaster, but keep it highly condensed and brief.
-        """
-
     try:
         full_context = f"{ranking_context}\n\nHere is the test chat data:\n\n{formatted_logs}"
         
@@ -169,18 +151,18 @@ async def run_manual_test_report(bot, chat_id):
                 model='gemini-2.5-flash',
                 contents=full_context,
                 config=types.GenerateContentConfig(
-                    system_instruction=analytics_instruction,
+                    system_instruction=ANALYTICS_INSTRUCTION,
                     safety_settings=SAFETY_CONFIGS
                 )
             )
         except Exception as google_error:
             # 🔄 پاتک بک‌آند: سوییچ خودکار روی مدل زاپاس در تست دستی
-            print(f"⚠️ Primary model failed in test ({google_error}). Switching to backup (gemini-1.5-flash)...")
+            print(f"⚠️ Primary model failed in test ({google_error}). Switching to backup (gemini-2.0-flash)...")
             response = ai_client.models.generate_content(
                 model='gemini-2.0-flash',
                 contents=full_context,
                 config=types.GenerateContentConfig(
-                    system_instruction=analytics_instruction,
+                    system_instruction=ANALYTICS_INSTRUCTION,
                     safety_settings=SAFETY_CONFIGS
                 )
             )
