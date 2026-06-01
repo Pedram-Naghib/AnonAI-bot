@@ -11,6 +11,7 @@ GOD_ID = 6779908406
 
 def register_private_anon_handlers(bot: AsyncTeleBot):
 
+    # 🚀 پاتک فنی: اضافه کردن دکوراتور جا افتاده‌ی استارت
     @bot.message_handler(commands=['start'])
     async def handle_start(message):
         if message.chat.type != "private": return
@@ -37,6 +38,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         anon_link = f"https://t.me/{bot_info.username}?start={secret_code}"
         msg = f"سلام ارباب فاطمه 🙇‍♂️\n🔗 لینک ناشناس شما:\n`{anon_link}`" if user_id == GOD_ID else f"👋 خوش آمدید!\n🔗 لینک اختصاصی شما:\n`{anon_link}`"
         await bot.reply_to(message, msg, parse_mode="Markdown", reply_markup=main_keyboard)
+
 
     @bot.message_handler(func=lambda m: m.text == "📊 آمار من" and m.chat.type == "private")
     async def handle_my_stats(message):
