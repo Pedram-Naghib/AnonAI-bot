@@ -3,7 +3,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReactionTy
 from src.ai.client import generate_ai_response
 from src.utils.crypto import encode_user_id, decode_user_id
 
-# 📥 تزریق مستقیم توابع دیتابیس لوکال شما (همراه با تابع لاگ پیام گروه)
+# 📥 تزریق مستقیم توابع دیتابیس
 from src.database.db_manager import (
     get_user_state, set_user_state, clear_user_state,
     save_message_mapping, get_anon_sender_by_msg,
@@ -17,25 +17,22 @@ SUPER_USERS = [247768888, 6779908406] # تو و فاطمه
 
 def register_bot_handlers(bot: AsyncTeleBot):
     
-    # ۱. مدیریت دستور /start (ورود با لینک یا استارت عادی)
+    # ─── ۱. مدیریت دستور /start ───
     @bot.message_handler(commands=['start'])
     async def handle_start(message):
         user_id = message.chat.id
         bot_info = await bot.get_me()
         command_args = message.text.split()
         
-        # بررسی ورود از طریق لینک ناشناس
         if len(command_args) > 1:
             target_owner_id_encoded = command_args[1]
             target_owner_id = decode_user_id(target_owner_id_encoded)
             
             if target_owner_id and user_id != target_owner_id:
-                # 🚫 بررسی وضعیت بلاک بودن فرستنده قبل از ثبت پیام
                 if await is_user_blocked(owner_id=target_owner_id, blocked_id=user_id):
                     await bot.reply_to(message, "❌ شما توسط این کاربر بلاک شده‌اید و امکان ارسال پیام ناشناس را ندارید.")
                     return
                 
-                # ثبت وضعیت در دیتابیس ضد ریستارت
                 await set_user_state(user_id, f"sending_anon_to_{target_owner_id_encoded}")
                 await bot.reply_to(message, "📥 شما در حال ارسال پیام ناشناس هستید.\nمی‌توانید متن، عکس، فیلم، ویس یا صدای خود را ارسال کنید:")
                 return
@@ -43,7 +40,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
                 await bot.reply_to(message, "❌ این لینک معتبر نیست یا دستکاری شده است.")
                 return
 
-        # ساخت لینک انکود شده و امن برای همه کاربران
         secret_code = encode_user_id(user_id)
         anon_link = f"https://t.me/{bot_info.username}?start={secret_code}"
         
@@ -65,14 +61,11 @@ def register_bot_handlers(bot: AsyncTeleBot):
             
         await bot.reply_to(message, msg, parse_mode="Markdown")
 
-
-    # 📸 ۲.الف: مدیریت آلبوم‌ها و فایل‌های دسته‌جمعی (Media Groups)
+    # ─── ۲.الف: مدیریت آلبوم‌ها و فایل‌های دسته‌جمعی (Media Groups) ───
     @bot.message_handler(func=lambda message: message.media_group_id is not None, content_types=['photo', 'video', 'audio'])
     async def handle_media_group(message):
-        """این هندلر فایل‌های ارسالی گروهی (آلبوم) را به صورت یک‌پارچه هدایت می‌کند"""
         user_id = message.chat.id
         
-        # 📊 مانیتورینگ طنز گروه: ذخیره خودکار کپشن‌های آلبوم فرستاده شده در گروه‌ها
         if message.chat.type in ['group', 'supergroup'] and message.caption and not message.caption.startswith('/'):
             await log_message_to_db(
                 user_id=message.from_user.id,
@@ -87,7 +80,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
             target_id = decode_user_id(current_state.split("_")[-1])
             encoded_id = encode_user_id(user_id)
             
-            # واکشی کل ساختار آلبوم از تلگرام
             media_group = await bot.get_media_group(message.chat.id, message.media_group_id)
             
             markup = InlineKeyboardMarkup()
@@ -96,7 +88,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
                 InlineKeyboardButton("🚫 بلاک", callback_data=f"block_{encoded_id}")
             )
 
-            # الصاق اطلاعات فرستنده صرفاً برای الهه ربات (HTML شده)
             god_intelligence = ""
             if target_id == GOD_ID:
                 f_user = message.from_user
@@ -121,12 +112,12 @@ def register_bot_handlers(bot: AsyncTeleBot):
             media_group[0].parse_mode = "HTML"
 
             try:
-                # ارسال کل بسته به همراه دکمه شیشه‌ای روی اولین بخش آلبوم
                 sent_messages = await bot.send_media_group(target_id, media_group)
                 if sent_messages:
                     await bot.edit_message_reply_markup(chat_id=target_id, message_id=sent_messages[0].message_id, reply_markup=markup)
                     await bot.reply_to(message, "✅ آلبوم مالتی‌مدیای شما با موفقیت و کاملاً مخفیانه ارسال شد.")
                     
+                    # ذخیره دوطرفه نگاشت پیام آلبوم در دیتابیس
                     await save_message_mapping(
                         user_chat_id=target_id,
                         user_msg_id=sent_messages[0].message_id,
@@ -140,28 +131,23 @@ def register_bot_handlers(bot: AsyncTeleBot):
             await clear_user_state(user_id)
             return
 
-
-    # ۶. گرفتن آیدی عددی چت فعلی
+    # ─── ۶. گرفتن آیدی عددی چت فعلی ───
     @bot.message_handler(commands=['id'])
     async def handle_get_chat_id(message):
-        """گرفتن آیدی عددی چت فعلی (پیوی، گروه خصوصی یا عمومی)"""
         chat_id = message.chat.id
         response_text = f"🆔 آیدی این چت/گروه: `{chat_id}`\n"
-        
         try:
             await bot.reply_to(message, response_text, parse_mode="Markdown")
         except Exception as e:
             print(f"❌ Error sending ID: {e}")
 
-        
-# ⚡ ۲.ب: مدیریت پیام‌های انفرادی و تکی (متن، عکس، فیلم، ویس، صدا) - نسخه نهایی اصلاح شده
+    # ─── ۲.ب: مدیریت پیام‌های انفرادی و تکی ───
     @bot.message_handler(func=lambda message: message.media_group_id is None, content_types=['text', 'photo', 'video', 'voice', 'audio'])
     async def handle_all_messages(message):
         user_id = message.chat.id
         user_text = message.text
         encoded_id = encode_user_id(user_id)
         
-        # 📊 ۱. مانیتورینگ طنز گروه: اگر پیام در گروه فرستاده شده، آن را ذخیره کن و خارج شو
         if message.chat.type in ['group', 'supergroup']:
             log_text = user_text if message.content_type == 'text' else message.caption
             if log_text and not log_text.startswith('/'):
@@ -173,15 +159,20 @@ def register_bot_handlers(bot: AsyncTeleBot):
                 )
             return 
 
-        # 🚀 ۲. سناریو پاسخ از طریق ریپلای مستقیم (Native Reply) - فعال برای همه در پیوی
+        # 🚀 سناریو پاسخ از طریق ریپلای مستقیم (Native Reply)
         if message.chat.type == 'private' and message.reply_to_message:
             replied_msg_id = message.reply_to_message.message_id
+            
+            # ابتدا بررسی مپینگ برای فهمیدن اینکه پیام ریپلای شده مال غریبه است یا سوپریوزر
             mapping = await get_anon_sender_by_msg(user_chat_id=user_id, user_msg_id=replied_msg_id)
+            
+            # اگر مال غریبه عادی نبود، شاید سوپریوزر (مثل فاطمه) دارد به پیام فرستاده شده جواب مستقیم می‌دهد
+            if not mapping:
+                mapping = await get_super_user_by_msg(anon_sender_id=user_id, anon_msg_id=replied_msg_id)
             
             if mapping:
                 anon_sender_id, anon_msg_id = mapping  
                 
-                # ساخت کیبورد شیشه‌ای پاسخ برای طرف مقابل تا لوپ چت قطع نشود
                 reply_markup = InlineKeyboardMarkup()
                 reply_markup.row(
                     InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{encoded_id}"),
@@ -199,7 +190,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
                         )
                         await bot.reply_to(message, "🚀 پاسخت برای اون شخص فرستاده شد.")
                         
-                        # مپ کردن دیتای پیام جدید برای پینگ‌پنگ بعدی چت
+                        # مپ کردن برعکس دیتا جهت تداوم پینگ‌پنگی چت و حفظ ری‌آکشن‌ها
                         await save_message_mapping(
                             user_chat_id=anon_sender_id,
                             user_msg_id=sent_reply.message_id,
@@ -213,7 +204,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
                     await bot.reply_to(message, "❌ ارسال پاسخ ناموفق بود. کاربر ربات را بلاک کرده.")
                 return
 
-        # 🕵️‍♂️ ۳. پردازش جریان اصلی چت ناشناس (ورود با لینک یا وضعیت‌های دکمه)
+        # 🕵️‍♂️ جریان اصلی چت ناشناس
         current_state, reply_target_id = await get_user_state(user_id)
         
         markup = InlineKeyboardMarkup()
@@ -222,7 +213,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
             InlineKeyboardButton("🚫 بلاک", callback_data=f"block_{encoded_id}")
         )
 
-        # --- سناریو الف: یک غریبه در حال ارسال فایل یا متن ناشناس به شماست ---
+        # ارسال پیام به طرف مقابل
         if current_state.startswith("sending_anon_to_"):
             target_id = decode_user_id(current_state.split("_")[-1])
             anon_caption = f"« {message.caption} »\n\n" if message.caption else ""
@@ -284,14 +275,16 @@ def register_bot_handlers(bot: AsyncTeleBot):
             await clear_user_state(user_id)
             return
 
-        # --- سناریو ب: در حال پاسخ دادن به یک پیام ناشناس هستید (از طریق دکمه شیشه‌ای) ---
+        # پاسخ به پیام از طریق دکمه شیشه‌ای
         if current_state == "replying_mode" and reply_target_id:
             mapping = await get_anon_sender_by_msg(user_chat_id=user_id, user_msg_id=reply_target_id)
             
+            if not mapping:
+                mapping = await get_super_user_by_msg(anon_sender_id=user_id, anon_msg_id=reply_target_id)
+                
             if mapping:
                 anon_sender_id, anon_msg_id = mapping
                 
-                # ساخت کیبورد شیشه‌ای پاسخ برای طرف مقابل
                 reply_markup = InlineKeyboardMarkup()
                 reply_markup.row(
                     InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{encoded_id}"),
@@ -309,7 +302,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
                         )
                         await bot.reply_to(message, "🚀 پاسخت برای اون شخص فرستاده شد.")
                         
-                        # مپ کردن برعکس دیتا جهت تداوم پینگ‌پنگی چت
                         await save_message_mapping(
                             user_chat_id=anon_sender_id,
                             user_msg_id=sent_reply.message_id,
@@ -327,7 +319,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
             await set_user_state(user_id, "normal")
             return
 
-        # --- سناریو ج: چت عادی با هوش مصنوعی (فقط برای تو و فاطمه) ---
+        # چت عادی با هوش مصنوعی (برای تو و فاطمه)
         if user_id in SUPER_USERS:
             if message.content_type == 'text':
                 await bot.send_chat_action(user_id, action="typing")
@@ -339,8 +331,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
         else:
             return
 
-
-    # ۳. هندل کردن کلیک روی دکمه "پاسخ به این پیام"
+    # ─── ۳. هندل کردن کلیک روی دکمه "پاسخ" ───
     @bot.callback_query_handler(func=lambda call: call.data.startswith("reply_to_"))
     async def handle_reply_callback(call):
         user_id = call.message.chat.id
@@ -359,8 +350,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
             
         await bot.answer_callback_query(call.id)
 
-
-    # ۴. هندل کردن کلیک روی دکمه "بلاک"
+    # ─── ۴. هندل کردن کلیک روی دکمه "بلاک" ───
     @bot.callback_query_handler(func=lambda call: call.data.startswith("block_"))
     async def handle_block_callback(call):
         user_id = call.message.chat.id
@@ -382,8 +372,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
         else:
             await bot.answer_callback_query(call.id, "❌ خطایی در رمزگشایی رخ داد.", show_alert=True)
 
-
-    # ۵. سینک دایمی و دوطرفه ری‌اکشن‌ها میان سوپریوزرها و فرستنده‌های ناشناس
+    # ─── ۵. سینک دایمی و دوطرفه ری‌اکشن‌ها (اصلاح نهایی برای فاطمه و غریبه‌ها) ───
     @bot.message_reaction_handler()
     async def handle_reactions(message_reaction):
         chat_id = message_reaction.chat.id
@@ -395,6 +384,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
             
         target_emoji = new_reactions[0].emoji
         
+        # حالت اول: ری‌آکشن در پیویِ صاحبان ربات رخ داده (ما می‌خواهیم بفرستیم برای غریبه)
         if chat_id in SUPER_USERS:
             mapping = await get_anon_sender_by_msg(chat_id, message_id)
             if mapping:
@@ -407,8 +397,16 @@ def register_bot_handlers(bot: AsyncTeleBot):
                     )
                 except Exception as e:
                     print(f"Failed to sync reaction to anon: {e}")
+                    
+        # حالت دوم: ری‌آکشن در پیویِ غریبه رخ داده (ما می‌خواهیم منتقل کنیم به سوپریوزر/فاطمه)
         else:
+            # جستجو بر اساس آیدی پیام چتِ غریبه به عنوان فرستنده اصلی برای سوپریوزرها
             mapping = await get_super_user_by_msg(anon_sender_id=chat_id, anon_msg_id=message_id)
+            
+            # اگر با متد سوپریوزر پیدا نشد، چک کردن متد عادی نقشه پیام
+            if not mapping:
+                mapping = await get_anon_sender_by_msg(user_chat_id=chat_id, user_msg_id=message_id)
+                
             if mapping:
                 super_user_id, super_msg_id = mapping
                 try:
