@@ -69,24 +69,25 @@ def register_admin_handlers(bot: AsyncTeleBot):
                 
             formatted_logs = "".join([f"=== USER: {u} ===\n" + "".join([f"- {m}\n" for m in ms]) + "\n" for u, ms in user_chats.items()])
 
-            # 🧠 ارتقای پرامپت هومبان برای جاگذاری اعداد دقیق و تخمین‌های سمی
+            # 🧠 ارتقای پرامپت هومبان برای جاگذاری اعداد دقیق، تخمین‌های سمی و تگ‌های HTML
             analytics_instruction = (
                 "You are Humban, a brutally honest, highly sarcastic, and witty group analyst for a close Persian crew.\n"
                 "Your job is to generate the \"Daily Group Report\" with strict, funny numerical stats for EACH person.\n\n"
-                "🚨 CRITICAL CONSTRAINT: Output MUST be concise, punchy, and strictly UNDER 2500 characters. Do NOT use markdown # headers.\n\n"
-                "Format exactly like this (use bold informal Persian for headers):\n\n"
-                "1. **📊 گه خور ترین ها (آمار دقیق چت)**:\n"
+                "🚨 CRITICAL CONSTRAINT: Output MUST be concise, punchy, and strictly UNDER 2500 characters.\n"
+                "🚨 FORMAT CONSTRAINT: Do NOT use markdown bold (**) or markdown headers. You MUST use strict HTML tags like <b>تیتر</b> for headers and bold text.\n\n"
+                "Format exactly like this:\n\n"
+                "1. <b>📊 گه خور ترین ها (آمار دقیق چت)</b>:\n"
                 "List top users based on the ranking data. You MUST include their exact message count.\n"
                 "Example: - نام (با X تا پیام): [Savage short roast]\n\n"
-                "2. **⌨️ کص‌دست‌ترین‌ها (آمار غلط املایی)**:\n"
+                "2. <b>⌨️ کص‌دست‌ترین‌ها (آمار غلط املایی)</b>:\n"
                 "Analyze spelling/typing mistakes from logs. Exaggerate or estimate a hilarious exact number of typos they made.\n"
                 "Example: - نام (با Y تا کص‌دستی و غلط املایی): [One line roast]\n\n"
-                "3. **🤬 بیشعورترین‌ها (شمارش فُحش‌ها)**:\n"
+                "3. <b>🤬 بیشعورترین‌ها (شمارش فُحش‌ها)</b>:\n"
                 "Count or creatively estimate the exact number of profanities, slangs, or rude terms they used.\n"
                 "Example: - نام (با Z تا فُحش و بددهنی): [One line roast]\n\n"
-                "4. **🔥 سوژه روز**:\n"
+                "4. <b>🔥 سوژه روز</b>:\n"
                 "Summarize the main funny drama in maximum 3 sentences.\n\n"
-                "5. **💬 جمله برتر روز**:\n"
+                "5. <b>💬 جمله برتر روز</b>:\n"
                 "Quote one exact funny line, name who said it, and roast them hard.\n\n"
                 "Tone: Heavy Persian street slang (حاجی، سم، اسید، سوتون، بوی مصلحت). Be an absolute roaster, condensed and numbers-focused!"
             )
@@ -94,14 +95,45 @@ def register_admin_handlers(bot: AsyncTeleBot):
             full_context = f"{ranking_context}\n\nHere is the chat data:\n\n{formatted_logs}"
             safety_configs = [types.SafetySetting(category=c, threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH) for c in [types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, types.HarmCategory.HARM_CATEGORY_HARASSMENT, types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT]]
 
-            try:
-                response = ai_client.models.generate_content(model='gemini-2.5-flash', contents=full_context, config=types.GenerateContentConfig(system_instruction=analytics_instruction, safety_settings=safety_configs))
-            except Exception:
-                response = ai_client.models.generate_content(model='gemini-2.0-flash', contents=full_context, config=types.GenerateContentConfig(system_instruction=analytics_instruction, safety_settings=safety_configs))
+            response = None
             
-            await bot.send_message(chat_id=message.chat.id, text=f"🧪 **[گزارش تست لایو هومبان]**\n\n{response.text}", parse_mode="Markdown")
+            # 🚀 استراتژی دفاعی ۴ لایه آبشاری هومبان (ضد کرش مطلق)
+            try:
+                print("🧠 [Layer 1] Querying primary model (gemini-2.5-flash)...")
+                response = ai_client.models.generate_content(
+                    model='gemini-2.5-flash', 
+                    contents=full_context, 
+                    config=types.GenerateContentConfig(system_instruction=analytics_instruction, safety_settings=safety_configs)
+                )
+            except Exception as err_25:
+                try:
+                    print(f"⚠️ Layer 1 failed ({err_25}). [Layer 2] Switching to gemini-2.0-flash...")
+                    response = ai_client.models.generate_content(
+                        model='gemini-2.0-flash', 
+                        contents=full_context, 
+                        config=types.GenerateContentConfig(system_instruction=analytics_instruction, safety_settings=safety_configs)
+                    )
+                except Exception as err_20:
+                    try:
+                        print(f"🚨 Layer 2 failed ({err_20}). [Layer 3] Switching to ultra-stable gemini-1.5-flash...")
+                        response = ai_client.models.generate_content(
+                            model='gemini-1.5-flash', 
+                            contents=full_context, 
+                            config=types.GenerateContentConfig(system_instruction=analytics_instruction, safety_settings=safety_configs)
+                        )
+                    except Exception as final_err:
+                        print(f"💥 CRITICAL: All Gemini models failed! ({final_err})")
+                        await bot.send_message(chat_id=message.chat.id, text="❌ <b>مصلحت عظما رخ داده ستون!</b>\nکل سرورهای جمینای به فنا رفتن و هیچ مدلی پاسخگو نیست. بعداً تست کن.", parse_mode="HTML")
+                        return
+
+            if response and response.text:
+                # 🚨 ارسال خروجی با قالب HTML برای امنیت و پایداری در برابر کاراکترهای خاص
+                await bot.send_message(chat_id=message.chat.id, text=f"🧪 <b>[گزارش تست لایو هومبان]</b>\n\n{response.text}", parse_mode="HTML")
+            else:
+                await bot.send_message(chat_id=message.chat.id, text="❌ خطایی در دریافت پاسخ از هوش مصنوعی رخ داد.", parse_mode="HTML")
+
         except Exception as e:
-            await bot.send_message(message.chat.id, text=f"❌ تست با خطا مواجه شد: {e}")
+            await bot.send_message(message.chat.id, text=f"❌ تست با خطا مواجه شد: {e}", parse_mode="HTML")
 
     # چت مستقیم با AI در پیوی ادمین‌ها
     @bot.message_handler(func=lambda m: m.chat.type == "private" and m.chat.id in SUPER_USERS and m.text and not m.text.startswith('/'))

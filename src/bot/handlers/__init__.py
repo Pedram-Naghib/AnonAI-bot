@@ -8,14 +8,14 @@ from src.bot.handlers.reactions import register_reaction_handlers
 def register_bot_handlers(bot: AsyncTeleBot):
     """ثبت‌نام زنجیره‌ای با رعایت اولویت سفت و سخت کامندهای پیوی"""
     
+    # اولویت سوم: دستورات ادمین و چت با AI
+    register_admin_handlers(bot)
+    
     # 🚨 پاتک اصلی: اولویت اول چت خصوصی، استارت و منوها است تا جایی گیر نکنند
     register_private_anon_handlers(bot)
     
     # اولویت دوم: مانیتورینگ متون گروه
     register_group_handlers(bot)
-    
-    # اولویت سوم: دستورات ادمین و چت با AI
-    register_admin_handlers(bot)
     
     # اولویت چهارم: اموجی‌ها
     register_reaction_handlers(bot)

@@ -48,14 +48,14 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         await bot.reply_to(message, msg, parse_mode="HTML", reply_markup=main_keyboard)
 
 
-    @bot.message_handler(func=lambda m: m.text == "📊 آمار من" and m.chat.type == "private")
+    @bot.message_handler(func=lambda m: m.text == "📊 آمار من", chat_types=["private"])
     async def handle_my_stats(message):
         stats = await get_user_profile_stats(message.chat.id)
         response_text = f"📊 **آمار من**\n\n👤 | نام : {message.from_user.first_name}\n🪪 | ایدی : `{message.chat.id}`\n✍ | ناشناس دریافتی : {stats['received']}\n⛔️ | بلاک شده‌ها : {stats['blocked']}"
         await bot.reply_to(message, response_text, parse_mode="Markdown")
 
     # ─── پردازش پینگ‌پنگی چت ناشناس در پیوی ───
-    @bot.message_handler(func=lambda m: m.chat.type == "private", content_types=['text', 'photo', 'video', 'voice', 'audio'])
+    @bot.message_handler(content_types=['text', 'photo', 'video', 'voice', 'audio'], chat_types=["private"])
     async def handle_private_anon_flow(message):
         user_id = message.chat.id
         encoded_id = encode_user_id(user_id)

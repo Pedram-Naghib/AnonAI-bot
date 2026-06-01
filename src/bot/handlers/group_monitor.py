@@ -18,7 +18,7 @@ def register_group_handlers(bot: AsyncTeleBot):
             return
 
     # ─── پیام‌های انفرادی، متنی و تک‌مدیای گروه ───
-    @bot.message_handler(func=lambda m: m.media_group_id is None, content_types=['text', 'photo', 'video', 'voice', 'audio'])
+    @bot.message_handler(func=lambda m: m.media_group_id is None, content_types=['text', 'photo', 'video', 'voice', 'audio'], chat_types=["supergroup", "group"])
     async def handle_group_single_messages(message):
         if message.chat.id == GROUP_CHAT_ID:
             log_text = message.text if message.content_type == 'text' else message.caption
