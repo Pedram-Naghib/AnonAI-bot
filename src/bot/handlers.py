@@ -3,6 +3,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReactionTy
 from src.ai.client import generate_ai_response
 from src.utils.crypto import encode_user_id, decode_user_id
 from src.config import GROUP_CHAT_ID
+import re
 
 # 📥 تزریق مستقیم توابع دیتابیس
 from src.database.db_manager import (
@@ -164,9 +165,39 @@ def register_bot_handlers(bot: AsyncTeleBot):
             return
         try:
             text = message.text.split("/gp ")
-            await bot.send_message(-1001992206899, text[-1], reply_markup=ReplyKeyboardRemove())
+            await bot.send_message(GROUP_CHAT_ID, text[-1], reply_markup=ReplyKeyboardRemove())
         except Exception as e:
             print(f"❌ Error sending ID: {e}")
+
+    # 🔗 شلیک خودکار با دیدن لینک گروه (بدون نیاز به دستور)
+    @bot.message_handler(regexp=r"^https:\/\/t\.me\/c\/1434396268\/(\d+)\s+(.*)")
+    async def handle_auto_reply_by_link(message):
+        chat_id = message.chat.id
+        
+        # سد دفاعی دسترسی سوپریوزرها
+        if chat_id not in SUPER_USERS:
+            return
+            
+        try:
+            # استخراج آیدی پیام و متن از طریق رگکس
+            match = re.match(r"^https:\/\/t\.me\/c\/1434396268\/(\d+)\s+(.*)", message.text)
+            
+            if match:
+                reply_to_msg_id = int(match.group(1)) # عدد آخر لینک (مثلاً 548058)
+                clean_text = match.group(2)          # کل متن بعد از لینک
+                
+                # ارسال ریپلای به گروه
+                await bot.send_message(
+                    chat_id=GROUP_CHAT_ID,
+                    text=clean_text,
+                    reply_to_message_id=reply_to_msg_id,
+                    reply_markup=ReplyKeyboardRemove()
+                )
+                await bot.reply_to(message, f"🎯 بدون دستور و با موفقیت روی پیام `{reply_to_msg_id}` ریپلای شد!")
+                
+        except Exception as e:
+            print(f"❌ Error in auto-reply trigger: {e}")
+            await bot.reply_to(message, f"❌ خطای ریپلای خودکار: {e}")
 
 
     # هندلر فعال‌سازی با پیام متنی "📊 آمار من" در پیوی ربات
