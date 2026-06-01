@@ -4,6 +4,8 @@ from src.ai.client import generate_ai_response
 from src.utils.crypto import encode_user_id, decode_user_id
 from src.config import GROUP_CHAT_ID
 import re
+from src.database.db_manager import get_daily_group_logs
+from src.ai.client import ai_client, types
 
 # 📥 تزریق مستقیم توابع دیتابیس
 from src.database.db_manager import (
@@ -200,6 +202,117 @@ def register_bot_handlers(bot: AsyncTeleBot):
             await bot.reply_to(message, f"❌ خطای ریپلای خودکار: {e}")
 
 
+    @bot.message_handler(commands=['test_summary'])
+    async def handle_test_summary(message):
+        chat_id = message.chat.id
+        
+        # ۱. سد دفاعی دسترسی: فقط تو و فاطمه
+        if chat_id not in SUPER_USERS:
+            return
+            
+        await bot.reply_to(message, "📥 در حال استخراج چت‌های ۲۴ ساعت گذشته از سوپابیس و ارسال به جمینای... لطفاً چند ثانیه صبر کن ستون.")
+        await bot.send_chat_action(chat_id, action="typing")
+        
+        try:
+            # ۲. کشیدن دیتای واقعی از دیتابیس
+            rows = await get_daily_group_logs()
+            
+            # ۳. مصلحت‌سنجی: اگر دیتابیس خالی بود، دیتای فیک تزریق کن تا تست متوقف نشود
+            if not rows:
+                await bot.send_message(chat_id, "💡 دیتابیس خالی بود ستون! برای اینکه تست نخوابه، دارم دیتای نمونه (Mock) به جمینای می‌دم...")
+                rows = [
+                    ("Pedram", "pedram_naghib", "حاجی این ربات چت ناشناس عجب چیزی شده بالاخره ران شد"),
+                    ("Ali", "ali_test", "کص‌دست کدو اشتباه زدی باز که ارور ۴۰۰ داد"),
+                    ("Pedram", "pedram_naghib", "خفه بابا درستش کردم مشکل از پلتفرم گوگل بود"),
+                    ("Reza", "reza_98", "چاکر همگی، دمت گرم پدرام ردیفه"),
+                    ("Mamad", "mamad_vulgar", "دهنتون سرویس کصکشا چقدر چت می‌کنید اسکل‌ها بگیرید بخوابید")
+                ]
+
+            # ۴. پردازش و دسته‌بندی پیام‌ها در پایتون
+            user_chats = {}
+            message_counts = {}
+            
+            for first_name, username, text in rows:
+                user_key = f"{first_name} (@{username})" if username else first_name
+                if user_key not in user_chats:
+                    user_chats[user_key] = []
+                user_chats[user_key].append(text)
+                message_counts[user_key] = message_counts.get(user_key, 0) + 1
+
+            # رتبه‌بندی دقیق بر اساس پایتون
+            top_speakers = sorted(message_counts.items(), key=lambda x: x[1], reverse=True)
+            ranking_context = "👑 EXACT RANKING BY MESSAGE COUNT:\n"
+            for index, (user, count) in enumerate(top_speakers, 1):
+                ranking_context += f"{index}. {user}: {count} messages\n"
+
+            formatted_logs = ""
+            for user, messages in user_chats.items():
+                formatted_logs += f"=== USER: {user} ===\n"
+                for msg in messages:
+                    formatted_logs += f"- {msg}\n"
+                formatted_logs += "\n"
+
+            # ۵. پرامپت اصلی، سمی و خلاصه شده هومبان
+            analytics_instruction = """
+            You are Humban, a brutally honest, highly sarcastic, and witty group analyst for a close Persian crew.
+            Your job is to generate the "Daily Group Report" exactly with the following format. 
+            
+            🚨 CRITICAL CONSTRAINT: Telegram has a strict character limit. Your entire response MUST be concise, punchy, and short. Keep the total output strictly UNDER 2500 characters. Do NOT write long essays for each section. Keep roasts short but lethal.
+            
+            Do NOT use markdown # headers. Use bold informal Persian like **تیتر**.
+            
+            1. **📊 گه خور ترین ها**: List exactly top users based on the EXACT RANKING. Add a very short, savage comment.
+            2. **⌨️ کص‌دست‌ترین‌ها**: List users with typos/fast-typing mistakes and roast them in one line.
+            3. **🤬 بیشعورترین‌ها**: List users who used the most profanity or rude tone.
+            4. **🔥 سوژه روز**: Summarize the main funny drama/hot topic today in maximum 3-4 juicy, cinematic sentences.
+            5. **💬 جمله برتر روز**: Quote one exact funny line and roast them hard.
+
+            Tone: Heavy Persian street slang (حاجی، سم، اسید، سوتون، بوی مصلحت). Be an absolute roaster, but keep it highly condensed and brief.
+            """
+
+            full_context = f"{ranking_context}\n\nHere is the chat data:\n\n{formatted_logs}"
+
+            # ۶. شلیک به API گوگل جمینای با مکانیزم سوئیچ خودکار زاپاس
+            safety_configs = [
+                types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH),
+                types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH),
+                types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH),
+                types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH)
+            ]
+
+            try:
+                # 🚀 تلاش اول با مدل اصلی و سریع‌تر
+                print("🧠 Querying primary model (gemini-2.5-flash)...")
+                response = ai_client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=full_context,
+                    config=types.GenerateContentConfig(
+                        system_instruction=analytics_instruction,
+                        safety_settings=safety_configs
+                    )
+                )
+            except Exception as google_error:
+                # 🔄 پاتک فنی: اگر مدل اصلی شلوغ بود یا ۵۰۳ داد، فوراً برو روی مدل پایدار ۱.۵
+                print(f"⚠️ Primary model overloaded ({google_error}). Switching to backup (gemini-1.5-flash)...")
+                response = ai_client.models.generate_content(
+                    model='gemini-2.0-flash',
+                    contents=full_context,
+                    config=types.GenerateContentConfig(
+                        system_instruction=analytics_instruction,
+                        safety_settings=safety_configs
+                    )
+                )
+            
+            report_text = response.text if response.text else "امروز آمار خالیه ستون."
+            
+            # ۷. ارسال خروجی مستقیم به پیویِ خودت
+            await bot.send_message(chat_id=chat_id, text=f"🧪 **[گزارش تست زنده هومبان - خروجی اختصاصی پیوی]**\n\n{report_text}", parse_mode="Markdown")
+            
+        except Exception as e:
+            print(f"❌ Error in /test_summary command: {e}")
+            await bot.send_message(chat_id=chat_id, text=f"❌ تست با خطا مواجه شد: {e}")
+
+
     # هندلر فعال‌سازی با پیام متنی "📊 آمار من" در پیوی ربات
     @bot.message_handler(func=lambda message: message.text == "📊 آمار من" and message.chat.type == "private")
     async def handle_my_stats(message):
@@ -228,16 +341,14 @@ def register_bot_handlers(bot: AsyncTeleBot):
         user_text = message.text
         encoded_id = encode_user_id(user_id)
         
-        if message.chat.type in ['group', 'supergroup']:
-            log_text = user_text if message.content_type == 'text' else message.caption
-            if log_text and not log_text.startswith('/'):
-                await log_message_to_db(
-                    user_id=message.from_user.id,
-                    username=message.from_user.username or "NoUsername",
-                    first_name=message.from_user.first_name,
-                    text=log_text
-                )
-            return 
+        # 🚨 سد دفاعی: فقط اگر پیام در گروه اصلی (OG) بود، لاگ دیتابیس فعال شود
+        if message.chat.id == GROUP_CHAT_ID and message.caption and not message.caption.startswith('/'):
+            await log_message_to_db(
+                user_id=message.from_user.id,
+                username=message.from_user.username or "NoUsername",
+                first_name=message.from_user.first_name,
+                text=message.caption
+            )
 
         # 🚀 سناریو پاسخ از طریق ریپلای مستقیم (Native Reply)
         if message.chat.type == 'private' and message.reply_to_message:
