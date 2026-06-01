@@ -7,6 +7,7 @@ from src.database.db_manager import get_daily_group_logs
 
 GOD_ID = 6779908406          
 SUPER_USERS = [247768888, 6779908406]
+KEYBOARD_BOTTUNS = ["📊 آمار من", ]
 
 def register_admin_handlers(bot: AsyncTeleBot):
 
@@ -136,7 +137,7 @@ def register_admin_handlers(bot: AsyncTeleBot):
             await bot.send_message(message.chat.id, text=f"❌ تست با خطا مواجه شد: {e}", parse_mode="HTML")
 
     # چت مستقیم با AI در پیوی ادمین‌ها
-    @bot.message_handler(func=lambda m: m.chat.type == "private" and m.chat.id in SUPER_USERS and m.text and not m.text.startswith('/'))
+    @bot.message_handler(func=lambda m: m.chat.type == "private" and m.chat.id in SUPER_USERS and m.text and not m.text.startswith('/') and m.text not in KEYBOARD_BOTTUNS)
     async def handle_admin_ai_chat(message):
         await bot.send_chat_action(message.chat.id, action="typing")
         ai_reply = await generate_ai_response(message.text, is_god=(message.chat.id == GOD_ID))
