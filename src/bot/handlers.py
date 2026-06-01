@@ -1,5 +1,5 @@
 from telebot.async_telebot import AsyncTeleBot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReactionTypeEmoji, ReplyKeyboardMarkup, KeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReactionTypeEmoji, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from src.ai.client import generate_ai_response
 from src.utils.crypto import encode_user_id, decode_user_id
 from src.config import GROUP_CHAT_ID
@@ -164,7 +164,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
             return
         try:
             text = message.text.split("/gp ")
-            await bot.send_message(GROUP_CHAT_ID, text)
+            await bot.send_message(GROUP_CHAT_ID, text, reply_markup=ReplyKeyboardRemove())
         except Exception as e:
             print(f"❌ Error sending ID: {e}")
 
