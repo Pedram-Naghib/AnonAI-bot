@@ -4,6 +4,7 @@ from src.ai.client import generate_ai_response
 from src.utils.crypto import encode_user_id, decode_user_id
 from src.config import GROUP_CHAT_ID
 import re
+import asyncio
 from src.database.db_manager import get_daily_group_logs
 from src.ai.client import ai_client, types
 
@@ -29,13 +30,12 @@ def register_bot_handlers(bot: AsyncTeleBot):
         command_args = message.text.split()
 
         if message.chat.type != "private":
-            return # ToDo
+            return
         user_id = message.chat.id
         
         # 🎛 ساخت کیبورد منوی اصلی ربات (سنجاق شده به پایین صفحه)
         main_keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
         btn_stats = KeyboardButton("📊 آمار من")
-        # اینجا می‌توانی دکمه‌های دیگر را هم در آینده اضافه کنی، فعلاً این دکمه را می‌گذاریم:
         main_keyboard.add(btn_stats)
         
         # بررسی ورود از طریق لینک ناشناس
@@ -75,22 +75,28 @@ def register_bot_handlers(bot: AsyncTeleBot):
                 "می‌تواند برای شما پیام ناشناس بفرستد و شما همین‌جا پاسخشان را بدهید!"
             )
             
-        # ارسال پیام خوش‌آمدگویی همراه با منوی دکمه‌ها
         await bot.reply_to(message, msg, parse_mode="Markdown", reply_markup=main_keyboard)
+
 
     # ─── ۲.الف: مدیریت آلبوم‌ها و فایل‌های دسته‌جمعی (Media Groups) ───
     @bot.message_handler(func=lambda message: message.media_group_id is not None, content_types=['photo', 'video', 'audio'])
     async def handle_media_group(message):
-        user_id = message.chat.id
-        
-        if message.chat.type in ['group', 'supergroup'] and message.caption and not message.caption.startswith('/'):
-            await log_message_to_db(
-                user_id=message.from_user.id,
-                username=message.from_user.username or "NoUsername",
-                first_name=message.from_user.first_name,
-                text=message.caption
-            )
+        # 🚨 سد دفاعی: مانیتورینگ گروه اصلی (فقط لاگ چت در صورت داشتن کپشن متنی)
+        if message.chat.id == GROUP_CHAT_ID:
+            if message.caption and not message.caption.startswith('/'):
+                await log_message_to_db(
+                    user_id=message.from_user.id,
+                    username=message.from_user.username or "NoUsername",
+                    first_name=message.from_user.first_name,
+                    text=message.caption
+                )
+            return # پرونده پیام گروه بسته می‌شود؛ چه متن داشت و ذخیره شد، چه نداشت.
 
+        elif message.chat.type in ['group', 'supergroup']:
+            return
+
+        # ─── جریان پیوی و چت ناشناس ───
+        user_id = message.chat.id
         current_state, _ = await get_user_state(user_id)
 
         if current_state.startswith("sending_anon_to_"):
@@ -134,7 +140,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
                     await bot.edit_message_reply_markup(chat_id=target_id, message_id=sent_messages[0].message_id, reply_markup=markup)
                     await bot.reply_to(message, "✅ آلبوم مالتی‌مدیای شما با موفقیت و کاملاً مخفیانه ارسال شد.")
                     
-                    # ذخیره دوطرفه نگاشت پیام آلبوم در دیتابیس
                     await save_message_mapping(
                         user_chat_id=target_id,
                         user_msg_id=sent_messages[0].message_id,
@@ -148,7 +153,8 @@ def register_bot_handlers(bot: AsyncTeleBot):
             await clear_user_state(user_id)
             return
 
-    # ─── ۶. گرفتن آیدی عددی چت فعلی ───
+
+    # ─── ۳. مدیریت دستورات عددی و مدیریتی ویژه ───
     @bot.message_handler(commands=['id'])
     async def handle_get_chat_id(message):
         chat_id = message.chat.id
@@ -159,7 +165,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
             print(f"❌ Error sending ID: {e}")
 
 
-    # ─── ۶. گرفتن آیدی عددی چت فعلی ───
     @bot.message_handler(commands=['gp'])
     async def handle_send_msg_to_gp(message):
         chat_id = message.chat.id
@@ -171,24 +176,19 @@ def register_bot_handlers(bot: AsyncTeleBot):
         except Exception as e:
             print(f"❌ Error sending ID: {e}")
 
-    # 🔗 شلیک خودکار با دیدن لینک گروه (بدون نیاز به دستور)
+
     @bot.message_handler(regexp=r"^https:\/\/t\.me\/c\/1434396268\/(\d+)\s+(.*)")
     async def handle_auto_reply_by_link(message):
         chat_id = message.chat.id
-        
-        # سد دفاعی دسترسی سوپریوزرها
         if chat_id not in SUPER_USERS:
             return
             
         try:
-            # استخراج آیدی پیام و متن از طریق رگکس
             match = re.match(r"^https:\/\/t\.me\/c\/1434396268\/(\d+)\s+(.*)", message.text)
-            
             if match:
-                reply_to_msg_id = int(match.group(1)) # عدد آخر لینک (مثلاً 548058)
-                clean_text = match.group(2)          # کل متن بعد از لینک
+                reply_to_msg_id = int(match.group(1))
+                clean_text = match.group(2)
                 
-                # ارسال ریپلای به گروه
                 await bot.send_message(
                     chat_id=GROUP_CHAT_ID,
                     text=clean_text,
@@ -205,8 +205,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
     @bot.message_handler(commands=['test_summary'])
     async def handle_test_summary(message):
         chat_id = message.chat.id
-        
-        # ۱. سد دفاعی دسترسی: فقط تو و فاطمه
         if chat_id not in SUPER_USERS:
             return
             
@@ -214,10 +212,8 @@ def register_bot_handlers(bot: AsyncTeleBot):
         await bot.send_chat_action(chat_id, action="typing")
         
         try:
-            # ۲. کشیدن دیتای واقعی از دیتابیس
             rows = await get_daily_group_logs()
             
-            # ۳. مصلحت‌سنجی: اگر دیتابیس خالی بود، دیتای فیک تزریق کن تا تست متوقف نشود
             if not rows:
                 await bot.send_message(chat_id, "💡 دیتابیس خالی بود ستون! برای اینکه تست نخوابه، دارم دیتای نمونه (Mock) به جمینای می‌دم...")
                 rows = [
@@ -228,10 +224,8 @@ def register_bot_handlers(bot: AsyncTeleBot):
                     ("Mamad", "mamad_vulgar", "دهنتون سرویس کصکشا چقدر چت می‌کنید اسکل‌ها بگیرید بخوابید")
                 ]
 
-            # ۴. پردازش و دسته‌بندی پیام‌ها در پایتون
             user_chats = {}
             message_counts = {}
-            
             for first_name, username, text in rows:
                 user_key = f"{first_name} (@{username})" if username else first_name
                 if user_key not in user_chats:
@@ -239,7 +233,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
                 user_chats[user_key].append(text)
                 message_counts[user_key] = message_counts.get(user_key, 0) + 1
 
-            # رتبه‌بندی دقیق بر اساس پایتون
             top_speakers = sorted(message_counts.items(), key=lambda x: x[1], reverse=True)
             ranking_context = "👑 EXACT RANKING BY MESSAGE COUNT:\n"
             for index, (user, count) in enumerate(top_speakers, 1):
@@ -252,7 +245,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
                     formatted_logs += f"- {msg}\n"
                 formatted_logs += "\n"
 
-            # ۵. پرامپت اصلی، سمی و خلاصه شده هومبان
             analytics_instruction = """
             You are Humban, a brutally honest, highly sarcastic, and witty group analyst for a close Persian crew.
             Your job is to generate the "Daily Group Report" exactly with the following format. 
@@ -271,8 +263,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
             """
 
             full_context = f"{ranking_context}\n\nHere is the chat data:\n\n{formatted_logs}"
-
-            # ۶. شلیک به API گوگل جمینای با مکانیزم سوئیچ خودکار زاپاس
             safety_configs = [
                 types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH),
                 types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH),
@@ -281,7 +271,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
             ]
 
             try:
-                # 🚀 تلاش اول با مدل اصلی و سریع‌تر
                 print("🧠 Querying primary model (gemini-2.5-flash)...")
                 response = ai_client.models.generate_content(
                     model='gemini-2.5-flash',
@@ -292,8 +281,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
                     )
                 )
             except Exception as google_error:
-                # 🔄 پاتک فنی: اگر مدل اصلی شلوغ بود یا ۵۰۳ داد، فوراً برو روی مدل پایدار ۱.۵
-                print(f"⚠️ Primary model overloaded ({google_error}). Switching to backup (gemini-1.5-flash)...")
+                print(f"⚠️ Primary model overloaded ({google_error}). Switching to backup (gemini-2.0-flash)...")
                 response = ai_client.models.generate_content(
                     model='gemini-2.0-flash',
                     contents=full_context,
@@ -304,25 +292,19 @@ def register_bot_handlers(bot: AsyncTeleBot):
                 )
             
             report_text = response.text if response.text else "امروز آمار خالیه ستون."
-            
-            # ۷. ارسال خروجی مستقیم به پیویِ خودت
-            await bot.send_message(chat_id=chat_id, text=f"🧪 **[گزارش تست زنده هومبان - خروجی اختصاصی پیوی]**\n\n{report_text}", parse_mode="Markdown")
+            await bot.send_message(chat_id=chat_id, text=f"🧪 **[گزارش تست لایو هومبان - خروجی اختصاصی پیوی]**\n\n{report_text}", parse_mode="Markdown")
             
         except Exception as e:
             print(f"❌ Error in /test_summary command: {e}")
             await bot.send_message(chat_id=chat_id, text=f"❌ تست با خطا مواجه شد: {e}")
 
 
-    # هندلر فعال‌سازی با پیام متنی "📊 آمار من" در پیوی ربات
     @bot.message_handler(func=lambda message: message.text == "📊 آمار من" and message.chat.type == "private")
     async def handle_my_stats(message):
         user_id = message.chat.id
         first_name = message.from_user.first_name
-        
-        # استخراج آمار زنده از دیتابیس
         stats = await get_user_profile_stats(user_id)
         
-        # چیدمان دقیق قالب درخواستی پدرام
         response_text = (
             f"📊 **آمار من**\n\n"
             f"👤 | نام : {first_name}\n"
@@ -331,39 +313,43 @@ def register_bot_handlers(bot: AsyncTeleBot):
             f"📬 | تعداد پیام‌های ناشناس دریافتی : {stats['received']}\n"
             f"⛔️ | تعداد افراد بلاک شده : {stats['blocked']}"
         )
-        
         await bot.reply_to(message, response_text, parse_mode="Markdown")
 
-    # ─── ۲.ب: مدیریت پیام‌های انفرادی و تکی ───
+
+    # ─── ۴.ب: مدیریت پیام‌های انفرادی و تکی (متن و تک‌مدیا) ───
     @bot.message_handler(func=lambda message: message.media_group_id is None, content_types=['text', 'photo', 'video', 'voice', 'audio'])
     async def handle_all_messages(message):
+        
+        # 🚨 شکار آنی چت‌های گروه اصلی (فقط لاگ چت‌های حاوی متن خالص)
+        if message.chat.id == GROUP_CHAT_ID:
+            log_text = message.text if message.content_type == 'text' else message.caption
+            if log_text and not log_text.startswith('/'):
+                await log_message_to_db(
+                    user_id=message.from_user.id,
+                    username=message.from_user.username or "NoUsername",
+                    first_name=message.from_user.first_name,
+                    text=log_text
+                )
+            return # کار با پیام گروه تمام شد؛ ران کردن بقیه منطق‌ها بلاک می‌شود.
+
+        elif message.chat.type in ['group', 'supergroup']:
+            return
+
+        # ─── از اینجا به بعد مربوط به چت خصوصی (پیوی) است ───
         user_id = message.chat.id
         user_text = message.text
         encoded_id = encode_user_id(user_id)
         
-        # 🚨 سد دفاعی: فقط اگر پیام در گروه اصلی (OG) بود، لاگ دیتابیس فعال شود
-        if message.chat.id == GROUP_CHAT_ID and message.caption and not message.caption.startswith('/'):
-            await log_message_to_db(
-                user_id=message.from_user.id,
-                username=message.from_user.username or "NoUsername",
-                first_name=message.from_user.first_name,
-                text=message.caption
-            )
-
         # 🚀 سناریو پاسخ از طریق ریپلای مستقیم (Native Reply)
         if message.chat.type == 'private' and message.reply_to_message:
             replied_msg_id = message.reply_to_message.message_id
-            
-            # ابتدا بررسی مپینگ برای فهمیدن اینکه پیام ریپلای شده مال غریبه است یا سوپریوزر
             mapping = await get_anon_sender_by_msg(user_chat_id=user_id, user_msg_id=replied_msg_id)
             
-            # اگر مال غریبه عادی نبود، شاید سوپریوزر (مثل فاطمه) دارد به پیام فرستاده شده جواب مستقیم می‌دهد
             if not mapping:
                 mapping = await get_super_user_by_msg(anon_sender_id=user_id, anon_msg_id=replied_msg_id)
             
             if mapping:
                 anon_sender_id, anon_msg_id = mapping  
-                
                 reply_markup = InlineKeyboardMarkup()
                 reply_markup.row(
                     InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{encoded_id}"),
@@ -380,8 +366,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
                             parse_mode="HTML"
                         )
                         await bot.reply_to(message, "🚀 پاسخت برای اون شخص فرستاده شد.")
-                        
-                        # مپ کردن برعکس دیتا جهت تداوم پینگ‌پنگی چت و حفظ ری‌آکشن‌ها
                         await save_message_mapping(
                             user_chat_id=anon_sender_id,
                             user_msg_id=sent_reply.message_id,
@@ -397,14 +381,12 @@ def register_bot_handlers(bot: AsyncTeleBot):
 
         # 🕵️‍♂️ جریان اصلی چت ناشناس
         current_state, reply_target_id = await get_user_state(user_id)
-        
         markup = InlineKeyboardMarkup()
         markup.row(
             InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{encoded_id}"),
             InlineKeyboardButton("⛔️ بلاک", callback_data=f"block_{encoded_id}")
         )
 
-        # ارسال پیام به طرف مقابل
         if current_state.startswith("sending_anon_to_"):
             target_id = decode_user_id(current_state.split("_")[-1])
             anon_caption = f"« {message.caption} »\n\n" if message.caption else ""
@@ -466,16 +448,13 @@ def register_bot_handlers(bot: AsyncTeleBot):
             await clear_user_state(user_id)
             return
 
-        # پاسخ به پیام از طریق دکمه شیشه‌ای
         if current_state == "replying_mode" and reply_target_id:
             mapping = await get_anon_sender_by_msg(user_chat_id=user_id, user_msg_id=reply_target_id)
-            
             if not mapping:
                 mapping = await get_super_user_by_msg(anon_sender_id=user_id, anon_msg_id=reply_target_id)
                 
             if mapping:
                 anon_sender_id, anon_msg_id = mapping
-                
                 reply_markup = InlineKeyboardMarkup()
                 reply_markup.row(
                     InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{encoded_id}"),
@@ -492,7 +471,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
                             parse_mode="HTML"
                         )
                         await bot.reply_to(message, "🚀 پاسخت برای اون شخص فرستاده شد.")
-                        
                         await save_message_mapping(
                             user_chat_id=anon_sender_id,
                             user_msg_id=sent_reply.message_id,
@@ -510,7 +488,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
             await set_user_state(user_id, "normal")
             return
 
-        # چت عادی با هوش مصنوعی (برای تو و فاطمه)
         if user_id in SUPER_USERS:
             if message.content_type == 'text':
                 await bot.send_chat_action(user_id, action="typing")
@@ -522,7 +499,8 @@ def register_bot_handlers(bot: AsyncTeleBot):
         else:
             return
 
-    # ─── ۳. هندل کردن کلیک روی دکمه "پاسخ" ───
+
+    # ─── ۵. هندل کردن کلیک روی دکمه‌ها (Callbacks) ───
     @bot.callback_query_handler(func=lambda call: call.data.startswith("reply_to_"))
     async def handle_reply_callback(call):
         user_id = call.message.chat.id
@@ -532,16 +510,13 @@ def register_bot_handlers(bot: AsyncTeleBot):
         
         if anonymous_user_id:
             await set_user_state(user_id, "replying_mode", reply_target_id=incoming_msg_id)
-            await bot.send_message(
-                user_id, 
-                "✍️ بسیار خب، پاسخی که می‌خواهی به این شخص بدهی را بنویس و ارسال کن."
-            )
+            await bot.send_message(user_id, "✍️ بسیار خب، پاسخی که می‌خواهی به این شخص بدهی را بنویس و ارسال کن.")
         else:
             await bot.send_message(user_id, "❌ این فرستنده دیگر معتبر نیست.")
             
         await bot.answer_callback_query(call.id)
 
-    # ─── ۴. هندل کردن کلیک روی دکمه "بلاک" ───
+
     @bot.callback_query_handler(func=lambda call: call.data.startswith("block_"))
     async def handle_block_callback(call):
         user_id = call.message.chat.id
@@ -563,7 +538,8 @@ def register_bot_handlers(bot: AsyncTeleBot):
         else:
             await bot.answer_callback_query(call.id, "❌ خطایی در رمزگشایی رخ داد.", show_alert=True)
 
-    # ─── ۵. سینک دایمی و دوطرفه ری‌اکشن‌ها (اصلاح نهایی برای فاطمه و غریبه‌ها) ───
+
+    # ─── ۶. سینک دایمی و دوطرفه ری‌اکشن‌ها ───
     @bot.message_reaction_handler()
     async def handle_reactions(message_reaction):
         chat_id = message_reaction.chat.id
@@ -575,7 +551,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
             
         target_emoji = new_reactions[0].emoji
         
-        # حالت اول: ری‌آکشن در پیویِ صاحبان ربات رخ داده (ما می‌خواهیم بفرستیم برای غریبه)
         if chat_id in SUPER_USERS:
             mapping = await get_anon_sender_by_msg(chat_id, message_id)
             if mapping:
@@ -589,12 +564,8 @@ def register_bot_handlers(bot: AsyncTeleBot):
                 except Exception as e:
                     print(f"Failed to sync reaction to anon: {e}")
                     
-        # حالت دوم: ری‌آکشن در پیویِ غریبه رخ داده (ما می‌خواهیم منتقل کنیم به سوپریوزر/فاطمه)
         else:
-            # جستجو بر اساس آیدی پیام چتِ غریبه به عنوان فرستنده اصلی برای سوپریوزرها
             mapping = await get_super_user_by_msg(anon_sender_id=chat_id, anon_msg_id=message_id)
-            
-            # اگر با متد سوپریوزر پیدا نشد، چک کردن متد عادی نقشه پیام
             if not mapping:
                 mapping = await get_anon_sender_by_msg(user_chat_id=chat_id, user_msg_id=message_id)
                 
