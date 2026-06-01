@@ -1,5 +1,5 @@
 from telebot.async_telebot import AsyncTeleBot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReactionTypeEmoji
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReactionTypeEmoji, ReplyKeyboardMarkup, KeyboardButton
 from src.ai.client import generate_ai_response
 from src.utils.crypto import encode_user_id, decode_user_id
 
@@ -8,38 +8,47 @@ from src.database.db_manager import (
     get_user_state, set_user_state, clear_user_state,
     save_message_mapping, get_anon_sender_by_msg,
     block_user, is_user_blocked, get_super_user_by_msg,
-    log_message_to_db
+    log_message_to_db, get_user_profile_stats
 )
 
 # 🔴 مدیریت کاربران و سطوح دسترسی
 GOD_ID = 6779908406          # آیدی الهه ربات (فاطمه)
 SUPER_USERS = [247768888, 6779908406] # تو و فاطمه
 
+
 def register_bot_handlers(bot: AsyncTeleBot):
     
-    # ─── ۱. مدیریت دستور /start ───
+    # ─── ۱. مدیریت دستور /start با کیبورد منوی آماده ───
     @bot.message_handler(commands=['start'])
     async def handle_start(message):
         user_id = message.chat.id
         bot_info = await bot.get_me()
         command_args = message.text.split()
         
+        # 🎛 ساخت کیبورد منوی اصلی ربات (سنجاق شده به پایین صفحه)
+        main_keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+        btn_stats = KeyboardButton("📊 آمار من")
+        # اینجا می‌توانی دکمه‌های دیگر را هم در آینده اضافه کنی، فعلاً این دکمه را می‌گذاریم:
+        main_keyboard.add(btn_stats)
+        
+        # بررسی ورود از طریق لینک ناشناس
         if len(command_args) > 1:
             target_owner_id_encoded = command_args[1]
             target_owner_id = decode_user_id(target_owner_id_encoded)
             
             if target_owner_id and user_id != target_owner_id:
                 if await is_user_blocked(owner_id=target_owner_id, blocked_id=user_id):
-                    await bot.reply_to(message, "❌ شما توسط این کاربر بلاک شده‌اید و امکان ارسال پیام ناشناس را ندارید.")
+                    await bot.reply_to(message, "❌ شما توسط این کاربر بلاک شده‌اید و امکان ارسال پیام ناشناس را ندارید.", reply_markup=main_keyboard)
                     return
                 
                 await set_user_state(user_id, f"sending_anon_to_{target_owner_id_encoded}")
-                await bot.reply_to(message, "📥 شما در حال ارسال پیام ناشناس هستید.\nمی‌توانید متن، عکس، فیلم، ویس یا صدای خود را ارسال کنید:")
+                await bot.reply_to(message, "📥 شما در حال ارسال پیام ناشناس هستید.\nمی‌توانید متن، عکس، فیلم، ویس یا صدای خود را ارسال کنید:", reply_markup=main_keyboard)
                 return
             elif not target_owner_id:
-                await bot.reply_to(message, "❌ این لینک معتبر نیست یا دستکاری شده است.")
+                await bot.reply_to(message, "❌ این لینک معتبر نیست یا دستکاری شده است.", reply_markup=main_keyboard)
                 return
 
+        # ساخت لینک انکود شده و امن
         secret_code = encode_user_id(user_id)
         anon_link = f"https://t.me/{bot_info.username}?start={secret_code}"
         
@@ -56,10 +65,11 @@ def register_bot_handlers(bot: AsyncTeleBot):
                 "👋 به ربات پیام ناشناس خوش آمدید!\n\n"
                 f"🔗 این لینک اختصاصی شماست:\n`{anon_link}`\n\n"
                 "این لینک را در بیو یا استوری خود بگذارید. هر کس روی آن کلیک کند، "
-                "می‌تواند برای شما پیام ناشناس (متنی، تصویری یا صوتی) بفرستد و شما همین‌جا پاسخشان را بدهید!"
+                "می‌تواند برای شما پیام ناشناس بفرستد و شما همین‌جا پاسخشان را بدهید!"
             )
             
-        await bot.reply_to(message, msg, parse_mode="Markdown")
+        # ارسال پیام خوش‌آمدگویی همراه با منوی دکمه‌ها
+        await bot.reply_to(message, msg, parse_mode="Markdown", reply_markup=main_keyboard)
 
     # ─── ۲.الف: مدیریت آلبوم‌ها و فایل‌های دسته‌جمعی (Media Groups) ───
     @bot.message_handler(func=lambda message: message.media_group_id is not None, content_types=['photo', 'video', 'audio'])
@@ -85,7 +95,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
             markup = InlineKeyboardMarkup()
             markup.row(
                 InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{encoded_id}"),
-                InlineKeyboardButton("🚫 بلاک", callback_data=f"block_{encoded_id}")
+                InlineKeyboardButton("⛔️ بلاک", callback_data=f"block_{encoded_id}")
             )
 
             god_intelligence = ""
@@ -176,7 +186,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
                 reply_markup = InlineKeyboardMarkup()
                 reply_markup.row(
                     InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{encoded_id}"),
-                    InlineKeyboardButton("🚫 بلاک", callback_data=f"block_{encoded_id}")
+                    InlineKeyboardButton("⛔️ بلاک", callback_data=f"block_{encoded_id}")
                 )
                 
                 try:
@@ -210,7 +220,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
         markup = InlineKeyboardMarkup()
         markup.row(
             InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{encoded_id}"),
-            InlineKeyboardButton("🚫 بلاک", callback_data=f"block_{encoded_id}")
+            InlineKeyboardButton("⛔️ بلاک", callback_data=f"block_{encoded_id}")
         )
 
         # ارسال پیام به طرف مقابل
@@ -288,7 +298,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
                 reply_markup = InlineKeyboardMarkup()
                 reply_markup.row(
                     InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{encoded_id}"),
-                    InlineKeyboardButton("🚫 بلاک", callback_data=f"block_{encoded_id}")
+                    InlineKeyboardButton("⛔️ بلاک", callback_data=f"block_{encoded_id}")
                 )
                 
                 try:
@@ -417,3 +427,25 @@ def register_bot_handlers(bot: AsyncTeleBot):
                     )
                 except Exception as e:
                     print(f"Failed to sync reaction to superuser: {e}")
+
+
+    # هندلر فعال‌سازی با پیام متنی "📊 آمار من" در پیوی ربات
+    @bot.message_handler(func=lambda message: message.text == "📊 آمار من" and message.chat.type == "private")
+    async def handle_my_stats(message):
+        user_id = message.chat.id
+        first_name = message.from_user.first_name
+        
+        # استخراج آمار زنده از دیتابیس
+        stats = await get_user_profile_stats(user_id)
+        
+        # چیدمان دقیق قالب درخواستی پدرام
+        response_text = (
+            f"📊 **آمار من**\n\n"
+            f"👤 | نام : {first_name}\n"
+            f"🪪 | ایدی : `{user_id}`\n"
+            f"✍ | تعداد پیام‌های ارسالی گروه : {stats['sent']}\n"
+            f"📬 | تعداد پیام‌های ناشناس دریافتی : {stats['received']}\n"
+            f"⛔️ | تعداد افراد بلاک شده : {stats['blocked']}"
+        )
+        
+        await bot.reply_to(message, response_text, parse_mode="Markdown")
