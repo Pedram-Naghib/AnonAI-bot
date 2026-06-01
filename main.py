@@ -9,7 +9,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from src.config import TELEGRAM_BOT_TOKEN
 from src.bot.handlers import register_bot_handlers
 from src.bot.tasks import send_daily_analytics
-from src.database.db_manager import init_db, log_message_to_db
+from src.database.db_manager import init_db
 
 USE_WEBHOOK = True
 
