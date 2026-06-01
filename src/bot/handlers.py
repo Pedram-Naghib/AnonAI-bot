@@ -197,7 +197,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
                             reply_markup=reply_markup,
                             parse_mode="HTML"
                         )
-                        await bot.reply_to(message, "🚀 پاسخت (از طریق ریپلای مستقیم) برای اون شخص فرستاده شد.")
+                        await bot.reply_to(message, "🚀 پاسخت برای اون شخص فرستاده شد.")
                         
                         # مپ کردن دیتای پیام جدید برای پینگ‌پنگ بعدی چت
                         await save_message_mapping(
@@ -352,9 +352,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
             await set_user_state(user_id, "replying_mode", reply_target_id=incoming_msg_id)
             await bot.send_message(
                 user_id, 
-                "✍️ بسیار خب، پاسخی که می‌خواهی به این شخص بدهی را بنویس و ارسال کن.\n"
-                "(هم می‌توانی مستقیماً روی پیام ناشناس دریافتی ریپلای (Reply) کنی و هم پیام بعدی‌ات را همین‌جا بفرستی؛ "
-                "در هر دو حالت پیام شما به جای هوش مصنوعی برای این شخص ارسال می‌شود)."
+                "✍️ بسیار خب، پاسخی که می‌خواهی به این شخص بدهی را بنویس و ارسال کن."
             )
         else:
             await bot.send_message(user_id, "❌ این فرستنده دیگر معتبر نیست.")
