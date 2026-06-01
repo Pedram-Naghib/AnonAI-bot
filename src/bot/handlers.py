@@ -153,24 +153,6 @@ def register_bot_handlers(bot: AsyncTeleBot):
         except Exception as e:
             print(f"❌ Error sending ID: {e}")
 
-
-    # ⚡ ۲.ب: مدیریت پیام‌های انفرادی و تکی (متن، عکس، فیلم، ویس، صدا)
-    @bot.message_handler(func=lambda message: message.media_group_id is None, content_types=['text', 'photo', 'video', 'voice', 'audio'])
-    async def handle_all_messages(message):
-        user_id = message.chat.id
-        user_text = message.text
-        encoded_id = encode_user_id(user_id)
-        
-        # 📊 مانیتورینگ طنز گروه: اگر پیام در گروه فرستاده شده و دستور نیست، مخفیانه ذخیره‌اش کن
-        if message.chat.type in ['group', 'supergroup']:
-            log_text = user_text if message.content_type == 'text' else message.caption
-            if log_text and not log_text.startswith('/'):
-                await log_message_to_db(
-                    user_id=message.from_user.id,
-                    username=message.from_user.username or "NoUsername",
-                    first_name=message.from_user.first_name,
-                    text=log_text
-                )
         
 # ⚡ ۲.ب: مدیریت پیام‌های انفرادی و تکی (متن، عکس، فیلم، ویس، صدا)
     @bot.message_handler(func=lambda message: message.media_group_id is None, content_types=['text', 'photo', 'video', 'voice', 'audio'])
