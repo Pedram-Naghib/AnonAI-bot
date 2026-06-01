@@ -36,8 +36,16 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         
         secret_code = encode_user_id(user_id)
         anon_link = f"https://t.me/{bot_info.username}?start={secret_code}"
-        msg = f"سلام ارباب فاطمه 🙇‍♂️\n🔗 لینک ناشناس شما:\n`{anon_link}`" if user_id == GOD_ID else f"👋 خوش آمدید!\n🔗 لینک اختصاصی شما:\n`{anon_link}`"
-        await bot.reply_to(message, msg, parse_mode="Markdown", reply_markup=main_keyboard)
+        
+        # 🚨 پاتک فنی: اضافه کردن f پشت استرینگ‌ها و استفاده از تگ‌های HTML به جای مارک‌داون
+        god_text = f"سلام و درود ارباب فاطمه. 🙇‍♂️\nهوش مصنوعی گوش به فرمان شماست.\n\n👁️‍🗨️ <b>دسترسی ارشد ویژه:</b>\nشما برخلاف کاربران عادی، توانایی مشاهدهٔ اطلاعات دقیق فرستندهٔ پیام‌ها را دارید.\n\n🔗 <b>لینک ناشناس ارباب:</b>\n{anon_link}"
+        
+        normal_text = f"👋 به ربات پیام ناشناس خوش آمدید!\n\n🔗 این لینک اختصاصی شماست:\n{anon_link}\n\nاین لینک را در بیو یا استوری خود بگذارید. هر کس روی آن کلیک کند، می‌تواند برای شما پیام ناشناس (متنی، تصویری یا صوتی) بفرستد و شما همین‌جا پاسخشان را بدهید!"
+        
+        msg = god_text if user_id == GOD_ID else normal_text
+        
+        # 🚨 تغییر parse_mode به HTML برای جلوگیری از کرش کردن تلگرام روی لینک‌ها
+        await bot.reply_to(message, msg, parse_mode="HTML", reply_markup=main_keyboard)
 
 
     @bot.message_handler(func=lambda m: m.text == "📊 آمار من" and m.chat.type == "private")
