@@ -163,7 +163,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
         if chat_id not in SUPER_USERS:
             return
         try:
-            text = message.text.split("/gp ")
+            text = message.text.split("/gp ")[0]
             await bot.send_message(GROUP_CHAT_ID, text, reply_markup=ReplyKeyboardRemove())
         except Exception as e:
             print(f"❌ Error sending ID: {e}")
