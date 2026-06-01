@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from src.ai.client import ai_client, types
 from src.database.db_manager import get_daily_group_logs, clean_old_logs
 from src.config import GROUP_CHAT_ID
+import re
 
 # پیکربندی لایه‌های امنیتی جمینای به صورت سراسری
 SAFETY_CONFIGS = [
@@ -18,7 +19,11 @@ ANALYTICS_INSTRUCTION = (
     "Your job is to generate the \"Daily Group Report\" with strict, funny numerical stats for EACH person.\n\n"
     "🚨 CRITICAL CONSTRAINT: Telegram has a strict character limit. Your entire response MUST be concise, punchy, and short. "
     "Keep the total output strictly UNDER 2500 characters. Do NOT write long essays for each section. Keep roasts short but lethal.\n\n"
-    "🚨 FORMAT CONSTRAINT: Do NOT use markdown bold (**) or markdown headers. You MUST use strict HTML tags like <b>تیتر</b> for headers and bold text.\n\n"
+    "🚨 HTML FORMAT CONSTRAINT:\n"
+    "- You MUST only use these safe HTML tags: <b>text</b> for bold, <i>text</i> for italic, and <code>text</code> for code blocks.\n"
+    "- Do NOT use markdown bold (**) or markdown headers (#).\n"
+    "- NEVER wrapped the response in <div>, <p>, <html>, <body> or markdown code blocks like ```html.\n"
+    "- Output raw, clean text containing only the allowed tags.\n\n"
     "Format exactly like this:\n\n"
     "1. <b>📊 گه خور ترین ها (آمار دقیق چت)</b>:\n"
     "List top users based on the ranking data. You MUST include their exact message count from the context.\n"
@@ -33,7 +38,7 @@ ANALYTICS_INSTRUCTION = (
     "Summarize the main funny drama/hot topic today in maximum 3-4 juicy, cinematic sentences.\n\n"
     "5. <b>💬 جمله برتر روز</b>:\n"
     "Quote one exact funny line, name who said it, and roast them hard.\n\n"
-    "Tone: Heavy Persian street slang (حاجی، سم., اسید، سوتون، بوی مصلحت). Be an absolute roaster, but keep it highly condensed and brief."
+    "Tone: Heavy Persian street slang (حاجی، سم، اسید، سوتون، بوی مصلحت). Be an absolute roaster, but keep it highly condensed and brief."
 )
 
 async def send_daily_analytics(bot):
@@ -99,7 +104,18 @@ async def send_daily_analytics(bot):
                 return 
 
     try:
-        report_text = response.text if (response and response.text) else "امروز آمار خالیه ستون‌ها."
+        if response and response.text:
+                # 🧼 پاتک امنیتی پایتون: پاک کردن تگ‌های اضافه و دزدکی هوش مصنوعی
+                clean_text = response.text
+                clean_text = re.sub(r'```html\s*', '', clean_text)  # حذف بلاک کد احتمالی
+                clean_text = re.sub(r'```\s*', '', clean_text)      # حذف ته بلاک کد
+                clean_text = clean_text.replace('<div>', '').replace('</div>', '')
+                clean_text = clean_text.replace('<p>', '').replace('</p>', '')
+                report_text = clean_text.strip()
+
+                # 🚨 حالا متنِ شسته و رفته را به تلگرام می‌فرستیم
+        else:
+            report_text = "امروز آمار خالیه ستون‌ها."
         
         # 🚨 ارسال مستقیم گزارش به گروه با پارس مود HTML
         await bot.send_message(chat_id=GROUP_CHAT_ID, text=report_text, parse_mode="HTML")

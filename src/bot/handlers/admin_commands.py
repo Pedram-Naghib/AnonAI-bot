@@ -4,6 +4,7 @@ from telebot.types import ReplyKeyboardRemove
 from src.config import GROUP_CHAT_ID
 from src.ai.client import ai_client, types, generate_ai_response
 from src.database.db_manager import get_daily_group_logs
+from src.bot.tasks import ANALYTICS_INSTRUCTION
 
 GOD_ID = 6779908406          
 SUPER_USERS = [247768888, 6779908406]
@@ -71,27 +72,7 @@ def register_admin_handlers(bot: AsyncTeleBot):
             formatted_logs = "".join([f"=== USER: {u} ===\n" + "".join([f"- {m}\n" for m in ms]) + "\n" for u, ms in user_chats.items()])
 
             # 🧠 ارتقای پرامپت هومبان برای جاگذاری اعداد دقیق، تخمین‌های سمی و تگ‌های HTML
-            analytics_instruction = (
-                "You are Humban, a brutally honest, highly sarcastic, and witty group analyst for a close Persian crew.\n"
-                "Your job is to generate the \"Daily Group Report\" with strict, funny numerical stats for EACH person.\n\n"
-                "🚨 CRITICAL CONSTRAINT: Output MUST be concise, punchy, and strictly UNDER 2500 characters.\n"
-                "🚨 FORMAT CONSTRAINT: Do NOT use markdown bold (**) or markdown headers. You MUST use strict HTML tags like <b>تیتر</b> for headers and bold text.\n\n"
-                "Format exactly like this:\n\n"
-                "1. <b>📊 گه خور ترین ها (آمار دقیق چت)</b>:\n"
-                "List top users based on the ranking data. You MUST include their exact message count.\n"
-                "Example: - نام (با X تا پیام): [Savage short roast]\n\n"
-                "2. <b>⌨️ کص‌دست‌ترین‌ها (آمار غلط املایی)</b>:\n"
-                "Analyze spelling/typing mistakes from logs. Exaggerate or estimate a hilarious exact number of typos they made.\n"
-                "Example: - نام (با Y تا کص‌دستی و غلط املایی): [One line roast]\n\n"
-                "3. <b>🤬 بیشعورترین‌ها (شمارش فُحش‌ها)</b>:\n"
-                "Count or creatively estimate the exact number of profanities, slangs, or rude terms they used.\n"
-                "Example: - نام (با Z تا فُحش و بددهنی): [One line roast]\n\n"
-                "4. <b>🔥 سوژه روز</b>:\n"
-                "Summarize the main funny drama in maximum 3 sentences.\n\n"
-                "5. <b>💬 جمله برتر روز</b>:\n"
-                "Quote one exact funny line, name who said it, and roast them hard.\n\n"
-                "Tone: Heavy Persian street slang (حاجی، سم، اسید، سوتون، بوی مصلحت). Be an absolute roaster, condensed and numbers-focused!"
-            )
+            analytics_instruction = ANALYTICS_INSTRUCTION
             
             full_context = f"{ranking_context}\n\nHere is the chat data:\n\n{formatted_logs}"
             safety_configs = [types.SafetySetting(category=c, threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH) for c in [types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, types.HarmCategory.HARM_CATEGORY_HARASSMENT, types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT]]
@@ -128,8 +109,16 @@ def register_admin_handlers(bot: AsyncTeleBot):
                         return
 
             if response and response.text:
-                # 🚨 ارسال خروجی با قالب HTML برای امنیت و پایداری در برابر کاراکترهای خاص
-                await bot.send_message(chat_id=message.chat.id, text=f"🧪 <b>[گزارش تست لایو هومبان]</b>\n\n{response.text}", parse_mode="HTML")
+                # 🧼 پاتک امنیتی پایتون: پاک کردن تگ‌های اضافه و دزدکی هوش مصنوعی
+                clean_text = response.text
+                clean_text = re.sub(r'```html\s*', '', clean_text)  # حذف بلاک کد احتمالی
+                clean_text = re.sub(r'```\s*', '', clean_text)      # حذف ته بلاک کد
+                clean_text = clean_text.replace('<div>', '').replace('</div>', '')
+                clean_text = clean_text.replace('<p>', '').replace('</p>', '')
+                clean_text = clean_text.strip()
+
+                # 🚨 حالا متنِ شسته و رفته را به تلگرام می‌فرستیم
+                await bot.send_message(chat_id=message.chat.id, text=f"🧪 <b>[گزارش تست لایو هومبان]</b>\n\n{clean_text}", parse_mode="HTML")
             else:
                 await bot.send_message(chat_id=message.chat.id, text="❌ خطایی در دریافت پاسخ از هوش مصنوعی رخ داد.", parse_mode="HTML")
 
