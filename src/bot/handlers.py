@@ -2,6 +2,7 @@ from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReactionTypeEmoji, ReplyKeyboardMarkup, KeyboardButton
 from src.ai.client import generate_ai_response
 from src.utils.crypto import encode_user_id, decode_user_id
+from src.config import GROUP_CHAT_ID
 
 # 📥 تزریق مستقیم توابع دیتابیس
 from src.database.db_manager import (
@@ -151,6 +152,19 @@ def register_bot_handlers(bot: AsyncTeleBot):
         response_text = f"🆔 آیدی این چت/گروه: `{chat_id}`\n"
         try:
             await bot.reply_to(message, response_text, parse_mode="Markdown")
+        except Exception as e:
+            print(f"❌ Error sending ID: {e}")
+
+
+    # ─── ۶. گرفتن آیدی عددی چت فعلی ───
+    @bot.message_handler(commands=['gp'])
+    async def handle_send_msg_to_gp(message):
+        chat_id = message.chat.id
+        if chat_id not in SUPER_USERS:
+            return
+        try:
+            text = message.text.split("/gp ")
+            await bot.send_message(GROUP_CHAT_ID, text)
         except Exception as e:
             print(f"❌ Error sending ID: {e}")
 
