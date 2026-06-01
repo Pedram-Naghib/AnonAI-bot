@@ -12,7 +12,7 @@ from src.database.db_manager import (
 )
 
 # 🔴 مدیریت کاربران و سطوح دسترسی
-GOD_ID = 6779908406          # آیدی الهه ربات (فاطمه)
+GOD_ID = 247768888          # آیدی الهه ربات (فاطمه)
 SUPER_USERS = [247768888, 6779908406] # تو و فاطمه
 
 def register_bot_handlers(bot: AsyncTeleBot):

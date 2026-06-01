@@ -2,14 +2,28 @@ import os
 import asyncpg
 from datetime import datetime, timedelta
 
-# خواندن آدرس اتصال مستقیم دیتابیس ابری سوپابیس از متغیرهای محیطی رندر
-DATABASE_URL = os.getenv("DATABASE_URL")
+# ⚙️ تنظیمات تفکیک‌شده اتصال لایو به دیتابیس سوپابیس
+DB_USER = "postgres.yismztfpjnocbeyberdj"
+DB_PASS = os.getenv("DB_PASS", "Pedramdb@310870")  # خواندن از لوکال یا سرور رندر
+DB_HOST = "aws-1-eu-central-1.pooler.supabase.com"
+DB_PORT = 5432
+DB_NAME = "postgres"
+
+async def get_connection():
+    """تابع کمکی یکپارچه برای اتصال امن بدون مشکل با کاراکترهای خاص مثل @"""
+    return await asyncpg.connect(
+        user=DB_USER,
+        password=DB_PASS,
+        host=DB_HOST,
+        port=DB_PORT,
+        database=DB_NAME
+    )
 
 async def init_db():
     """ساخت جداول مورد نیاز ربات در صورت عدم وجود در دیتابیس ابری Supabase"""
-    conn = await asyncpg.connect(DATABASE_URL)
+    conn = await get_connection()
     
-    # ۱. جدول وضعیت کاربران و ردیابی هدف‌های ریپلای (FSM) - تبدیل آیدی‌ها به BIGINT
+    # ۱. جدول وضعیت کاربران و ردیابی هدف‌های ریپلای (FSM)
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS user_states (
             user_id BIGINT PRIMARY KEY,
@@ -59,7 +73,7 @@ async def init_db():
 
 async def get_user_state(user_id: int):
     """دریافت وضعیت فعلی و آیدی هدف ریپلای برای کاربر از دیتابیس ابری"""
-    conn = await asyncpg.connect(DATABASE_URL)
+    conn = await get_connection()
     row = await conn.fetchrow(
         "SELECT state, reply_target_id FROM user_states WHERE user_id = $1", 
         user_id
@@ -71,7 +85,7 @@ async def get_user_state(user_id: int):
 
 async def set_user_state(user_id: int, state: str, reply_target_id: int = None):
     """تنظیم یا به‌روزرسانی وضعیت یک کاربر با ساختار جایگزینی همگام PostgreSQL"""
-    conn = await asyncpg.connect(DATABASE_URL)
+    conn = await get_connection()
     await conn.execute("""
         INSERT INTO user_states (user_id, state, reply_target_id)
         VALUES ($1, $2, $3)
@@ -83,7 +97,7 @@ async def set_user_state(user_id: int, state: str, reply_target_id: int = None):
 
 async def clear_user_state(user_id: int):
     """حذف وضعیت کاربر و بازگرداندن به حالت پیش‌فرض"""
-    conn = await asyncpg.connect(DATABASE_URL)
+    conn = await get_connection()
     await conn.execute("DELETE FROM user_states WHERE user_id = $1", user_id)
     await conn.close()
 
@@ -94,7 +108,7 @@ async def clear_user_state(user_id: int):
 
 async def save_message_mapping(user_chat_id: int, user_msg_id: int, anon_sender_id: int, anon_msg_id: int):
     """ذخیره ارتباط پیام دریافت شده با پیام اصلی فرستنده"""
-    conn = await asyncpg.connect(DATABASE_URL)
+    conn = await get_connection()
     await conn.execute("""
         INSERT INTO message_map (user_chat_id, user_msg_id, anon_sender_id, anon_msg_id)
         VALUES ($1, $2, $3, $4)
@@ -104,7 +118,7 @@ async def save_message_mapping(user_chat_id: int, user_msg_id: int, anon_sender_
 
 async def get_anon_sender_by_msg(user_chat_id: int, user_msg_id: int):
     """پیدا کردن اطلاعات پیام فرستنده اصلی بر اساس پیام دریافتی شما"""
-    conn = await asyncpg.connect(DATABASE_URL)
+    conn = await get_connection()
     row = await conn.fetchrow("""
         SELECT anon_sender_id, anon_msg_id 
         FROM message_map 
@@ -117,7 +131,7 @@ async def get_anon_sender_by_msg(user_chat_id: int, user_msg_id: int):
 
 async def get_super_user_by_msg(anon_sender_id: int, anon_msg_id: int):
     """پیدا کردن اطلاعات پیام صاحب لینک (سوپریوزر) بر اساس پیام شخص غریبه"""
-    conn = await asyncpg.connect(DATABASE_URL)
+    conn = await get_connection()
     row = await conn.fetchrow("""
         SELECT user_chat_id, user_msg_id 
         FROM message_map 
@@ -135,7 +149,7 @@ async def get_super_user_by_msg(anon_sender_id: int, anon_msg_id: int):
 
 async def block_user(owner_id: int, blocked_id: int):
     """بلاک کردن دائمی یک کاربر ناشناس توسط صاحب لینک"""
-    conn = await asyncpg.connect(DATABASE_URL)
+    conn = await get_connection()
     await conn.execute("""
         INSERT INTO block_list (owner_id, blocked_id)
         VALUES ($1, $2)
@@ -145,7 +159,7 @@ async def block_user(owner_id: int, blocked_id: int):
 
 async def is_user_blocked(owner_id: int, blocked_id: int) -> bool:
     """بررسی وضعیت بلاک بودن فرستنده ناشناس"""
-    conn = await asyncpg.connect(DATABASE_URL)
+    conn = await get_connection()
     row = await conn.fetchrow("""
         SELECT 1 FROM block_list 
         WHERE owner_id = $1 AND blocked_id = $2
@@ -160,7 +174,7 @@ async def is_user_blocked(owner_id: int, blocked_id: int) -> bool:
 
 async def log_message_to_db(user_id: int, username: str, first_name: str, text: str):
     """ذخیره ناهمگام چت‌های عادی اعضای گروه درون جدول دیتابیس ابری"""
-    conn = await asyncpg.connect(DATABASE_URL)
+    conn = await get_connection()
     await conn.execute(
         "INSERT INTO group_logs (user_id, username, first_name, message_text, timestamp) VALUES ($1, $2, $3, $4, $5)",
         user_id, username, first_name, text, datetime.now()
@@ -170,19 +184,18 @@ async def log_message_to_db(user_id: int, username: str, first_name: str, text: 
 async def get_daily_group_logs():
     """استخراج ناهمگام پیام‌های ۲۴ ساعت گذشته گروه بر اساس فرمت زمان بومی"""
     one_day_ago = datetime.now() - timedelta(days=1)
-    conn = await asyncpg.connect(DATABASE_URL)
+    conn = await get_connection()
     rows = await conn.fetch("""
         SELECT first_name, username, message_text 
         FROM group_logs 
         WHERE timestamp > $1
     """, one_day_ago)
     await conn.close()
-    # تبدیل به فرمت لیست از چندجمله‌ای‌ها (Tuple) جهت همگام‌سازی با بخش‌های قبلی برنامه
     return [(r['first_name'], r['username'], r['message_text']) for r in rows]
 
 async def clean_old_logs():
     """حذف اتوماتیک پیام‌های قدیمی گروه برای بهینه‌سازی حجم دیتابیس رایگان Supabase"""
     two_days_ago = datetime.now() - timedelta(days=2)
-    conn = await asyncpg.connect(DATABASE_URL)
+    conn = await get_connection()
     await conn.execute("DELETE FROM group_logs WHERE timestamp < $1", two_days_ago)
     await conn.close()
