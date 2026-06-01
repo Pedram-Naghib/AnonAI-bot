@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 # ⚙️ تنظیمات تفکیک‌شده اتصال لایو به دیتابیس سوپابیس
 DB_USER = "postgres.yismztfpjnocbeyberdj"
-DB_PASS = os.getenv("DB_PASS", "Pedramdb@310870")  # خواندن از لوکال یا سرور رندر
+DB_PASS = os.getenv("DB_PASS")  # خواندن از لوکال یا سرور رندر
 DB_HOST = "aws-1-eu-central-1.pooler.supabase.com"
 DB_PORT = 5432
 DB_NAME = "postgres"
