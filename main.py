@@ -47,7 +47,7 @@ async def start_bot():
     # ⏰ ۳. تنظیم اسکجولر گزارش ۲۴ ساعته با تزریق اِونت لوپ جاری
     # این کار مانع از کرش کردن متد ارسال پیام ربات در بک‌آند می‌شود
     current_loop = asyncio.get_running_loop()
-    scheduler = AsyncIOScheduler(event_loop=current_loop)
+    scheduler = AsyncIOScheduler()
     scheduler.add_job(send_daily_analytics, 'cron', hour=23, minute=30, args=[bot])
     scheduler.start()
     print("Base Analytics scheduler started...")
