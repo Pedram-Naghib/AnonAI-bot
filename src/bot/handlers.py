@@ -154,14 +154,14 @@ def register_bot_handlers(bot: AsyncTeleBot):
             print(f"❌ Error sending ID: {e}")
 
         
-# ⚡ ۲.ب: مدیریت پیام‌های انفرادی و تکی (متن، عکس، فیلم، ویس، صدا)
+# ⚡ ۲.ب: مدیریت پیام‌های انفرادی و تکی (متن، عکس، فیلم، ویس، صدا) - نسخه نهایی اصلاح شده
     @bot.message_handler(func=lambda message: message.media_group_id is None, content_types=['text', 'photo', 'video', 'voice', 'audio'])
     async def handle_all_messages(message):
         user_id = message.chat.id
         user_text = message.text
         encoded_id = encode_user_id(user_id)
         
-        # 📊 مانیتورینگ طنز گروه: اگر پیام در گروه فرستاده شده و دستور نیست، مخفیانه ذخیره‌اش کن
+        # 📊 ۱. مانیتورینگ طنز گروه: اگر پیام در گروه فرستاده شده، آن را ذخیره کن و خارج شو
         if message.chat.type in ['group', 'supergroup']:
             log_text = user_text if message.content_type == 'text' else message.caption
             if log_text and not log_text.startswith('/'):
@@ -171,34 +171,49 @@ def register_bot_handlers(bot: AsyncTeleBot):
                     first_name=message.from_user.first_name,
                     text=log_text
                 )
-        
-        # 🚀 سناریو پاسخ از طریق ریپلای مستقیم (Native Reply) - فعال برای همه در چت خصوصی
+            return 
+
+        # 🚀 ۲. سناریو پاسخ از طریق ریپلای مستقیم (Native Reply) - فعال برای همه در پیوی
         if message.chat.type == 'private' and message.reply_to_message:
             replied_msg_id = message.reply_to_message.message_id
             mapping = await get_anon_sender_by_msg(user_chat_id=user_id, user_msg_id=replied_msg_id)
             
             if mapping:
                 anon_sender_id, anon_msg_id = mapping  
+                
+                # ساخت کیبورد شیشه‌ای پاسخ برای طرف مقابل تا لوپ چت قطع نشود
+                reply_markup = InlineKeyboardMarkup()
+                reply_markup.row(
+                    InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{encoded_id}"),
+                    InlineKeyboardButton("🚫 بلاک", callback_data=f"block_{encoded_id}")
+                )
+                
                 try:
                     if message.content_type == 'text':
                         sent_reply = await bot.send_message(
                             anon_sender_id, 
                             f"📩 یک پاسخ از ناشناس شما دریافت شد:\n\n« {user_text} »",
-                            reply_to_message_id=anon_msg_id
+                            reply_to_message_id=anon_msg_id,
+                            reply_markup=reply_markup,
+                            parse_mode="HTML"
                         )
                         await bot.reply_to(message, "🚀 پاسخت (از طریق ریپلای مستقیم) برای اون شخص فرستاده شد.")
+                        
+                        # مپ کردن دیتای پیام جدید برای پینگ‌پنگ بعدی چت
                         await save_message_mapping(
-                            user_chat_id=user_id,
-                            user_msg_id=message.message_id,
-                            anon_sender_id=anon_sender_id,
-                            anon_msg_id=sent_reply.message_id
+                            user_chat_id=anon_sender_id,
+                            user_msg_id=sent_reply.message_id,
+                            anon_sender_id=user_id,
+                            anon_msg_id=message.message_id
                         )
                     else:
                         await bot.reply_to(message, "⚠️ در حالت ریپلای مستقیم، فقط می‌توانید پیام متنی ارسال کنید.")
-                except Exception:
+                except Exception as e:
+                    print(f"Error in native reply routing: {e}")
                     await bot.reply_to(message, "❌ ارسال پاسخ ناموفق بود. کاربر ربات را بلاک کرده.")
                 return
 
+        # 🕵️‍♂️ ۳. پردازش جریان اصلی چت ناشناس (ورود با لینک یا وضعیت‌های دکمه)
         current_state, reply_target_id = await get_user_state(user_id)
         
         markup = InlineKeyboardMarkup()
@@ -207,7 +222,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
             InlineKeyboardButton("🚫 بلاک", callback_data=f"block_{encoded_id}")
         )
 
-        # --- سناریو الف: یک غریبه در حال ارسال فایل یا متن ناشناس به شماست (HTML شده) ---
+        # --- سناریو الف: یک غریبه در حال ارسال فایل یا متن ناشناس به شماست ---
         if current_state.startswith("sending_anon_to_"):
             target_id = decode_user_id(current_state.split("_")[-1])
             anon_caption = f"« {message.caption} »\n\n" if message.caption else ""
@@ -275,23 +290,36 @@ def register_bot_handlers(bot: AsyncTeleBot):
             
             if mapping:
                 anon_sender_id, anon_msg_id = mapping
+                
+                # ساخت کیبورد شیشه‌ای پاسخ برای طرف مقابل
+                reply_markup = InlineKeyboardMarkup()
+                reply_markup.row(
+                    InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{encoded_id}"),
+                    InlineKeyboardButton("🚫 بلاک", callback_data=f"block_{encoded_id}")
+                )
+                
                 try:
                     if message.content_type == 'text':
                         sent_reply = await bot.send_message(
                             anon_sender_id, 
                             f"📩 یک پاسخ از ناشناس شما دریافت شد:\n\n« {user_text} »",
-                            reply_to_message_id=anon_msg_id
+                            reply_to_message_id=anon_msg_id,
+                            reply_markup=reply_markup,
+                            parse_mode="HTML"
                         )
                         await bot.reply_to(message, "🚀 پاسخت برای اون شخص فرستاده شد.")
+                        
+                        # مپ کردن برعکس دیتا جهت تداوم پینگ‌پنگی چت
                         await save_message_mapping(
-                            user_chat_id=user_id,
-                            user_msg_id=message.message_id,
-                            anon_sender_id=anon_sender_id,
-                            anon_msg_id=sent_reply.message_id
+                            user_chat_id=anon_sender_id,
+                            user_msg_id=sent_reply.message_id,
+                            anon_sender_id=user_id,
+                            anon_msg_id=message.message_id
                         )
                     else:
                         await bot.reply_to(message, "⚠️ از طریق وضعیت دکمه فقط می‌توانید پاسخ متنی بفرستید.")
-                except Exception:
+                except Exception as e:
+                    print(f"Error in inline button reply routing: {e}")
                     await bot.reply_to(message, "❌ ارسال پاسخ ناموفق بود. کاربر ربات را بلاک کرده.")
             else:
                 await bot.reply_to(message, "❌ خطا: پیام متناظر این دکمه در دیتابیس یافت نشد.")
