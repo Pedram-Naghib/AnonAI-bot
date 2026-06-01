@@ -172,8 +172,26 @@ def register_bot_handlers(bot: AsyncTeleBot):
                     text=log_text
                 )
         
-        # سناریو پاسخ از طریق ریپلای مستقیم (Native Reply) روی خود پیام دریافتی
-        if user_id in SUPER_USERS and message.reply_to_message:
+# ⚡ ۲.ب: مدیریت پیام‌های انفرادی و تکی (متن، عکس، فیلم، ویس، صدا)
+    @bot.message_handler(func=lambda message: message.media_group_id is None, content_types=['text', 'photo', 'video', 'voice', 'audio'])
+    async def handle_all_messages(message):
+        user_id = message.chat.id
+        user_text = message.text
+        encoded_id = encode_user_id(user_id)
+        
+        # 📊 مانیتورینگ طنز گروه: اگر پیام در گروه فرستاده شده و دستور نیست، مخفیانه ذخیره‌اش کن
+        if message.chat.type in ['group', 'supergroup']:
+            log_text = user_text if message.content_type == 'text' else message.caption
+            if log_text and not log_text.startswith('/'):
+                await log_message_to_db(
+                    user_id=message.from_user.id,
+                    username=message.from_user.username or "NoUsername",
+                    first_name=message.from_user.first_name,
+                    text=log_text
+                )
+        
+        # 🚀 سناریو پاسخ از طریق ریپلای مستقیم (Native Reply) - فعال برای همه در چت خصوصی
+        if message.chat.type == 'private' and message.reply_to_message:
             replied_msg_id = message.reply_to_message.message_id
             mapping = await get_anon_sender_by_msg(user_chat_id=user_id, user_msg_id=replied_msg_id)
             
@@ -186,7 +204,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
                             f"📩 یک پاسخ از ناشناس شما دریافت شد:\n\n« {user_text} »",
                             reply_to_message_id=anon_msg_id
                         )
-                        await bot.reply_to(message, "🚀 پاسخت (از طریق ریپلای) برای اون شخص فرستاده شد.")
+                        await bot.reply_to(message, "🚀 پاسخت (از طریق ریپلای مستقیم) برای اون شخص فرستاده شد.")
                         await save_message_mapping(
                             user_chat_id=user_id,
                             user_msg_id=message.message_id,
@@ -197,7 +215,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
                         await bot.reply_to(message, "⚠️ در حالت ریپلای مستقیم، فقط می‌توانید پیام متنی ارسال کنید.")
                 except Exception:
                     await bot.reply_to(message, "❌ ارسال پاسخ ناموفق بود. کاربر ربات را بلاک کرده.")
-                return 
+                return
 
         current_state, reply_target_id = await get_user_state(user_id)
         
@@ -255,7 +273,7 @@ def register_bot_handlers(bot: AsyncTeleBot):
                     sent_msg = await bot.send_audio(target_id, message.audio.file_id, caption=caption_text, reply_markup=markup, parse_mode="HTML")
 
                 if sent_msg:
-                    await bot.reply_to(message, "✅ پیام ناشناس شما (همراه با فایل) با موفقیت و کاملاً مخفیانه ارسال شد.")
+                    await bot.reply_to(message, "✅ پیام ناشناس شما با موفقیت ارسال شد.")
                     await save_message_mapping(
                         user_chat_id=target_id,
                         user_msg_id=sent_msg.message_id,
