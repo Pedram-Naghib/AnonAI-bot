@@ -51,7 +51,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
     @bot.message_handler(func=lambda m: m.text == "📊 آمار من" and m.chat.type == "private")
     async def handle_my_stats(message):
         stats = await get_user_profile_stats(message.chat.id)
-        response_text = f"📊 **آمار من**\n\n👤 | نام : {message.from_user.first_name}\n🪪 | ایدی : `{message.chat.id}`\n✍ | ارسال گروه : {stats['sent']}\n📬 | ناشناس دریافتی : {stats['received']}\n⛔️ | بلاک شده‌ها : {stats['blocked']}"
+        response_text = f"📊 **آمار من**\n\n👤 | نام : {message.from_user.first_name}\n🪪 | ایدی : `{message.chat.id}`\n✍ | ناشناس دریافتی : {stats['received']}\n⛔️ | بلاک شده‌ها : {stats['blocked']}"
         await bot.reply_to(message, response_text, parse_mode="Markdown")
 
     # ─── پردازش پینگ‌پنگی چت ناشناس در پیوی ───
