@@ -155,3 +155,33 @@ async def is_user_blocked(owner_id: int, blocked_id: int) -> bool:
     """, owner_id, blocked_id)
     await conn.close()
     return row is not None
+
+
+
+
+async def get_user_profile_stats(user_id: int) -> dict:
+    """محاسبه و دریافت آمار دقیق پروفایل چت ناشناس و گروه برای یک کاربر"""
+    conn = await get_connection()
+    
+    # ۱. تعداد کدهای ارسالی در گروه خودتان (۲۴ ساعت گذشته)
+    sent_group_msgs = await conn.fetchval(
+        "SELECT COUNT(*) FROM group_logs WHERE user_id = $1", user_id
+    )
+    
+    # ۲. تعداد پیام‌های ناشناسی که بقیه به لینک این کاربر فرستاده‌اند (دریافتی‌ها)
+    received_anon_msgs = await conn.fetchval(
+        "SELECT COUNT(*) FROM message_map WHERE user_chat_id = $1", user_id
+    )
+    
+    # ۳. تعداد افرادی که این کاربر آن‌ها را بلاک کرده است
+    blocked_count = await conn.fetchval(
+        "SELECT COUNT(*) FROM block_list WHERE owner_id = $1", user_id
+    )
+    
+    await conn.close()
+    
+    return {
+        "sent": sent_group_msgs,
+        "received": received_anon_msgs,
+        "blocked": blocked_count
+    }
