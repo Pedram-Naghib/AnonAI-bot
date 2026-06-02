@@ -2,7 +2,6 @@ import re
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import ReplyKeyboardRemove
 from src.config import GROUP_CHAT_ID
-from src.ai.client import ai_client, types, generate_ai_response
 from src.database.db_manager import get_daily_group_logs
 
 GOD_ID = 6779908406          
@@ -39,10 +38,3 @@ def register_admin_handlers(bot: AsyncTeleBot):
                 await bot.reply_to(message, f"🎯 روی پیام `{reply_to_msg_id}` ریپلای شد!")
         except Exception as e:
             print(f"❌ Error in link auto-reply: {e}")
-
-    # چت مستقیم با AI در پیوی ادمین‌ها
-    @bot.message_handler(func=lambda m: m.chat.type == "private" and m.chat.id in SUPER_USERS and m.text and not m.text.startswith('/') and m.text not in KEYBOARD_BOTTUNS)
-    async def handle_admin_ai_chat(message):
-        await bot.send_chat_action(message.chat.id, action="typing")
-        ai_reply = await generate_ai_response(message.text, is_god=(message.chat.id == GOD_ID))
-        await bot.reply_to(message, ai_reply)
