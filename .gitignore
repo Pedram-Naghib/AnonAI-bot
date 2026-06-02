@@ -5,6 +5,7 @@
 *.env
 token.json
 secrets.json
+.gitignore
 
 # 🗄️ فایل دیتابیس لوکال شما (نباید آپلود شود تا دیتابیس سرور خام بماند)
 *.db
@@ -33,6 +34,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+test.py # file test
 
 # 💻 پوشه‌های محیط مجازی (Virtual Environment)
 venv/

@@ -52,17 +52,6 @@ async def init_db():
         )
     """)
     
-    # 📊 ۴. جدول مانیتورینگ طنز رفتارهای اعضا (سیستم آنالیز ۲۴ ساعته)
-    await conn.execute("""
-        CREATE TABLE IF NOT EXISTS group_logs (
-            user_id BIGINT,
-            username TEXT,
-            first_name TEXT,
-            message_text TEXT,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
     await conn.close()
     print("🚀 All Supabase tables initialized successfully.")
 
@@ -166,65 +155,3 @@ async def is_user_blocked(owner_id: int, blocked_id: int) -> bool:
     """, owner_id, blocked_id)
     await conn.close()
     return row is not None
-
-
-# ────────────────────────────────────────────────────────
-# 📊 سیستم مانیتورینگ طنز رفتارهای اعضا (PostgreSQL Cloud Compatible)
-# ────────────────────────────────────────────────────────
-
-async def log_message_to_db(user_id: int, username: str, first_name: str, text: str):
-    """ذخیره ناهمگام چت‌های عادی اعضای گروه درون جدول دیتابیس ابری"""
-    conn = await get_connection()
-    await conn.execute(
-        "INSERT INTO group_logs (user_id, username, first_name, message_text, timestamp) VALUES ($1, $2, $3, $4, $5)",
-        user_id, username, first_name, text, datetime.now()
-    )
-    await conn.close()
-
-async def get_daily_group_logs():
-    """استخراج ناهمگام پیام‌های ۲۴ ساعت گذشته گروه بر اساس فرمت زمان بومی"""
-    one_day_ago = datetime.now() - timedelta(days=1)
-    conn = await get_connection()
-    rows = await conn.fetch("""
-        SELECT first_name, username, message_text 
-        FROM group_logs 
-        WHERE timestamp > $1
-    """, one_day_ago)
-    await conn.close()
-    return [(r['first_name'], r['username'], r['message_text']) for r in rows]
-
-async def clean_old_logs():
-    """حذف اتوماتیک پیام‌های قدیمی گروه برای بهینه‌سازی حجم دیتابیس رایگان Supabase"""
-    two_days_ago = datetime.now() - timedelta(days=2)
-    conn = await get_connection()
-    await conn.execute("DELETE FROM group_logs WHERE timestamp < $1", two_days_ago)
-    await conn.close()
-
-
-
-async def get_user_profile_stats(user_id: int) -> dict:
-    """محاسبه و دریافت آمار دقیق پروفایل چت ناشناس و گروه برای یک کاربر"""
-    conn = await get_connection()
-    
-    # ۱. تعداد کدهای ارسالی در گروه خودتان (۲۴ ساعت گذشته)
-    sent_group_msgs = await conn.fetchval(
-        "SELECT COUNT(*) FROM group_logs WHERE user_id = $1", user_id
-    )
-    
-    # ۲. تعداد پیام‌های ناشناسی که بقیه به لینک این کاربر فرستاده‌اند (دریافتی‌ها)
-    received_anon_msgs = await conn.fetchval(
-        "SELECT COUNT(*) FROM message_map WHERE user_chat_id = $1", user_id
-    )
-    
-    # ۳. تعداد افرادی که این کاربر آن‌ها را بلاک کرده است
-    blocked_count = await conn.fetchval(
-        "SELECT COUNT(*) FROM block_list WHERE owner_id = $1", user_id
-    )
-    
-    await conn.close()
-    
-    return {
-        "sent": sent_group_msgs,
-        "received": received_anon_msgs,
-        "blocked": blocked_count
-    }

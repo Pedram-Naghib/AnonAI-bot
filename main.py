@@ -8,7 +8,6 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from src.config import TELEGRAM_BOT_TOKEN
 from src.bot.handlers import register_bot_handlers
-from src.bot.tasks import send_daily_analytics
 from src.database.db_manager import init_db
 
 # 🎛 تنظیمات ران شدن (روی سیستم خودت False بگذار، روی سرور رندر True)
@@ -46,11 +45,11 @@ async def start_bot():
     
     # ⏰ ۳. تنظیم اسکجولر گزارش ۲۴ ساعته با تزریق اِونت لوپ جاری
     # این کار مانع از کرش کردن متد ارسال پیام ربات در بک‌آند می‌شود
-    current_loop = asyncio.get_running_loop()
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(send_daily_analytics, 'cron', hour=23, minute=30, args=[bot])
-    scheduler.start()
-    print("Base Analytics scheduler started...")
+    # current_loop = asyncio.get_running_loop()
+    # scheduler = AsyncIOScheduler()
+    # scheduler.add_job(send_daily_analytics, 'cron', hour=23, minute=30, args=[bot])
+    # scheduler.start()
+    # print("Base Analytics scheduler started...")
     
     # ۴. انتخاب مسیر ران کردن (وب‌هوک یا پولینگ)
     if USE_WEBHOOK:
