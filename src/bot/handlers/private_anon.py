@@ -12,7 +12,6 @@ GOD_ID = 6779908406
 
 def register_private_anon_handlers(bot: AsyncTeleBot):
 
-    # 🚀 پاتک فنی: ثبت‌نام و آپدیت خودکار هویتی کاربران در جدول مرجع users
     @bot.message_handler(commands=['start'])
     async def handle_start(message):
         if message.chat.type != "private": return
@@ -20,7 +19,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         command_args = message.text.split()
         user_id = message.chat.id
         
-        # ثبت یا آپدیت هویت کاربر در دیتابیس متمرکز
         await register_or_update_user(user_id, message.from_user.first_name, message.from_user.username)
         
         main_keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
@@ -48,7 +46,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         await bot.reply_to(message, msg, parse_mode="HTML", reply_markup=main_keyboard)
 
 
-    # 📊 نمایش پروفایل بیزینسی، موجودی سکه و امتیاز آنتی‌ترول با قالب قفل‌شکسته HTML
     @bot.message_handler(func=lambda m: m.text == "📊 آمار من" and m.chat.type == "private")
     async def handle_my_stats(message):
         stats = await get_user_profile_stats(message.chat.id)
@@ -64,7 +61,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         await bot.reply_to(message, response_text, parse_mode="HTML")
 
 
-    # ─── پردازش پینگ‌پنگی چت ناشناس در پیوی (مجهز به سپر دفاعی کامندها) ───
+    # ─── پردازش پینگ‌پنگی چت ناشناس در پیوی (پچ جامع کپی انواع مدیا) ───
     @bot.message_handler(
         content_types=['text', 'photo', 'video', 'voice', 'audio'], 
         func=lambda m: m.chat.type == "private" and (m.text is None or not m.text.startswith('/')) and m.text != "📊 آمار من"
@@ -90,17 +87,32 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         if current_state.startswith("sending_anon_to_"):
             target_id = decode_user_id(current_state.split("_")[-1])
             markup = InlineKeyboardMarkup().row(InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{encoded_id}"), InlineKeyboardButton("⛔️ بلاک", callback_data=f"block_{encoded_id}"))
+            
+            # اگر مقصد ادمین ارشد بود اطلاعات فرستنده چسبانده شود
             god_intel = f"👁️‍🗨️ <b>فرستنده برای الهه:</b>\n👤 {message.from_user.first_name}\n🆔 @{message.from_user.username or 'No'}\n───\n\n" if target_id == GOD_ID else ""
             
-            sent_msg = None
-            if message.content_type == 'text':
-                sent_msg = await bot.send_message(target_id, f"{god_intel}📣 پیام ناشناس جدید:\n💬 <code>{message.text}</code>", reply_markup=markup, parse_mode="HTML")
-            elif message.content_type == 'photo':
-                sent_msg = await bot.send_photo(target_id, message.photo[-1].file_id, caption=f"{god_intel}📣 پیام ناشناس تصویری", reply_markup=markup, parse_mode="HTML")
+            try:
+                # پاتک قدرتمند copy_message: هر نوع متون یا رسانه‌ای را عینا منتقل می‌کند
+                if message.content_type == 'text':
+                    sent_msg = await bot.send_message(target_id, f"{god_intel}📣 پیام ناشناس جدید:\n💬 <code>{message.text}</code>", reply_markup=markup, parse_mode="HTML")
+                else:
+                    # برای مدیاها از متد کپی نیتیو استفاده می‌کنیم
+                    sent_msg = await bot.copy_message(
+                        chat_id=target_id,
+                        from_chat_id=user_id,
+                        message_id=message.message_id,
+                        caption=f"{god_intel}📣 پیام ناشناس جدید (رسانه)\n" + (message.caption or ""),
+                        reply_markup=markup,
+                        parse_mode="HTML"
+                    )
+                
+                if sent_msg:
+                    await bot.reply_to(message, "✅ مخفیانه ارسال شد.")
+                    await save_message_mapping(target_id, sent_msg.message_id, user_id, message.message_id)
+            except Exception as e:
+                print(f"❌ Error forwarding anon message: {e}")
+                await bot.reply_to(message, "❌ خطا در ارسال پیام. ممکن است ربات توسط کاربر مقصد بلاک شده باشد.")
             
-            if sent_msg:
-                await bot.reply_to(message, "✅ مخفیانه ارسال شد.")
-                await save_message_mapping(target_id, sent_msg.message_id, user_id, message.message_id)
             await clear_user_state(user_id)
             return
 
@@ -115,7 +127,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             await set_user_state(user_id, "normal")
 
 
-    # ─── کالبک دکمه‌های شیشه‌ای پاسخ و بلاک (سینک با ساختار HTML) ───
     @bot.callback_query_handler(func=lambda c: c.data.startswith("reply_to_"))
     async def handle_reply_callback(call):
         if decode_user_id(call.data.split("reply_to_")[-1]):
@@ -129,8 +140,15 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         if anon_id:
             await block_user(owner_id=call.message.chat.id, blocked_id=anon_id)
             await bot.answer_callback_query(call.id, "بلاک شد! 🛑")
-            updated = f"{call.message.text or call.message.caption}\n\n❌ <b>این فرستنده بلاک شد.</b>"
-            if call.message.text: 
-                await bot.edit_message_text(updated, call.message.chat.id, call.message.message_id, parse_mode="HTML")
-            else: 
-                await bot.edit_message_caption(updated, call.message.chat.id, call.message.message_id, parse_mode="HTML")
+            
+            # پچ رفع ارور TypeError دکمه بلاک روی عکس‌ها
+            base_text = call.message.text if call.message.text else (call.message.caption or "پیام رسانه‌ای")
+            updated = f"{base_text}\n\n❌ <b>این فرستنده بلاک شد.</b>"
+            
+            try:
+                if call.message.text: 
+                    await bot.edit_message_text(updated, call.message.chat.id, call.message.message_id, parse_mode="HTML")
+                else: 
+                    await bot.edit_message_caption(updated, call.message.chat.id, call.message.message_id, parse_mode="HTML")
+            except Exception:
+                pass
