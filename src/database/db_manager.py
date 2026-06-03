@@ -10,7 +10,7 @@ DB_PORT = 5432
 DB_NAME = "postgres"
 
 async def get_connection():
-    """تابع کمکی یکپارچه برای اتصال امن بدون مشکل با کاراکترهای خاص مثل @"""
+    """تابع کمکی یکپارچه برای اتصال امن بدون مشکل با کاراکترهای خاص"""
     return await asyncpg.connect(
         user=DB_USER,
         password=DB_PASS,
@@ -20,19 +20,35 @@ async def get_connection():
     )
 
 async def init_db():
-    """ساخت جداول مورد نیاز ربات در صورت عدم وجود در دیتابیس ابری Supabase"""
+    """ساخت جداول مینی‌مال و متمرکز ربات در صورت عدم وجود در دیتابیس ابری Supabase"""
     conn = await get_connection()
     
-    # ۱. جدول وضعیت کاربران و ردیابی هدف‌های ریپلای (FSM)
+    # ۱. جدول جامع و متمرکز کاربران (ادغام اطلاعات هویتی، ماشین وضعیت FSM و اقتصاد سکه)
     await conn.execute("""
-        CREATE TABLE IF NOT EXISTS user_states (
+        CREATE TABLE IF NOT EXISTS users (
             user_id BIGINT PRIMARY KEY,
-            state TEXT,
-            reply_target_id BIGINT
+            first_name TEXT,
+            username TEXT,
+            anon_state TEXT DEFAULT 'normal',
+            reply_target_id BIGINT DEFAULT NULL,
+            coins BIGINT DEFAULT 10,
+            rating FLOAT DEFAULT 5.0,
+            rating_count INT DEFAULT 0,
+            chat_status TEXT DEFAULT 'idle',
+            active_partner_id BIGINT DEFAULT NULL,
+            queue_joined_at TIMESTAMPTZ DEFAULT NULL,
+            last_compensation_at TIMESTAMPTZ DEFAULT NULL,
+            joined_at TIMESTAMPTZ DEFAULT NOW()
         )
     """)
     
-    # ۲. جدول نگاشت پیام‌ها برای انتقال ری‌آکشن‌ها
+    # ساخت ایندکس بهینه برای جستجوی فوق سریع در صف چت تصادفی
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_matchmaking_core 
+        ON users (chat_status, rating DESC, queue_joined_at)
+    """)
+    
+    # ۲. جدول نگاشت پیام‌ها برای انتقال پینگ‌پنگی چت ناشناس
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS message_map (
             user_chat_id BIGINT,
@@ -53,41 +69,57 @@ async def init_db():
     """)
     
     await conn.close()
-    print("🚀 All Supabase tables initialized successfully.")
+    print("🚀 All Unified Supabase tables initialized successfully.")
 
 
 # ────────────────────────────────────────────────────────
-# ⚙️ توابع مدیریت وضعیت کاربران (User States)
+# 👤 توابع مدیریت هویت و وضعیت کاربران (User Core & FSM)
 # ────────────────────────────────────────────────────────
+
+async def register_or_update_user(user_id: int, first_name: str, username: str):
+    """ثبت‌نام اولیه یا به‌روزرسانی اطلاعات هویتی کاربر در جدول مرجع"""
+    conn = await get_connection()
+    await conn.execute("""
+        INSERT INTO users (user_id, first_name, username)
+        VALUES ($1, $2, $3)
+        ON CONFLICT(user_id) DO UPDATE SET 
+            first_name = EXCLUDED.first_name, 
+            username = EXCLUDED.username
+    """, user_id, first_name, username)
+    await conn.close()
 
 async def get_user_state(user_id: int):
-    """دریافت وضعیت فعلی و آیدی هدف ریپلای برای کاربر از دیتابیس ابری"""
+    """دریافت وضعیت فعلی اف‌اس‌ام چت ناشناس و آیدی هدف ریپلای از جدول جامع users"""
     conn = await get_connection()
     row = await conn.fetchrow(
-        "SELECT state, reply_target_id FROM user_states WHERE user_id = $1", 
+        "SELECT anon_state, reply_target_id FROM users WHERE user_id = $1", 
         user_id
     )
     await conn.close()
     if row:
-        return row['state'], row['reply_target_id']
+        return row['anon_state'], row['reply_target_id']
     return "normal", None
 
 async def set_user_state(user_id: int, state: str, reply_target_id: int = None):
-    """تنظیم یا به‌روزرسانی وضعیت یک کاربر با ساختار جایگزینی همگام PostgreSQL"""
+    """تنظیم یا به‌روزرسانی وضعیت اف‌اس‌ام کاربر با ساختار اتمیک UPSERT"""
     conn = await get_connection()
     await conn.execute("""
-        INSERT INTO user_states (user_id, state, reply_target_id)
+        INSERT INTO users (user_id, anon_state, reply_target_id)
         VALUES ($1, $2, $3)
         ON CONFLICT(user_id) DO UPDATE SET 
-            state = EXCLUDED.state, 
+            anon_state = EXCLUDED.anon_state, 
             reply_target_id = EXCLUDED.reply_target_id
     """, user_id, state, reply_target_id)
     await conn.close()
 
 async def clear_user_state(user_id: int):
-    """حذف وضعیت کاربر و بازگرداندن به حالت پیش‌فرض"""
+    """بازگرداندن وضعیت چت ناشناس کاربر به حالت پیش‌فرض بدون حذف اکانت و سکه‌ها"""
     conn = await get_connection()
-    await conn.execute("DELETE FROM user_states WHERE user_id = $1", user_id)
+    await conn.execute("""
+        UPDATE users 
+        SET anon_state = 'normal', reply_target_id = NULL 
+        WHERE user_id = $1
+    """, user_id)
     await conn.close()
 
 
@@ -157,16 +189,20 @@ async def is_user_blocked(owner_id: int, blocked_id: int) -> bool:
     return row is not None
 
 
-
+# ────────────────────────────────────────────────────────
+# 📊 توابع محاسباتی و آمار پروفایل (Profile Stats)
+# ────────────────────────────────────────────────────────
 
 async def get_user_profile_stats(user_id: int) -> dict:
-    """محاسبه و دریافت آمار دقیق پروفایل چت ناشناس و گروه برای یک کاربر"""
+    """دریافت آمار دقیق هویتی، موجودی اقتصادی و چت ناشناس کاربر"""
     conn = await get_connection()
     
-    # ۱. تعداد کدهای ارسالی در گروه خودتان (۲۴ ساعت گذشته)
-    sent_group_msgs = await conn.fetchval(
-        "SELECT COUNT(*) FROM group_logs WHERE user_id = $1", user_id
+    # ۱. دریافت دارایی‌ها (سکه و امتیاز) از جدول مرکزی users
+    user_info = await conn.fetchrow(
+        "SELECT coins, rating FROM users WHERE user_id = $1", user_id
     )
+    coins = user_info['coins'] if user_info else 10
+    rating = user_info['rating'] if user_info else 5.0
     
     # ۲. تعداد پیام‌های ناشناسی که بقیه به لینک این کاربر فرستاده‌اند (دریافتی‌ها)
     received_anon_msgs = await conn.fetchval(
@@ -181,7 +217,8 @@ async def get_user_profile_stats(user_id: int) -> dict:
     await conn.close()
     
     return {
-        "sent": sent_group_msgs,
+        "coins": coins,
+        "rating": rating,
         "received": received_anon_msgs,
         "blocked": blocked_count
     }

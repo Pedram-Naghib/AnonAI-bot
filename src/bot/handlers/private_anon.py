@@ -1,8 +1,9 @@
+import re
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from src.utils.crypto import encode_user_id, decode_user_id
 from src.database.db_manager import (
-    get_user_state, set_user_state, clear_user_state,
+    register_or_update_user, get_user_state, set_user_state, clear_user_state,
     save_message_mapping, get_anon_sender_by_msg,
     block_user, is_user_blocked, get_super_user_by_msg, get_user_profile_stats
 )
@@ -11,13 +12,16 @@ GOD_ID = 6779908406
 
 def register_private_anon_handlers(bot: AsyncTeleBot):
 
-    # 🚀 پاتک فنی: اضافه کردن دکوراتور جا افتاده‌ی استارت
+    # 🚀 پاتک فنی: ثبت‌نام و آپدیت خودکار هویتی کاربران در جدول مرجع users
     @bot.message_handler(commands=['start'])
     async def handle_start(message):
         if message.chat.type != "private": return
         bot_info = await bot.get_me()
         command_args = message.text.split()
         user_id = message.chat.id
+        
+        # ثبت یا آپدیت هویت کاربر در دیتابیس متمرکز
+        await register_or_update_user(user_id, message.from_user.first_name, message.from_user.username)
         
         main_keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
         main_keyboard.add(KeyboardButton("📊 آمار من"))
@@ -37,25 +41,34 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         secret_code = encode_user_id(user_id)
         anon_link = f"https://t.me/{bot_info.username}?start={secret_code}"
         
-        # 🚨 پاتک فنی: اضافه کردن f پشت استرینگ‌ها و استفاده از تگ‌های HTML به جای مارک‌داون
         god_text = f"سلام و درود ارباب فاطمه. 🙇‍♂️\nهوش مصنوعی گوش به فرمان شماست.\n\n👁️‍🗨️ <b>دسترسی ارشد ویژه:</b>\nشما برخلاف کاربران عادی، توانایی مشاهدهٔ اطلاعات دقیق فرستندهٔ پیام‌ها را دارید.\n\n🔗 <b>لینک ناشناس ارباب:</b>\n{anon_link}"
-        
         normal_text = f"👋 به ربات پیام ناشناس خوش آمدید!\n\n🔗 این لینک اختصاصی شماست:\n{anon_link}\n\nاین لینک را در بیو یا استوری خود بگذارید. هر کس روی آن کلیک کند، می‌تواند برای شما پیام ناشناس (متنی، تصویری یا صوتی) بفرستد و شما همین‌جا پاسخشان را بدهید!"
         
         msg = god_text if user_id == GOD_ID else normal_text
-        
-        # 🚨 تغییر parse_mode به HTML برای جلوگیری از کرش کردن تلگرام روی لینک‌ها
         await bot.reply_to(message, msg, parse_mode="HTML", reply_markup=main_keyboard)
 
 
-    @bot.message_handler(func=lambda m: m.text == "📊 آمار من", chat_types=["private"])
+    # 📊 نمایش پروفایل بیزینسی، موجودی سکه و امتیاز آنتی‌ترول با قالب قفل‌شکسته HTML
+    @bot.message_handler(func=lambda m: m.text == "📊 آمار من" and m.chat.type == "private")
     async def handle_my_stats(message):
         stats = await get_user_profile_stats(message.chat.id)
-        response_text = f"📊 **آمار من**\n\n👤 | نام : {message.from_user.first_name}\n🪪 | ایدی : `{message.chat.id}`\n✍ | ناشناس دریافتی : {stats['received']}\n⛔️ | بلاک شده‌ها : {stats['blocked']}"
-        await bot.reply_to(message, response_text, parse_mode="Markdown")
+        response_text = (
+            f"<b>📊 آمار و پروفایل من</b>\n\n"
+            f"👤 | نام: {message.from_user.first_name}\n"
+            f"🪪 | آیدی: <code>{message.chat.id}</code>\n"
+            f"💰 | موجودی سکه: <b>{stats['coins']}</b>\n"
+            f"⭐ | امتیاز آنتی‌ترول: <b>{stats['rating']:.1f}</b>\n"
+            f"✍️ | ناشناس دریافتی: {stats['received']}\n"
+            f"⛔️ | بلاک شده‌ها: {stats['blocked']}"
+        )
+        await bot.reply_to(message, response_text, parse_mode="HTML")
 
-    # ─── پردازش پینگ‌پنگی چت ناشناس در پیوی ───
-    @bot.message_handler(content_types=['text', 'photo', 'video', 'voice', 'audio'], chat_types=["private"])
+
+    # ─── پردازش پینگ‌پنگی چت ناشناس در پیوی (مجهز به سپر دفاعی کامندها) ───
+    @bot.message_handler(
+        content_types=['text', 'photo', 'video', 'voice', 'audio'], 
+        func=lambda m: m.chat.type == "private" and (m.text is None or not m.text.startswith('/')) and m.text != "📊 آمار من"
+    )
     async def handle_private_anon_flow(message):
         user_id = message.chat.id
         encoded_id = encode_user_id(user_id)
@@ -71,7 +84,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 await bot.reply_to(message, "🚀 فرستاده شد.")
             return
 
-        # ۲. سناریوهای جریان اف‌اس‌ام
+        # ۲. سناریوهای جریان اف‌اس‌ام ابری
         current_state, reply_target_id = await get_user_state(user_id)
         
         if current_state.startswith("sending_anon_to_"):
@@ -101,7 +114,8 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 await bot.reply_to(message, "🚀 فرستاده شد.")
             await set_user_state(user_id, "normal")
 
-    # ─── کالبک دکمه‌های شیشه‌ای پاسخ و بلاک ───
+
+    # ─── کالبک دکمه‌های شیشه‌ای پاسخ و بلاک (سینک با ساختار HTML) ───
     @bot.callback_query_handler(func=lambda c: c.data.startswith("reply_to_"))
     async def handle_reply_callback(call):
         if decode_user_id(call.data.split("reply_to_")[-1]):
@@ -115,6 +129,8 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         if anon_id:
             await block_user(owner_id=call.message.chat.id, blocked_id=anon_id)
             await bot.answer_callback_query(call.id, "بلاک شد! 🛑")
-            updated = f"{call.message.text or call.message.caption}\n\n❌ **این فرستنده بلاک شد.**"
-            if call.message.text: await bot.edit_message_text(updated, call.message.chat.id, call.message.message_id, parse_mode="Markdown")
-            else: await bot.edit_message_caption(updated, call.message.chat.id, call.message.message_id, parse_mode="Markdown")
+            updated = f"{call.message.text or call.message.caption}\n\n❌ <b>این فرستنده بلاک شد.</b>"
+            if call.message.text: 
+                await bot.edit_message_text(updated, call.message.chat.id, call.message.message_id, parse_mode="HTML")
+            else: 
+                await bot.edit_message_caption(updated, call.message.chat.id, call.message.message_id, parse_mode="HTML")
