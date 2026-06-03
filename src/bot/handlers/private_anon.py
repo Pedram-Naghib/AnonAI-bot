@@ -329,11 +329,11 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
 
 
     # ==========================================
-    # 💬 بخش هشتم: سیستم تونل‌زنی زنده پیام‌ها و استیکرها (چت تصادفی + چت ناشناس)
+    # 💬 بخش هشتم: سیستم تونل‌زنی زنده پیام‌ها، استیکرها و گیف‌ها (چت تصادفی + چت ناشناس)
     # ==========================================
-    # 🎯 اصلاح پاتک استیکر: اضافه کردن 'sticker' به آرایه content_types جهت فعال‌سازی جابه‌جایی انواع استیکر در چت فعال و ناشناس
+    # 🎯 پاتک ارتقایافتهٔ مالتی‌مدیا: اضافه کردن 'animation' به آرایه content_types جهت فعال‌سازی جابه‌جایی زندهٔ گیف‌ها (GIF)
     @bot.message_handler(
-        content_types=['text', 'photo', 'video', 'voice', 'audio', 'sticker'], 
+        content_types=['text', 'photo', 'video', 'voice', 'audio', 'sticker', 'animation'], 
         func=lambda m: m.chat.type == "private" and (m.text is None or not m.text.startswith('/')) and m.text not in ["📊 آمار من", "🎲 شروع چت تصادفی", "❌ انصراف از صف جستجو", "🛑 قطع چت فعال", "💰 سکه‌های من"]
     )
     async def handle_private_anon_flow(message):
@@ -341,13 +341,13 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         encoded_id = encode_user_id(user_id)
         status, partner_id, _, _ = await get_user_chat_status_ext(user_id)
         
-        # ۱. تونل‌زنی لایو پیام‌ها و استیکرها در چت تصادفی فعال
+        # ۱. تونل‌زنی لایو پیام‌ها، استیکرها و گیف‌ها در چت تصادفی فعال
         if status == 'chatting' and partner_id:
             try:
                 if message.content_type == 'text': 
                     await bot.send_message(partner_id, message.text)
                 else: 
-                    # کپی امن استیکرها و مدیاها با کدهای توکار تلگرام بدون دردسر آپلود مجدد فایل
+                    # متد copy_message به طور پیش‌فرض استیکر، مدیا و انیمیشن (GIF) را عینا و بدون مشکل جابه‌جا می‌کند
                     await bot.copy_message(chat_id=partner_id, from_chat_id=user_id, message_id=message.message_id)
             except Exception:
                 await disconnect_active_chat(user_id)
@@ -355,7 +355,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 await bot.send_message(user_id, "❌ ارتباط قطع شد؛ به نظر می‌رسه پارتنرت ربات رو بلاک یا چت رو متوقف کرده.", reply_markup=kb_main)
             return
 
-        # ۲. لایه دوم: پاسخ ناشناس به پیام دریافت شده در پیوی
+        # ۲. لایه دوم: پاسخ ناشناس به پیام دریافت شده در پیوی (پشتیبانی از متن، استیکر و گیف)
         if message.reply_to_message:
             mapping = await get_anon_sender_by_msg(user_id, message.reply_to_message.message_id) or await get_super_user_by_msg(user_id, message.reply_to_message.message_id)
             if mapping:
@@ -365,7 +365,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 if message.content_type == 'text':
                     sent = await bot.send_message(anon_sender_id, f"📩 پاسخ ناشناس شما:\n\n« {message.text} »", reply_to_message_id=anon_msg_id, reply_markup=markup, parse_mode="HTML")
                 else:
-                    # انتقال ناشناس استیکرها و رسانه‌ها در حالت ریپلای پیوی
+                    # انتقال ناشناس گیف، استیکر و رسانه‌ها در حالت ریپلای پیوی
                     sent = await bot.copy_message(chat_id=anon_sender_id, from_chat_id=user_id, message_id=message.message_id, reply_to_message_id=anon_msg_id, reply_markup=markup)
                 
                 await save_message_mapping(anon_sender_id, sent.message_id, user_id, message.message_id)
@@ -385,7 +385,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 else: 
                     sent_msg = await bot.copy_message(
                         chat_id=target_id, from_chat_id=user_id, message_id=message.message_id, 
-                        caption=f"{god_intel}📣 پیام ناشناس جدید (رسانه/استیکر)\n" + (message.caption or ""), 
+                        caption=f"{god_intel}📣 پیام ناشناس جدید (رسانه/استیکر/گیف)\n" + (message.caption or ""), 
                         reply_markup=markup, parse_mode="HTML"
                     )
                 if sent_msg:
