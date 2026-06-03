@@ -2,7 +2,6 @@ import re
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import ReplyKeyboardRemove
 from src.config import GROUP_CHAT_ID
-from src.database.db_manager import get_daily_group_logs
 
 GOD_ID = 6779908406          
 SUPER_USERS = [247768888, 6779908406]
