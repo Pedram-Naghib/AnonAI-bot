@@ -11,7 +11,7 @@ from src.bot.handlers import register_bot_handlers
 from src.database.db_manager import init_db
 
 # 🎛 تنظیمات ران شدن (روی سیستم خودت False بگذار، روی سرور رندر True)
-USE_WEBHOOK = False
+USE_WEBHOOK = True
 
 WEBHOOK_HOST = "anonai-bot.onrender.com"
 WEBHOOK_PORT = int(os.environ.get("PORT", 8000))
