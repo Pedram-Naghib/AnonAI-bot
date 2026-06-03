@@ -345,7 +345,8 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         if status == 'chatting' and partner_id:
             try:
                 if message.content_type == 'text': 
-                    await bot.send_message(partner_id, message.text)
+                    # استفاده از copy_message به جای send_message ساختار ایموجی‌های پرمیوم متنی را کاملاً حفظ می‌کند
+                    await bot.copy_message(chat_id=partner_id, from_chat_id=user_id, message_id=message.message_id)
                 else: 
                     # متد copy_message به طور پیش‌فرض استیکر، مدیا و انیمیشن (GIF) را عینا و بدون مشکل جابه‌جا می‌کند
                     await bot.copy_message(chat_id=partner_id, from_chat_id=user_id, message_id=message.message_id)
