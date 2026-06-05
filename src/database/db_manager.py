@@ -5,7 +5,14 @@ import asyncpg
 from datetime import datetime, timedelta
 
 # ==========================================
-# ⚙️ بخش اول: تنظیمات و لایه اتصال متمرکز به Supabase
+# ⚙️ بخش ویژه: تنظیمات متمرکز اقتصادی ربات (قابل تغییر در آینده)
+# ==========================================
+# 🎯 فعلاً همه هزینه‌ها ۰ (رایگان) است. بعداً راحت همین‌جا اعداد را عوض کن پدرام.
+BASE_CHAT_COST = 0       # هزینه پایه ورود به چت تصادفی (بعداً می‌کنی ۵)
+GENDER_FILTER_COST = 0   # هزینه اضافه برای فیلتر جنسیت (بعداً می‌کنی ۱۰)
+
+# ==========================================
+# ⚙️ تنظیمات و لایه اتصال متمرکز به Supabase
 # ==========================================
 DB_USER = "postgres.yismztfpjnocbeyberdj"
 DB_PASS = os.getenv("DB_PASS")
@@ -54,7 +61,7 @@ async def init_db():
     await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT DEFAULT NULL;")
     await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS target_gender TEXT DEFAULT 'any';")
     
-    # 🎯 جدول جدید نقشه‌برداری لینک‌های فوق‌کوتاه دیتابیسی (۸ کاراکتری) برای پیام ناشناس
+    # 🎯 جدول نقشه‌برداری لینک‌های فوق‌کوتاه دیتابیسی (۸ کاراکتری) برای پیام ناشناس
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS user_links (
             user_id BIGINT REFERENCES users(user_id) ON DELETE CASCADE,
@@ -78,7 +85,7 @@ async def init_db():
         ON users (chat_status, rating DESC, queue_joined_at)
     """)
     
-    # 🎯 ساخت ایندکس اختصاصی برای سرچ آنی کدهای کوتاه پیام ناشناس کاربران در ترافیک میلیونی
+    # 🎯 ساخت ایندکس اختصاصی برای سرچ آنی کدهای کوتاه پیام ناشناس کاربران
     await conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_user_links_code 
         ON user_links (short_code)
@@ -153,36 +160,27 @@ async def clear_user_state(user_id: int):
 # ────────────────────────────────────────────────────────
 
 async def get_or_create_short_link(user_id: int) -> str:
-    """
-    دریافت یا تولید آنی لینک کوتاه ۸ کاراکتریِ کاملاً منحصربه‌فرد برای کاربر
-    """
+    """دریافت یا تولید آنی لینک کوتاه ۸ کاراکتریِ کاملاً منحصربه‌فرد برای کاربر"""
     conn = await get_connection()
     
-    # ۱. بررسی اینکه آیا کاربر از قبل در جدول لینک کوتاه دارد یا خیر
     existing = await conn.fetchval("SELECT short_code FROM user_links WHERE user_id = $1", user_id)
     if existing:
         await conn.close()
         return existing
 
-    # ۲. تولید کد ۸ کاراکتری امن و ضد تکرار (Anti-Collision Loop)
     alphabet = string.ascii_letters + string.digits
     while True:
         short_code = ''.join(secrets.choice(alphabet) for _ in range(8))
-        
-        # چک کردن عدم همپوشانی در کل دیتابیس
         is_dup = await conn.fetchval("SELECT 1 FROM user_links WHERE short_code = $1", short_code)
         if not is_dup:
             break
 
-    # ۳. ثبت اتمیک کد کوتاه در جدول واسط Supabase
     await conn.execute("INSERT INTO user_links (user_id, short_code) VALUES ($1, $2)", user_id, short_code)
     await conn.close()
     return short_code
 
 async def get_user_id_by_short_code(short_code: str):
-    """
-    استخراج و رمزگشایی آیدی عددی اصلی صاحب لینک از روی کد تصادفی ۸ کاراکتری دیتابیس
-    """
+    """استخراج آیدی عددی اصلی صاحب لینک از روی کد تصادفی ۸ کاراکتری دیتابیس"""
     conn = await get_connection()
     target_uid = await conn.fetchval("SELECT user_id FROM user_links WHERE short_code = $1", short_code)
     await conn.close()
@@ -265,7 +263,7 @@ async def update_user_gender(user_id: int, gender: str):
 
 
 # ────────────────────────────────────────────────────────
-# 🎲 بخش ششم: هستهٔ مرکزی، صف انتظار و مچ‌میکینگ ضربدری جنسیت
+# 🎲 بخش ششم: هستهٔ مرکزی، صف انتظار و تراکنش‌های مالی متغیر چت تصادفی
 # ────────────────────────────────────────────────────────
 
 async def get_user_chat_status_ext(user_id: int):
@@ -278,9 +276,16 @@ async def get_user_chat_status_ext(user_id: int):
     return 'idle', None, 10, None
 
 async def join_random_chat_queue(user_id: int, target_gender: str):
-    """تزریق کاربر به صف با کسر موجودی؛ فیلتر پسر یا دختر ۱۰ سکه، فیلتر شانسی رایگان"""
+    """
+    تزریق کاربر به صف بر اساس متغیرهای اقتصادی داینامیک کانفیگ شده در بالای فایل
+    """
     conn = await get_connection()
-    cost = 10 if target_gender in ['male', 'female'] else 0
+    
+    # 🎯 محاسبه داینامیک هزینه: هزینه پایه + هزینه فیلتر اختصاصی (اگر انتخاب کرده باشد)
+    cost = BASE_CHAT_COST
+    if target_gender in ['male', 'female']:
+        cost += GENDER_FILTER_COST
+        
     await conn.execute("""
         UPDATE users 
         SET chat_status = 'searching', queue_joined_at = NOW(), target_gender = $2, coins = coins - $3
@@ -289,11 +294,16 @@ async def join_random_chat_queue(user_id: int, target_gender: str):
     await conn.close()
 
 async def leave_random_chat_queue(user_id: int):
-    """انصراف اختیاری از صف و اعمال سیستم بازگشت وجه (Refund) سکه‌های کسر شده فیلترها"""
+    """
+    انصراف از صف و عودت دادن دقیق سکه‌های کسر شده بر اساس فیلترهای بالای فایل
+    """
     conn = await get_connection()
     row = await conn.fetchrow("SELECT target_gender FROM users WHERE user_id = $1", user_id)
     if row:
-        refund = 10 if row['target_gender'] in ['male', 'female'] else 0
+        refund = BASE_CHAT_COST
+        if row['target_gender'] in ['male', 'female']:
+            refund += GENDER_FILTER_COST
+            
         await conn.execute("""
             UPDATE users 
             SET chat_status = 'idle', queue_joined_at = NULL, active_partner_id = NULL, coins = coins + $2 
@@ -314,10 +324,8 @@ async def try_matchmaking(user_id: int, stage: int) -> int:
     my_gender = my_info['gender'] or 'male'
     my_target = my_info['target_gender'] or 'any'
     
-    # پله‌های مچ‌میکینگ متحرک بر اساس زمان معطلی کاربر در صف
     rating_query = "AND u.rating BETWEEN $2 - 0.2 AND $2 + 0.2" if stage == 1 else ("AND u.rating BETWEEN $2 - 1.0 AND $2 + 1.0" if stage == 2 else "")
     
-    # فیلتر جادویی جنسیت: باید هم پارتنر با هدف من مچ باشد و هم هدف پارتنر با جنسیت من جور باشد
     gender_filter = """
         AND (
             ($3 = 'any' AND (u.target_gender = 'any' OR u.target_gender = $4))
@@ -355,7 +363,6 @@ async def connect_two_users(user1_id: int, user2_id: int) -> bool:
     await tx.start()
     
     try:
-        # قفل ایمن سطرهای هر دو کاربر به ترتیب ثابت آیدی‌ها جهت ریشه‌کن کردن بن‌بست PostgreSQL
         st_low = await conn.fetchval("SELECT chat_status FROM users WHERE user_id = $1 FOR UPDATE", low_id)
         st_high = await conn.fetchval("SELECT chat_status FROM users WHERE user_id = $1 FOR UPDATE", high_id)
         
@@ -364,11 +371,9 @@ async def connect_two_users(user1_id: int, user2_id: int) -> bool:
             await conn.close()
             return False
 
-        # تغییر وضعیت جفت به حالت chatting (سکهٔ فیلتر قبلاً کسر شده است)
         await conn.execute("UPDATE users SET chat_status = 'chatting', active_partner_id = $2, queue_joined_at = NULL WHERE user_id = $1", low_id, high_id if low_id == user1_id else user1_id)
         await conn.execute("UPDATE users SET chat_status = 'chatting', active_partner_id = $2, queue_joined_at = NULL WHERE user_id = $1", high_id, low_id if high_id == user1_id else user1_id)
         
-        # لایه واریز پاداش رفرال دو مرحله‌ای به معرف‌ها در صورت مچ شدن دوست دعوت شده
         ref1 = await conn.fetchrow("SELECT referred_by, is_ref_rewarded FROM users WHERE user_id = $1", user1_id)
         if ref1 and ref1['referred_by'] and not ref1['is_ref_rewarded']:
             await conn.execute("UPDATE users SET coins = coins + 5 WHERE user_id = $1", ref1['referred_by'])
@@ -399,7 +404,9 @@ async def disconnect_active_chat(user_id: int) -> int:
     return partner_id
 
 async def apply_queue_compensation(user_id: int) -> str:
-    """قانون معطلی ۱۵ دقیقه‌ای: عودت کامل وجه کسر شده فیلترها به همراه واریز پاداش جریمه ربات"""
+    """
+    قانون معطلی ۱۵ دقیقه‌ای: عودت کامل سکه‌ها بر اساس فرمول داینامیک + ۲ سکه هدیه معطلی
+    """
     conn = await get_connection()
     row = await conn.fetchrow("SELECT target_gender, last_compensation_at FROM users WHERE user_id = $1", user_id)
     
@@ -411,21 +418,20 @@ async def apply_queue_compensation(user_id: int) -> str:
     last_comp = row['last_compensation_at']
     now = datetime.now()
     
-    refund = 10 if target_gender in ['male', 'female'] else 0
+    refund = BASE_CHAT_COST
+    if target_gender in ['male', 'female']:
+        refund += GENDER_FILTER_COST
     
-    # فیلتر کول‌داون ۳ ساعته: اگر زیر ۳ ساعت دوباره معطل شود فقط پول فیلترش پس داده می‌شود
     if last_comp and now - last_comp < timedelta(hours=3):
         await conn.execute("UPDATE users SET chat_status = 'idle', queue_joined_at = NULL, coins = coins + $2 WHERE user_id = $1", user_id, refund)
         await conn.close()
         return "cooldown"
         
-    # واریز ۲ سکه هدیه معطلی اضافه برای کاربران بخش رایگان (شانسی)
-    bonus = 2 if refund == 0 else 0 
     await conn.execute("""
         UPDATE users 
-        SET chat_status = 'idle', queue_joined_at = NULL, coins = coins + $2 + $3, last_compensation_at = NOW() 
+        SET chat_status = 'idle', queue_joined_at = NULL, coins = coins + $2 + 2, last_compensation_at = NOW() 
         WHERE user_id = $1
-    """, user_id, refund, bonus)
+    """, user_id, refund)
     await conn.close()
     return "rewarded"
 
@@ -444,7 +450,6 @@ async def set_user_referrer(user_id: int, referrer_id: int, is_pure_ref: bool = 
             await conn.execute("UPDATE users SET referred_by = $2 WHERE user_id = $1", user_id, referrer_id)
     else:
         initial_coins = 15 if is_pure_ref else 10
-        # کست قطعی پارامتر با ساختار $2::BIGINT جهت مهار دائم خطای عدم تشخیص نوع داده رندر
         await conn.execute("""
             INSERT INTO users (user_id, referred_by, coins) 
             VALUES ($1, $2::BIGINT, $3)

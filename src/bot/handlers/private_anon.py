@@ -71,6 +71,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         command_args = message.text.split()
         user_id = message.chat.id
         
+        # 🎯 پاتک رفع باگ خطای ۷۴: اجرای صحیح و اتمیک تابع دیتابیس بدون انتساب خرابکارانه
         await register_or_update_user(user_id, message.from_user.first_name, message.from_user.username)
         kb_main, _, _ = get_keyboards()
         
@@ -355,6 +356,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         await bot.reply_to(message, "🛑 شما چت را قطع کردید. برای شروع مجدد دکمه 🎲 رو بزنید.", reply_markup=kb_main)
         
         if partner_id:
+            # 🎯 شبیه‌سازی ترفند کدهای کوتاه برای ریپلای منوی آنتی‌ترول فرانت
             encoded_partner = encode_user_id(partner_id)
             encoded_user = encode_user_id(user_id)
             markup_user = InlineKeyboardMarkup().row(
@@ -410,7 +412,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         # ۱. تونل‌زنی لایو پیام‌ها، استیکرها و گیف‌ها در چت تصادفی فعال
         if status == 'chatting' and partner_id:
             try:
-                # پاتک کپی: با متد copy_message ساختار متن و ایموجی‌های پرمیوم کاربران کاملاً حفظ می‌شود
+                # با متد copy_message ساختار متن و ایموجی‌های پرمیوم کاربران کاملاً حفظ می‌شود
                 await bot.copy_message(chat_id=partner_id, from_chat_id=user_id, message_id=message.message_id)
             except Exception:
                 await disconnect_active_chat(user_id)
@@ -475,7 +477,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             mapping = await get_anon_sender_by_msg(user_id, reply_target_id) or await get_super_user_by_msg(user_id, reply_target_id)
             if mapping:
                 anon_sender_id, anon_msg_id = mapping
-                markup = InlineKeyboardMarkup().row(InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{encoded_id}"), InlineKeyboardButton("⛔️ mafia_{encoded_id}"))
+                markup = InlineKeyboardMarkup().row(InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{encoded_id}"), InlineKeyboardButton("⛔️ بلاک", callback_data=f"block_{encoded_id}"))
                 
                 if message.content_type == 'text':
                     sent = await bot.send_message(anon_sender_id, f"📩 پاسخ ناشناس شما:\n\n« {message.text} »", reply_to_message_id=anon_msg_id, reply_markup=markup, parse_mode="HTML")
