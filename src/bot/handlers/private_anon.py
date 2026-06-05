@@ -467,9 +467,14 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                     
                     await bot.reply_to(message, "✅ مخفیانه ارسال شد.")
                     await save_message_mapping(target_id, sent_msg.message_id, user_id, message.message_id)
-            except Exception:
+            except Exception as e:
                 await bot.reply_to(message, "❌ خطا در ارسال پیام؛ ممکن است ربات توسط کاربر مقصد مسدود شده باشد.")
-                print(Exception)
+                import traceback
+                print("\n💥=== BUG TRACKER REPORT ===")
+                print(f"🚨 Error Message: {e}")
+                print("📝 Full Code Traceback:")
+                traceback.print_exc()
+                print("============================\n")
             await clear_user_state(user_id)
             return
 
