@@ -1,4 +1,6 @@
 import os
+import string
+import secrets
 import asyncpg
 from datetime import datetime, timedelta
 
@@ -52,6 +54,15 @@ async def init_db():
     await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT DEFAULT NULL;")
     await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS target_gender TEXT DEFAULT 'any';")
     
+    # 🎯 جدول جدید نقشه‌برداری لینک‌های فوق‌کوتاه دیتابیسی (۸ کاراکتری) برای پیام ناشناس
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_links (
+            user_id BIGINT REFERENCES users(user_id) ON DELETE CASCADE,
+            short_code VARCHAR(12) PRIMARY KEY,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    
     # جدول لیست سیاه چت تصادفی (برای کاربران ناراضی که به هم دیس‌لایک داده‌اند)
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS random_chat_blocks (
@@ -65,6 +76,12 @@ async def init_db():
     await conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_matchmaking_core 
         ON users (chat_status, rating DESC, queue_joined_at)
+    """)
+    
+    # 🎯 ساخت ایندکس اختصاصی برای سرچ آنی کدهای کوتاه پیام ناشناس کاربران در ترافیک میلیونی
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_user_links_code 
+        ON user_links (short_code)
     """)
     
     # ۲. جدول نگاشت پیام‌ها برای چت‌های ناشناس پیوی (مسیریابی ریپلای‌ها)
@@ -88,7 +105,7 @@ async def init_db():
     """)
     
     await conn.close()
-    print("🚀 All Unified Supabase tables & Gender Match layers initialized successfully.")
+    print("🚀 All Unified Supabase tables & Short Code Database layers initialized successfully.")
 
 
 # ────────────────────────────────────────────────────────
@@ -129,6 +146,47 @@ async def clear_user_state(user_id: int):
     conn = await get_connection()
     await conn.execute("UPDATE users SET anon_state = 'normal', reply_target_id = NULL WHERE user_id = $1", user_id)
     await conn.close()
+
+
+# ────────────────────────────────────────────────────────
+# 🔗 بخش ویژه: موتور مدیریت لینک‌های فوق‌کوتاه اختصاصی دیتابیس
+# ────────────────────────────────────────────────────────
+
+async def get_or_create_short_link(user_id: int) -> str:
+    """
+    دریافت یا تولید آنی لینک کوتاه ۸ کاراکتریِ کاملاً منحصربه‌فرد برای کاربر
+    """
+    conn = await get_connection()
+    
+    # ۱. بررسی اینکه آیا کاربر از قبل در جدول لینک کوتاه دارد یا خیر
+    existing = await conn.fetchval("SELECT short_code FROM user_links WHERE user_id = $1", user_id)
+    if existing:
+        await conn.close()
+        return existing
+
+    # ۲. تولید کد ۸ کاراکتری امن و ضد تکرار (Anti-Collision Loop)
+    alphabet = string.ascii_letters + string.digits
+    while True:
+        short_code = ''.join(secrets.choice(alphabet) for _ in range(8))
+        
+        # چک کردن عدم همپوشانی در کل دیتابیس
+        is_dup = await conn.fetchval("SELECT 1 FROM user_links WHERE short_code = $1", short_code)
+        if not is_dup:
+            break
+
+    # ۳. ثبت اتمیک کد کوتاه در جدول واسط Supabase
+    await conn.execute("INSERT INTO user_links (user_id, short_code) VALUES ($1, $2)", user_id, short_code)
+    await conn.close()
+    return short_code
+
+async def get_user_id_by_short_code(short_code: str):
+    """
+    استخراج و رمزگشایی آیدی عددی اصلی صاحب لینک از روی کد تصادفی ۸ کاراکتری دیتابیس
+    """
+    conn = await get_connection()
+    target_uid = await conn.fetchval("SELECT user_id FROM user_links WHERE short_code = $1", short_code)
+    await conn.close()
+    return target_uid
 
 
 # ────────────────────────────────────────────────────────
@@ -186,7 +244,7 @@ async def is_user_blocked(owner_id: int, blocked_id: int) -> bool:
 # ────────────────────────────────────────────────────────
 
 async def get_user_profile_stats(user_id: int) -> dict:
-    """استخراج زندهٔ دارایی‌ها، امتیاز آنتی‌ترول، جنسیت و رکوردهای بلاک کاربر"""
+    """استخراج زندهٔ دارایی‌ها، امتیاز آنتی‌ترول, جنسیت و رکوردهای بلاک کاربر"""
     conn = await get_connection()
     user_info = await conn.fetchrow("SELECT coins, rating, gender FROM users WHERE user_id = $1", user_id)
     coins = user_info['coins'] if user_info else 10
