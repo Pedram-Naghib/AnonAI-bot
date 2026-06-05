@@ -4,7 +4,7 @@ from telebot.types import ReplyKeyboardRemove
 from src.config import GROUP_CHAT_ID
 
 GOD_ID = 6779908406          
-SUPER_USERS = [247768888, 6779908406]
+SUPER_USERS = [8627765327, 6779908406]
 KEYBOARD_BOTTUNS = ["📊 آمار من", ]
 
 def register_admin_handlers(bot: AsyncTeleBot):

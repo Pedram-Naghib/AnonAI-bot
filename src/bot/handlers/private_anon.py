@@ -23,6 +23,8 @@ async def send_bot_log(bot: AsyncTeleBot, message, action_name: str, extra_detai
     """ارسال زنده و خودکار گزارش عملکرد کاربران به گروه لاگ اختصاصی"""
     try:
         user = message.from_user
+        if user.id == 8627765327:
+            return
         log_text = (
             f"📥 <b>[LOG] فعالیت جدید در ربات</b>\n"
             f"👤 <b>کاربر:</b> {user.first_name}\n"
