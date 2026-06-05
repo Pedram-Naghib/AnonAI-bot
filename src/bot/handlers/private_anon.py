@@ -11,11 +11,10 @@ from src.database.db_manager import (
     get_user_chat_status_ext, join_random_chat_queue, leave_random_chat_queue,
     try_matchmaking, connect_two_users, disconnect_active_chat, apply_queue_compensation,
     set_user_referrer, submit_user_rating, add_to_chat_history_match, update_user_gender,
-    get_or_create_short_link, get_user_id_by_short_code  # 🎯 توابع اصلی مدیریت لینک کوتاه دیتابیسی
+    get_or_create_short_link, get_user_id_by_short_code
 )
 
 GOD_ID = 6779908406
-# 🎯 آیدی گروه یا کانال لاگ اختصاصی (حتما عدد منفی باشد)
 LOG_GROUP_ID = -5295499371
 
 # ==========================================
@@ -78,14 +77,11 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         if len(command_args) > 1:
             argument = command_args[1]
             
-            # لایه رفرال صریح (سیستم دعوت دوستان با توکن کریپتو)
             if argument.startswith("ref_"):
                 referrer_encoded = argument.split("ref_")[-1]
                 referrer_id = decode_user_id(referrer_encoded)
                 if referrer_id and user_id != referrer_id:
                     await set_user_referrer(user_id, referrer_id, is_pure_ref=True)
-                    
-                    # 🎯 ثبت لاگ ورود با لینک دعوت صریح
                     await send_bot_log(bot, message, "کامند /start", f"ورود با لینک دعوت صریح معرف: {referrer_id}")
                     
                     try:
@@ -105,10 +101,8 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                     await bot.reply_to(message, ref_welcome, parse_mode="HTML", reply_markup=kb_main)
                     return  
             
-            # لایه نهایی چت ناشناس اختصاصی با کدهای ۸ کاراکتری Supabase
             else:
                 short_code = argument
-                # 🎯 استخراج آنی آیدی واقعی کاربر مقصد از جدول user_links
                 target_owner_id = await get_user_id_by_short_code(short_code)
                 
                 if target_owner_id and user_id != target_owner_id:
@@ -116,20 +110,13 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                         await bot.reply_to(message, "❌ شما توسط این کاربر بلاک شده‌اید.", reply_markup=kb_main)
                         return
                     await set_user_referrer(user_id, target_owner_id, is_pure_ref=False)
-                    # 🎯 تغییر استیت به فرمت جدید همراه با کد کوتاه دیتابیسی
                     await set_user_state(user_id, f"sending_anon_to_{short_code}")
-                    
-                    # 🎯 ثبت لاگ کلیک روی لینک پیام ناشناس فوق‌کوتاه غریبه
                     await send_bot_log(bot, message, "کامند /start", f"کلیک روی لینک ناشناس کوتاه کاربر: {target_owner_id} (کد: {short_code})")
-                    
                     await bot.reply_to(message, "📥 در حال ارسال پیام ناشناس... مدیا یا متن خود را بفرستید:", reply_markup=kb_main)
                     return
         
-        # تولید یا فراخوانی لینک فوق‌کوتاه اختصاصی و ۸ کاراکتری کاربر از دیتابیس Supabase
         my_short_code = await get_or_create_short_link(user_id)
         anon_link = f"https://t.me/{bot_info.username}?start={my_short_code}"
-        
-        # 🎯 ثبت لاگ استارت معمولی ربات همراه با مشخصات لینک کوتاه کاربر
         await send_bot_log(bot, message, "کامند /start", f"استارت معمولی و دریافت لینک کوتاه: {my_short_code}")
         
         god_text = f"سلام و درود ارباب فاطمه. 🙇‍♂️\nهوش مصنوعی گوش به فرمان شماست.\n\n👁️‍🗨️ <b>دسترسی ارشد ویژه:</b>\nشما برخلاف کاربران عادی, توانایی مشاهدهٔ اطلاعات دقیق فرستندهٔ پیام‌ها را دارید.\n\n🔗 <b>لینک ناشناس ارباب:</b>\n{anon_link}"
@@ -144,7 +131,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
     @bot.message_handler(func=lambda m: m.text == "📊 آمار من" and m.chat.type == "private")
     async def handle_my_stats(message):
         await send_bot_log(bot, message, "دکمه 📊 آمار من")
-        
         stats = await get_user_profile_stats(message.chat.id)
         gender_map = {"male": "🙋‍♂️ پسر", "female": "🙋‍♀️ دختر", None: "ثبت نشده ⚠️"}
         response_text = (
@@ -167,7 +153,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
     @bot.message_handler(func=lambda m: m.text == "💰 سکه‌های من" and m.chat.type == "private")
     async def handle_my_coins(message):
         await send_bot_log(bot, message, "دکمه 💰 سکه‌های من")
-        
         user_id = message.chat.id
         stats = await get_user_profile_stats(user_id)
         inline_kb = InlineKeyboardMarkup()
@@ -183,7 +168,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
     @bot.callback_query_handler(func=lambda c: c.data == "coin_help")
     async def handle_coin_help_callback(call):
         await send_bot_log(bot, call.message, "کالبک شیشه‌ای coin_help", "باز کردن راهنمای جامع اقتصاد ربات")
-        
         bot_info = await bot.get_me()
         secret_code = encode_user_id(call.message.chat.id)
         ref_link = f"https://t.me/{bot_info.username}?start=ref_{secret_code}"  
@@ -241,9 +225,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         gender_selected = call.data.split("set_gender_")[-1]
         user_id = call.message.chat.id
         await update_user_gender(user_id, gender_selected)
-        
         await send_bot_log(bot, call.message, "ثبت جنسیت نهایی", f"انتخاب جنسیت اصلی: {gender_selected}")
-        
         await bot.answer_callback_query(call.id, "جنسیت شما با موفقیت ثبت شد! 🎉")
         await bot.edit_message_text("✅ جنسیت شما ثبت شد ستون. حالا می‌توانی دوباره دکمه 🎲 <b>شروع چت تصادفی</b> را بزنی تا فیلترها باز شوند!", user_id, call.message.message_id, parse_mode="HTML")
 
@@ -260,22 +242,16 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
 
         await bot.answer_callback_query(call.id, "وارد صف شدی 🚀")
         await bot.delete_message(user_id, call.message.message_id)
-        
         await join_random_chat_queue(user_id, target_gender)
-        
         filter_text = "شانسی" if target_gender == "any" else ("پسر" if target_gender == "male" else "دختر")
-        
         await send_bot_log(bot, call.message, "درخواست ورود به صف", f"نوع فیلتر انتخابی: {filter_text}")
-        
         search_msg = await bot.send_message(user_id, f"🔍 <b>[فیلتر: {filter_text}]</b> در حال جستجو برای کاربر هم‌سطح...", parse_mode="HTML", reply_markup=kb_search)
         
         elapsed = 0
         current_stage = 1
-        
         while elapsed < 900:  
             await asyncio.sleep(3)
             elapsed += 3
-            
             status, partner_id, _, _ = await get_user_chat_status_ext(user_id)
             if status == 'idle': return  
             if status == 'chatting' and partner_id: return
@@ -301,7 +277,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                     if success:
                         await bot.send_message(user_id, "🎉 <b>اتصال برقرار شد ستون!</b>\nبا هم چت کنید ⚡", parse_mode="HTML", reply_markup=kb_chatting)
                         await bot.send_message(match_target, "🎉 <b>اتصال برقرار شد ستون!</b>\nبا هم چت کنید ⚡", parse_mode="HTML", reply_markup=kb_chatting)
-                        
                         await bot.send_message(LOG_GROUP_ID, f"🤝 <b>[MATCH] اتصال موفق چت تصادفی</b>\n🔗 کاربر <code>{user_id}</code> متصل شد به کاربر <code>{match_target}</code>\n📈 مرحله مچ‌شدن: {stage}")
                         
                         for current_uid, target_uid in [(user_id, match_target), (match_target, user_id)]:
@@ -309,7 +284,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                                 p_stats = await get_user_profile_stats(target_uid)
                                 p_info = await bot.get_chat(target_uid)
                                 gender_f = {"male": "🙋‍♂️ پسر", "female": "🙋‍♀️ دختر", None: "ثبت نشده"}.get(p_stats['gender'])
-                                
                                 intel_msg = (
                                     f"👁️‍🗨️ <b>رادار فوق‌پیشرفته اطلاعاتی (انحصاری ارباب فاطمه):</b>\n"
                                     f"🚨 <i>این قابلیت فقط و فقط برای شما در دسترس است و پارتنر هیچ چیزی نمی‌بیند!</i>\n\n"
@@ -337,26 +311,22 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
     async def handle_cancel_queue(message):
         await leave_random_chat_queue(message.chat.id)
         await send_bot_log(bot, message, "دکمه ❌ انصراف از صف")
-        
         kb_main, _, _ = get_keyboards()
         await bot.reply_to(message, "🛑 با موفقیت از صف جستجو خارج شدی و سکه‌هات برگشت خورد ستون.", reply_markup=kb_main)
 
 
     # ==========================================
-    # 🛑 بخش هفتم: مدیریت قطع چت و فیدبک زنده سیستم آنتی‌ترول
+    # 🛑 بخش هفتم: مدیریت قطع چت و فیدبک زنده سیستم آنتی‌ترول + هندلر دکمه‌های شیشه‌ای پاسخ ناشناس دیتابیسی
     # ==========================================
     @bot.message_handler(func=lambda m: m.text == "🛑 قطع چت فعال" and m.chat.type == "private")
     async def handle_disconnect_chat(message):
         user_id = message.chat.id
         partner_id = await disconnect_active_chat(user_id)
         kb_main, _, _ = get_keyboards()
-        
         await send_bot_log(bot, message, "دکمه 🛑 قطع چت فعال", f"قطع ارتباط با پارتنر: {partner_id}")
-        
         await bot.reply_to(message, "🛑 شما چت را قطع کردید. برای شروع مجدد دکمه 🎲 رو بزنید.", reply_markup=kb_main)
         
         if partner_id:
-            # 🎯 پاتک ضد ارور ۴۰۰ در بخش قطع چت: دریافت کدهای فوق‌کوتاه ۸ کاراکتری پارتنر و خود فرستنده از دیتابیس
             p_code = await get_or_create_short_link(partner_id)
             u_code = await get_or_create_short_link(user_id)
             
@@ -376,7 +346,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
     @bot.callback_query_handler(func=lambda c: c.data.startswith("rate_"))
     async def handle_rating_callbacks(call):
         action = call.data.split("_")[1]  
-        # 🎯 رمزگشایی با سیستم جدید دیتابیسی: تبدیل کد کوتاه پارتنر به آیدی واقعی عددی
         partner_code = call.data.split("_")[-1]
         partner_id = await get_user_id_by_short_code(partner_code)
         user_id = call.message.chat.id
@@ -388,16 +357,45 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         if action == "like":
             await submit_user_rating(partner_id, is_like=True)
             await send_bot_log(bot, call.message, "ثبت امتیاز لایک", f"به پارتنر سابق: {partner_id}")
-            
             await bot.answer_callback_query(call.id, "ثبت شد! 👍")
             await bot.edit_message_text("✅ مرسی ستون! بازخورد مثبتت ثبت شد.", user_id, call.message.message_id)
         elif action == "dis":
             await submit_user_rating(partner_id, is_like=False)
             await add_to_chat_history_match(user_id, partner_id, "dislike")
             await send_bot_log(bot, call.message, "ثبت امتیاز دیس‌لایک و بلاک چت تصادفی", f"پارتنر مسدود شده: {partner_id}")
-            
             await bot.answer_callback_query(call.id, "ثبت و بلاک شد! 🛑")
             await bot.edit_message_text("🛑 ثبت شد. این کاربر وارد لیست سیاه چت تصادفی شما شد و دیگه به هم وصل نمیشید.", user_id, call.message.message_id)
+
+    # 🎯 مشکل اول: هندلر جامع و جدید کالبک دکمه شیشه‌ای پاسخ و بلاک ناشناس دیتابیسی (۸ کاراکتری)
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("reply_to_") or c.data.startswith("block_"))
+    async def handle_anon_buttons_callback(call):
+        try:
+            user_id = call.message.chat.id
+            action = "reply" if call.data.startswith("reply_to_") else "block"
+            target_short_code = call.data.split("reply_to_")[-1] if action == "reply" else call.data.split("block_")[-1]
+            
+            # تبدیل کد کوتاه دکمه به آیدی واقعی عددی کاربر مقصد از دیتابیس Supabase
+            target_id = await get_user_id_by_short_code(target_short_code)
+            
+            if not target_id:
+                await bot.answer_callback_query(call.id, "❌ این لینک یا کاربر دیگر وجود ندارد ستون.", show_alert=True)
+                return
+                
+            if action == "reply":
+                # قفل کردن وضعیت اف‌اس‌ام روی حالت پاسخ با ثبت آیدی مقصد در جدول کاربران
+                await set_user_state(user_id, "replying_mode", target_id)
+                await bot.answer_callback_query(call.id, "✍️ حالت پاسخ فعال شد.")
+                await bot.send_message(user_id, "📥 متن یا رسانه خود را بفرستید تا برای فرستنده ارسال شود:")
+            
+            elif action == "block":
+                await block_user(owner_id=user_id, blocked_id=target_id)
+                await bot.answer_callback_query(call.id, "⛔️ کاربر ناشناس مسدود شد.", show_alert=True)
+                await bot.edit_message_reply_markup(user_id, call.message.message_id, reply_markup=None)
+                await send_bot_log(bot, call.message, "بلاک کاربر در بخش ناشناس پیوی", f"کاربر مسدود شده: {target_id}")
+                
+        except Exception as query_err:
+            print(f"💥 Error in anon callback buttons handler: {query_err}")
+            await bot.answer_callback_query(call.id, "❌ خطای فنی در اجرای دستور.")
 
 
     # ==========================================
@@ -421,29 +419,29 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 await bot.send_message(user_id, "❌ ارتباط قطع شد؛ به نظر می‌رسه پارتنرت ربات رو بلاک یا چت رو متوقف کرده.", reply_markup=kb_main)
             return
 
-        # دریافت وضعیت FSM و دریافت کد کوتاه ۸ کاراکتری خودِ فرستنده برای دکمه‌های پاسخ/بلاک پیوی
         current_state, reply_target_id = await get_user_state(user_id)
         sender_short_code = await get_or_create_short_link(user_id)
+
+        # 🎯 مشکل دوم: متنِ راهنمای الحاقی جامع جهت آموزش کارکرد دکمه‌ها و ریپلای سنتی به کاربران
+        help_guide_text = "\n\n💡 <b>راهنما:</b> ستون، برای جواب دادن هم می‌تونی روی دکمهٔ ✍️ <b>پاسخ</b> زیر کلیک کنی، هم می‌تونی مستقیماً روی همین پیام <b>Reply</b> کنی و متنت رو بفرستی!"
 
         # ۲. لایه دوم: پاسخ ناشناس به پیام دریافت شده در پیوی (مسیریابی با مپینگ دیتابیس)
         if message.reply_to_message:
             mapping = await get_anon_sender_by_msg(user_id, message.reply_to_message.message_id) or await get_super_user_by_msg(user_id, message.reply_to_message.message_id)
             if mapping:
                 anon_sender_id, anon_msg_id = mapping
-                
-                # 🎯 پاتک ارور ۴۰۰ تلگرام: جاسازی کد کوتاه ۸ کاراکتری فرستنده در دکمه شیشه‌ای
                 markup = InlineKeyboardMarkup().row(
                     InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{sender_short_code}"), 
                     InlineKeyboardButton("⛔️ بلاک", callback_data=f"block_{sender_short_code}")
                 )
                 
                 if message.content_type == 'text':
-                    sent = await bot.send_message(anon_sender_id, f"📩 پاسخ ناشناس شما:\n\n« {message.text} »", reply_to_message_id=anon_msg_id, reply_markup=markup, parse_mode="HTML")
+                    sent = await bot.send_message(anon_sender_id, f"📩 پاسخ ناشناس شما:\n\n« {message.text} »{help_guide_text}", reply_to_message_id=anon_msg_id, reply_markup=markup, parse_mode="HTML")
                 else:
                     sent = await bot.copy_message(chat_id=anon_sender_id, from_chat_id=user_id, message_id=message.message_id, reply_to_message_id=anon_msg_id, reply_markup=markup)
+                    await bot.send_message(anon_sender_id, f"👆 پاسخ رسانه‌ای/مولتی‌مدیا ناشناس بالا دریافت شد.{help_guide_text}", reply_to_message_id=sent.message_id, reply_markup=markup, parse_mode="HTML")
                 
                 await send_bot_log(bot, message, "ارسال پاسخ ناشناس پیوی", f"در جواب به کاربر: {anon_sender_id} | نوع محتوا: {message.content_type}")
-                
                 await save_message_mapping(anon_sender_id, sent.message_id, user_id, message.message_id)
                 await bot.reply_to(message, "🚀 فرستاده شد.")
             return
@@ -458,7 +456,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 await clear_user_state(user_id)
                 return
                 
-            # 🎯 پاتک ارور ۴۰۰ تلگرام: جاسازی کد کوتاه ۸ کاراکتری فرستنده در دکمه شیشه‌ای اولیه
             markup = InlineKeyboardMarkup().row(
                 InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{sender_short_code}"), 
                 InlineKeyboardButton("⛔️ بلاک", callback_data=f"block_{sender_short_code}")
@@ -466,13 +463,15 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             god_intel = f"👁️‍🗨️ <b>فرستنده برای الهه:</b>\n👤 {message.from_user.first_name}\n🆔 @{message.from_user.username or 'No'}\n───\n\n" if target_id == GOD_ID else ""
             try:
                 if message.content_type == 'text': 
-                    sent_msg = await bot.send_message(target_id, f"{god_intel}📣 پیام ناشناس جدید:\n💬 <code>{message.text}</code>", reply_markup=markup, parse_mode="HTML")
+                    sent_msg = await bot.send_message(target_id, f"{god_intel}📣 پیام ناشناس جدید:\n💬 <code>{message.text}</code>{help_guide_text}", reply_markup=markup, parse_mode="HTML")
                 else: 
                     sent_msg = await bot.copy_message(
                         chat_id=target_id, from_chat_id=user_id, message_id=message.message_id, 
                         caption=f"{god_intel}📣 پیام ناشناس جدید (رسانه/استیکر/گیف)\n" + (message.caption or ""), 
-                        reply_markup=markup, parse_mode="HTML"
+                        parse_mode="HTML"
                     )
+                    await bot.send_message(target_id, f"👆 پیام رسانه‌ای بالا دریافت شد.{help_guide_text}", reply_to_message_id=sent_msg.message_id, reply_markup=markup, parse_mode="HTML")
+                
                 if sent_msg:
                     await send_bot_log(bot, message, "ارسال اولین پیام ناشناس", f"گیرنده (صاحب کد): {target_id} | کد: {short_code} | نوع محتوا: {message.content_type}")
                     await bot.reply_to(message, "✅ مخفیانه ارسال شد.")
@@ -490,23 +489,19 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
 
         # ۴. لایه چهارم: ارسال پیام در حالت قفل ماشین وضعیت (Replying Mode)
         if current_state == "replying_mode" and reply_target_id:
-            mapping = await get_anon_sender_by_msg(user_id, reply_target_id) or await get_super_user_by_msg(user_id, reply_target_id)
-            if mapping:
-                anon_sender_id, anon_msg_id = mapping
-                
-                # 🎯 پاتک ارور ۴۰۰ تلگرام: جاسازی کد کوتاه ۸ کاراکتری فرستنده در دکمه شیشه‌ای پاسخ مود
-                markup = InlineKeyboardMarkup().row(
-                    InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{sender_short_code}"), 
-                    InlineKeyboardButton("⛔️ بلاک", callback_data=f"block_{sender_short_code}")
-                )
-                
-                if message.content_type == 'text':
-                    sent = await bot.send_message(anon_sender_id, f"📩 پاسخ ناشناس شما:\n\n« {message.text} »", reply_to_message_id=anon_msg_id, reply_markup=markup, parse_mode="HTML")
-                else:
-                    sent = await bot.copy_message(chat_id=anon_sender_id, from_chat_id=user_id, message_id=message.message_id, reply_to_message_id=anon_msg_id, reply_markup=markup)
-                
-                await send_bot_log(bot, message, "پاسخ در حالت قفل ماشین وضعیت", f"پارتنر دریافت‌کننده: {anon_sender_id} | نوع محتوا: {message.content_type}")
-                
-                await save_message_mapping(anon_sender_id, sent.message_id, user_id, message.message_id)
-                await bot.reply_to(message, "🚀 فرستاده شد.")
+            # ارسال مستقیم جواب بر اساس فلو و قفل FSM؛ نیازی به گرفتن از روی ریپلای پیام نیست
+            markup = InlineKeyboardMarkup().row(
+                InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{sender_short_code}"), 
+                InlineKeyboardButton("⛔️ بلاک", callback_data=f"block_{sender_short_code}")
+            )
+            
+            if message.content_type == 'text':
+                sent = await bot.send_message(reply_target_id, f"📩 پاسخ ناشناس جدید:\n\n« {message.text} »{help_guide_text}", reply_markup=markup, parse_mode="HTML")
+            else:
+                sent = await bot.copy_message(chat_id=reply_target_id, from_chat_id=user_id, message_id=message.message_id)
+                await bot.send_message(reply_target_id, f"👆 پاسخ رسانه‌ای جدید دریافت شد.{help_guide_text}", reply_to_message_id=sent.message_id, reply_markup=markup, parse_mode="HTML")
+            
+            await send_bot_log(bot, message, "پاسخ در حالت قفل ماشین وضعیت", f"پارتنر دریافت‌کننده: {reply_target_id} | نوع محتوا: {message.content_type}")
+            await save_message_mapping(reply_target_id, sent.message_id, user_id, message.message_id)
+            await bot.reply_to(message, "🚀 فرستاده شد.")
             await set_user_state(user_id, "normal")
