@@ -71,7 +71,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         command_args = message.text.split()
         user_id = message.chat.id
         
-        await register_or_update_update_user = await register_or_update_user(user_id, message.from_user.first_name, message.from_user.username)
+        await register_or_update_user(user_id, message.from_user.first_name, message.from_user.username)
         kb_main, _, _ = get_keyboards()
         
         if len(command_args) > 1:
