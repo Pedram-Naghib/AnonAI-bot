@@ -469,6 +469,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                     await save_message_mapping(target_id, sent_msg.message_id, user_id, message.message_id)
             except Exception:
                 await bot.reply_to(message, "❌ خطا در ارسال پیام؛ ممکن است ربات توسط کاربر مقصد مسدود شده باشد.")
+                print(Exception)
             await clear_user_state(user_id)
             return
 
