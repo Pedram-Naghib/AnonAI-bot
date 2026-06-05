@@ -209,7 +209,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 InlineKeyboardButton("🙋‍♂️ پسرم", callback_data="set_gender_male"),
                 InlineKeyboardButton("🙋‍♀️ دخترم", callback_data="set_gender_female")
             )
-            await bot.reply_to(message, "⚠️ <b>ستون، برای استفاده از چت تصادفی ابتدا باید جنسیت خودت رو تعیین کنی:</b>\n(این اطلاعات فقط یک‌بار دریافت میشه و قابل تغییر نیست)", parse_mode="HTML", reply_markup=markup_gender)
+            await bot.reply_to(message, "⚠️ <b> برای استفاده از چت تصادفی ابتدا باید جنسیت خودت رو تعیین کنی:</b>\n(این اطلاعات فقط یک‌بار دریافت میشه و قابل تغییر نیست)", parse_mode="HTML", reply_markup=markup_gender)
             return
 
         markup_filter = InlineKeyboardMarkup().add(
@@ -423,7 +423,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         sender_short_code = await get_or_create_short_link(user_id)
 
         # 🎯 مشکل دوم: متنِ راهنمای الحاقی جامع جهت آموزش کارکرد دکمه‌ها و ریپلای سنتی به کاربران
-        help_guide_text = "\n\n💡 <b>راهنما:</b> ستون، برای جواب دادن هم می‌تونی روی دکمهٔ ✍️ <b>پاسخ</b> زیر کلیک کنی، هم می‌تونی مستقیماً روی همین پیام <b>Reply</b> کنی و متنت رو بفرستی!"
+        help_guide_text = "\n\n💡 <b>راهنما:</b>برای جواب دادن هم می‌تونی روی دکمهٔ ✍️ <b>پاسخ</b> زیر کلیک کنی، هم می‌تونی مستقیماً روی همین پیام <b>Reply</b> کنی و متنت رو بفرستی!"
 
         # ۲. لایه دوم: پاسخ ناشناس به پیام دریافت شده در پیوی (مسیریابی با مپینگ دیتابیس)
         if message.reply_to_message:
