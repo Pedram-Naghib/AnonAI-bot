@@ -198,6 +198,18 @@ async def get_complete_user_context(user_id: int) -> dict:
         "short_code": None
     }
 
+# ==========================================
+# 🔍 پاتک مکان‌یابی آیدی کاربران از روی یوزرنیم تلگرام
+# ==========================================
+async def get_user_id_by_username(username: str):
+    """پیدا کردن آیدی عددی کاربر از روی یوزرنیم تلگرام (بدون حساسیت به حروف کوچک و بزرگ)"""
+    clean_username = username.strip().lstrip('@')
+    
+    conn = await get_connection()
+    target_uid = await conn.fetchval("SELECT user_id FROM users WHERE username ILIKE $1", clean_username)
+    await conn.close()
+    return target_uid
+
 
 # ────────────────────────────────────────────────────────
 # 🔗 بخش ویژه: موتور مدیریت لینک‌های فوق‌کوتاه اختصاصی دیتابیس
@@ -247,7 +259,11 @@ async def save_message_mapping(user_chat_id: int, user_msg_id: int, anon_sender_
 async def get_anon_sender_by_msg(user_chat_id: int, user_msg_id: int):
     """پیدا کردن فرستنده اصلی پیام بر اساس پیام دریافتی شما در پیوی ناشناس"""
     conn = await get_connection()
-    row = await conn.fetchrow("SELECT anon_sender_id, anon_msg_id FROM message_map WHERE user_chat_id = $1 AND user_msg_id = $2", user_chat_id, user_msg_id)
+    row = await conn.fetchrow("""
+        SELECT anon_sender_id, anon_msg_id 
+        FROM message_map 
+        WHERE user_chat_id = $1 AND user_msg_id = $2
+    """, user_chat_id, user_msg_id)
     await conn.close()
     if row:
         return row['anon_sender_id'], row['anon_msg_id']
@@ -256,7 +272,11 @@ async def get_anon_sender_by_msg(user_chat_id: int, user_msg_id: int):
 async def get_super_user_by_msg(anon_sender_id: int, anon_msg_id: int):
     """پیدا کردن اطلاعات پیام صاحب لینک (سوپریوزر) بر اساس ریپلای شخص غریبه"""
     conn = await get_connection()
-    row = await conn.fetchrow("SELECT user_chat_id, user_msg_id FROM message_map WHERE anon_sender_id = $1 AND anon_msg_id = $2", anon_sender_id, anon_msg_id)
+    row = await conn.fetchrow("""
+        SELECT user_chat_id, user_msg_id 
+        FROM message_map 
+        WHERE anon_sender_id = $1 AND anon_msg_id = $2
+    """, anon_sender_id, anon_msg_id)
     await conn.close()
     if row:
         return row['user_chat_id'], row['user_msg_id']
