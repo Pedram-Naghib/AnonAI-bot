@@ -154,6 +154,50 @@ async def clear_user_state(user_id: int):
     await conn.execute("UPDATE users SET anon_state = 'normal', reply_target_id = NULL WHERE user_id = $1", user_id)
     await conn.close()
 
+# ==========================================
+# 🎯 پاتک ارشد سرعت: دریافت متمرکز بافت کاربر (Complete Context Lookup)
+# ==========================================
+async def get_complete_user_context(user_id: int) -> dict:
+    """
+    شاه‌کلید بهینه‌سازی سرعت ربات
+    دریافت هم‌زمان وضعیت چت، استیت FSM، تارگت ریپلای، موجودی سکه، جنسیت و شورت‌کد تنها در ۱ ریکوئست
+    """
+    conn = await get_connection()
+    row = await conn.fetchrow("""
+        SELECT 
+            u.chat_status, 
+            u.active_partner_id, 
+            u.anon_state, 
+            u.reply_target_id, 
+            u.coins, 
+            u.gender,
+            ul.short_code
+        FROM users u
+        LEFT JOIN user_links ul ON u.user_id = ul.user_id
+        WHERE u.user_id = $1
+    """, user_id)
+    await conn.close()
+    
+    if row:
+        return {
+            "chat_status": row['chat_status'],
+            "active_partner_id": row['active_partner_id'],
+            "anon_state": row['anon_state'],
+            "reply_target_id": row['reply_target_id'],
+            "coins": row['coins'],
+            "gender": row['gender'],
+            "short_code": row['short_code']
+        }
+    return {
+        "chat_status": "idle",
+        "active_partner_id": None,
+        "anon_state": "normal",
+        "reply_target_id": None,
+        "coins": 10,
+        "gender": None,
+        "short_code": None
+    }
+
 
 # ────────────────────────────────────────────────────────
 # 🔗 بخش ویژه: موتور مدیریت لینک‌های فوق‌کوتاه اختصاصی دیتابیس
