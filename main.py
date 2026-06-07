@@ -10,6 +10,9 @@ from src.config import TELEGRAM_BOT_TOKEN
 from src.bot.handlers import register_bot_handlers
 from src.database.db_manager import init_db
 
+# 🔥 ایمپورت کردن ورکرهای پس‌زمینه جدید برای لود هم‌زمان در لوپ اصلی
+from src.bot.background_workers import background_log_worker, background_matchmaking_worker
+
 # 🎛 تنظیمات ران شدن (روی سیستم خودت False بگذار، روی سرور رندر True)
 USE_WEBHOOK = True
 
@@ -39,11 +42,17 @@ async def start_bot():
     print("🗄️ Initializing Databases...")
     await init_db()
     
-    # 🔌 ۲. ثبت هندلرهای اصلی ربات
+    # 🔌 ۲. ثبت هندلرهای اصلی ربات (شامل کلین ردیف‌های اولویت‌بندی شده)
     print("🔌 Registering bot handlers...")
     register_bot_handlers(bot)
     
-    # ⏰ ۳. تنظیم اسکجولر گزارش ۲۴ ساعته با تزریق اِونت لوپ جاری
+    # 🔥 ۳. روشن کردن ورکرهای اتمیک پس‌زمینه درون Event Loop جاری
+    # این تسک‌ها به صورت غیرمسدودکننده در پس‌زمینه شروع به مچ‌میکینگ و پردازش لاگ‌ها می‌کنند
+    print("⚡ Activating Background Workers (Log Queue & Matchmaking)...")
+    asyncio.create_task(background_log_worker(bot))
+    asyncio.create_task(background_matchmaking_worker(bot))
+    
+    # ⏰ ۴. تنظیم اسکجولر گزارش ۲۴ ساعته با تزریق اِونت لوپ جاری
     # این کار مانع از کرش کردن متد ارسال پیام ربات در بک‌آند می‌شود
     # current_loop = asyncio.get_running_loop()
     # scheduler = AsyncIOScheduler()
@@ -51,7 +60,7 @@ async def start_bot():
     # scheduler.start()
     # print("Base Analytics scheduler started...")
     
-    # ۴. انتخاب مسیر ران کردن (وب‌هوک یا پولینگ)
+    # ۵. انتخاب مسیر ران کردن (وب‌هوک یا پولینگ)
     if USE_WEBHOOK:
         print("🔔 Setting up Webhook...")
         await bot.remove_webhook()
@@ -64,10 +73,10 @@ async def start_bot():
     else:
         print("🔄 Starting Long Polling...")
         await bot.remove_webhook()
-        print("🤖 Humban is online via Polling...")
+        print("🤖 CyberAnons is online via Polling...")
         # اجرای بدون وقفه پولینگ لوکال
         await bot.infinity_polling(logger_level=20, allowed_updates=ALLOWED_UPDATES)
 
 if __name__ == "__main__":
-    # اجرای استاندارد ناهمگام
+    # اجرای استاندارد ناهمگام کل ساختار سرور
     asyncio.run(start_bot())
