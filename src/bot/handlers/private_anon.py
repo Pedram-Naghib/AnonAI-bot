@@ -17,10 +17,6 @@ from src.database.db_manager import (
     get_or_create_short_link, get_user_id_by_short_code, get_complete_user_context,
     get_user_id_by_username, claim_daily_bonus
 )
-
-# ==========================================
-# 🎯 اتصال به لایه حافظه موقت اختصاصی ربات (Redis)
-# ==========================================
 # ==========================================
 # 🎯 اتصال اتمیک و داینامیک به ردیس رندر (بدون باگ لوکال‌هواست)
 # ==========================================
