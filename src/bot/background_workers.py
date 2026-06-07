@@ -9,9 +9,9 @@ from src.database.db_manager import (
 )
 
 # ایمپورت کردن کلاینت ردیس، لایه باطل‌کننده کش و لاگر متمرکز از فایل اصلی
-from src.bot.handlers.private_anon import (
-    redis_client, cache_invalidate_user, log_queue, LOG_GROUP_ID, GOD_ID
-)
+from src.bot.handlers.private_anon import LOG_GROUP_ID, GOD_ID
+# بخش ایمپورت‌های بالای background_workers.py
+from src.bot.redis_config import redis_client, cache_invalidate_user, log_queue
 from src.bot.handlers.random_chat import get_keyboards
 
 # ==========================================

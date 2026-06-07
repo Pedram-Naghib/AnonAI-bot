@@ -8,9 +8,8 @@ from src.database.db_manager import (
 )
 
 # ۲. متدهای مربوط به ردیس و مدیریت کش را دقیقاً از ماژول پرایوت می‌آوریم
-from src.bot.handlers.private_anon import (
-    redis_client, cache_invalidate_user, send_bot_log, get_keyboards
-)
+from src.bot.redis_config import redis_client, cache_invalidate_user
+from src.bot.handlers.private_anon import send_bot_log, get_keyboards
 
 def register_account_handlers(bot: AsyncTeleBot):
 

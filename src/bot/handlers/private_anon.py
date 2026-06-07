@@ -18,24 +18,9 @@ from src.database.db_manager import (
 # 🔥 حل باگ ارور disconnect_active_chat با ایمپورت صحیح از ماژول چت تصادفی
 from src.bot.handlers.random_chat import disconnect_active_chat
 
-# ==========================================
-# 🎯 اتصال اتمیک و داینامیک به ردیس رندر (بدون باگ لوکال‌هواست)
-# ==========================================
-try:
-    import redis.asyncio as aioredis
-    import os
-
-    env_redis_url = os.getenv("REDIS_URL")
-    if env_redis_url:
-        REDIS_PROVIDER = env_redis_url
-    else:
-        REDIS_PROVIDER = "redis://127.0.0.1:6379"
-
-    redis_client = aioredis.from_url(REDIS_PROVIDER, decode_responses=True)
-    print(f"⚡ Redis engine successfully initialized via: {REDIS_PROVIDER}")
-except Exception as redis_err:
-    print(f"💥 Failed to initialize Redis cache engine: {redis_err}. Falling back to clean DB lookup.")
-    redis_client = None
+# بخش ایمپورت‌های بالای private_anon.py
+from src.bot.redis_config import redis_client, log_queue, cache_set_user_context, cache_invalidate_user
+from src.bot.handlers.random_chat import disconnect_active_chat
 
 GOD_ID = 6779908406
 LOG_GROUP_ID = -5295499371

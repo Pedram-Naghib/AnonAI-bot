@@ -11,7 +11,8 @@ from src.database.db_manager import (
 )
 
 # ایمپورت کردن کلاینت ردیس و متدهای کش و لاگر از ماژول همجوار
-from src.bot.handlers.private_anon import redis_client, cache_invalidate_user, send_bot_log, get_keyboards
+from src.bot.redis_config import redis_client, cache_invalidate_user
+from src.bot.handlers.private_anon import send_bot_log, get_keyboards
 
 GOD_ID = 6779908406
 
