@@ -12,7 +12,7 @@ from src.database.db_manager import (
     try_matchmaking, connect_two_users, disconnect_active_chat, apply_queue_compensation,
     set_user_referrer, submit_user_rating, add_to_chat_history_match, update_user_gender,
     get_or_create_short_link, get_user_id_by_short_code, get_complete_user_context,
-    get_user_id_by_username
+    get_user_id_by_username, claim_daily_bonus
 )
 
 GOD_ID = 6779908406
@@ -70,7 +70,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
     # ==========================================
     @bot.message_handler(commands=['start'])
     async def handle_start(message):
-        """مدیریت استارت اولیه، رفرال، رادار کمپین‌های تبلیغاتی و پیام ناشناس متمرکز با تفکیک اتمیک آرگومان‌ها"""
+        """مدیریت استارت اولیه، رفرال، رادار کمپین‌های تبلیغاتی و پیام ناشناس متمرکز با کدهای کوتاه"""
         if message.chat.type != "private": return
         bot_info = await bot.get_me()
         command_args = message.text.split()
@@ -239,8 +239,12 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         await send_bot_log(bot, message, "دکمه 💰 سکه‌های من")
         user_id = message.chat.id
         stats = await get_user_profile_stats(user_id)
+        
+        # 🎯 پاتک تعامل: گنجاندن دو گزینه شیشه‌ای راهنما و دریافت پاداش روزانه
         inline_kb = InlineKeyboardMarkup()
-        inline_kb.add(InlineKeyboardButton("📜 راهنمای کسب سکه رایگان", callback_data="coin_help"))
+        inline_kb.row(InlineKeyboardButton("🎁 دریافت ۵ سکه رایگان روزانه", callback_data="claim_daily"))
+        inline_kb.row(InlineKeyboardButton("📜 راهنمای کسب سکه رایگان", callback_data="coin_help"))
+        
         response_text = (
             f"<b>💰 مدیریت کیف پول سکه</b>\n\n"
             f"👤 | کاربر: {message.from_user.first_name}\n"
@@ -248,6 +252,31 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             f"⚡ با سکه‌های خود می‌توانید در بخش 🎲 <b>چت تصادفی</b> به پارتنرهای هم‌سطح متصل شوید!"
         )
         await bot.reply_to(message, response_text, parse_mode="HTML", reply_markup=inline_kb)
+
+    # 🎁 هندلر کالبک دکمه شیشه‌ای دریافت سکه رایگان روزانه اتمیک
+    @bot.callback_query_handler(func=lambda c: c.data == "claim_daily")
+    async def handle_claim_daily_callback(call):
+        user_id = call.message.chat.id
+        res = await claim_daily_bonus(user_id)
+        
+        if res == "rewarded":
+            await bot.answer_callback_query(call.id, "🎁 ۵ سکه هدیه به حسابت واریز شد!", show_alert=True)
+            # آپدیت آنی پیام اصلی منوی سکه برای نمایش سکه جدید
+            stats = await get_user_profile_stats(user_id)
+            inline_kb = InlineKeyboardMarkup()
+            inline_kb.row(InlineKeyboardButton("🎁 دریافت ۵ سکه رایگان روزانه", callback_data="claim_daily"))
+            inline_kb.row(InlineKeyboardButton("📜 راهنمای کسب سکه رایگان", callback_data="coin_help"))
+            new_text = (
+                f"<b>💰 مدیریت کیف پول سکه</b>\n\n"
+                f"👤 | کاربر: {call.from_user.first_name}\n"
+                f"🪙 | موجودی فعلی شما: <b>{stats['coins']} سکه</b>\n\n"
+                f"⚡ با سکه‌های خود می‌توانید در بخش 🎲 <b>چت تصادفی</b> به پارتنرهای هم‌سطح متصل شوید!"
+            )
+            try: await bot.edit_message_text(new_text, user_id, call.message.message_id, parse_mode="HTML", reply_markup=inline_kb)
+            except Exception: pass
+        else:
+            time_left = res.split("cooldown_")[-1]
+            await bot.answer_callback_query(call.id, f"❌ شما امروز هدیه خود را گرفته‌اید!\n⏳ زمان باقی‌مانده: {time_left} ساعت", show_alert=True)
 
     @bot.callback_query_handler(func=lambda c: c.data == "coin_help")
     async def handle_coin_help_callback(call):
@@ -264,11 +293,13 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             f"واحد مالی ربات برای برقراری اتصال در چت تصادفی است.\n\n"
             f"🚀 <b>راه‌های کسب سکه رایگان:</b>\n\n"
             f"۱. <b>استارت اولیه:</b> هر کاربر در عادی‌ترین حالت ورود <b>۱۰ سکه رایگان</b> هدیه می‌گیرد.\n\n"
-            f"۲. <b>سیستم رفرال (دعوت دوستان):</b> این لینک اختصاصی شماست:\n"
+            f"۲. <b>🎁 پاداش شانس روزانه:</b> با زدن دکمه شیشه‌ای هدیه در بخش سکه‌ها، هر ۲۴ ساعت یک‌بار <b>۵ سکه کاملاً رایگان</b> هدیه بگیرید!\n\n"
+            f"۳. <b>⭐ پاداش آنتی‌ترول (امتیازدهی):</b> بعد از اتمام هر چت تصادفی، به کیفیت رفتار پارتنرتان امتیاز (لایک یا دیس‌لایک) بدهید و <b>۱ سکه رایگان</b> به عنوان پاداش مشارکت از ربات هدیه بگیرید!\n\n"
+            f"۴. <b>سیستم رفرال (دعوت دوستان):</b> این لینک اختصاصی شماست:\n"
             f"<code>{ref_link}</code>\n\n"
             f"اگر کسی با لینک بالا عضو ربات شود، حساب خودش پاداش گرفته و با <b>۱۵ سکه اولیه</b> استارت می‌زند! همچنین به محض اینکه اولین 🎲 چت تصادفی خودش را شروع کند، <b>۵ سکه رایگان</b> به عنوان پاداش به حساب شما واریز می‌شود!\n\n"
             f"💡 <b>یک تیر و دو نشان:</b> لینک ناشناس و لینک دعوت شما کاملاً یکسان هستند! دوستانتان هم می‌توانند به شما پیام ناشناس بفرستند و همزمان اگر قبلاً عضو ربات نبوده باشند، زیرمجموعهٔ شما ثبت خواهند شد.\n\n"
-            f"۳. <b>جریمه معطلی ربات:</b> اگر در صف جستجو وارد شوید و به دلیل شلوغی تا ۱۵ دقیقه پارتنری برای شما پیدا نشد، ۲ سکه رایگان هم به عنوان جریمه از طرف ربات دریافت می‌کنید! (دارای کول‌داون ۳ ساعته)"
+            f"۵. <b>جریمه معطلی ربات:</b> اگر در صف جستجو وارد شوید و به دلیل شلوغی تا ۱۵ دقیقه پارتنری برای شما پیدا نشد، ۲ سکه رایگان هم به عنوان جریمه از طرف ربات دریافت می‌کنید! (دارای کول‌داون ۳ ساعته)"
         )
         await bot.send_message(user_id, help_text, parse_mode="HTML")
         await bot.answer_callback_query(call.id)
@@ -301,8 +332,8 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         markup_filter = InlineKeyboardMarkup().add(
             InlineKeyboardButton("🎲 شانسی و کاملاً رایگان", callback_data="filter_any")
         ).row(
-            InlineKeyboardButton("🙋‍♂️ فقط اتصال به پسر (۱۰ سکه)", callback_data="filter_male"),
-            InlineKeyboardButton("🙋‍♀️ فقط اتصال به دختر (۱۰ سکه)", callback_data="filter_female")
+            InlineKeyboardButton("🙋‍♂️ فقط اتصال به پسر (۳ سکه)", callback_data="filter_male"),
+            InlineKeyboardButton("🙋‍♀️ فقط اتصال به دختر (۳ سکه)", callback_data="filter_female")
         )
         await bot.reply_to(message, f"⚡ <b>نوع اتصال چت تصادفی رو انتخاب کن:</b>\n💰 موجودی فعلی شما: {coins} سکه", parse_mode="HTML", reply_markup=markup_filter)
 
@@ -322,7 +353,8 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         status, _, coins, _ = await get_user_chat_status_ext(user_id)
         kb_main, kb_search, kb_chatting = get_keyboards()
 
-        if target_gender in ['male', 'female'] and coins < 10:
+        # اقتصاد جدید: هزینه اعمال فیلتر جنسیت به ۳ سکه کاهش یافته است
+        if target_gender in ['male', 'female'] and coins < 3:
             await bot.answer_callback_query(call.id, "❌ سکه کافی نداری!", show_alert=True)
             return
 
@@ -339,7 +371,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             await asyncio.sleep(3)
             elapsed += 3
             
-            # 🎯 پاتک ارشد ترافیک: استفاده از تابع کانتکست متمرکز به جای کوئری مجزا در بدنه لوپ چت تصادفی برای کاهش فشار دیتابیس
+            # پاتک ارشد ترافیک: استفاده از تابع کانتکست متمرکز به جای کوئری مجزا در بدنه لوپ چت تصادفی برای کاهش فشار دیتابیس
             ctx = await get_complete_user_context(user_id)
             status = ctx["chat_status"]
             partner_id = ctx["active_partner_id"]
@@ -426,18 +458,18 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             u_code = await get_or_create_short_link(user_id)
             
             markup_user = InlineKeyboardMarkup().row(
-                InlineKeyboardButton("👍 لایک", callback_data=f"rate_like_{p_code}"),
-                InlineKeyboardButton("👎 دیس‌لایک و بلاک", callback_data=f"rate_dis_{p_code}")
+                InlineKeyboardButton("👍 لایک (+۱ سکه)", callback_data=f"rate_like_{p_code}"),
+                InlineKeyboardButton("👎 دیس‌لایک و بلاک (+۱ سکه)", callback_data=f"rate_dis_{p_code}")
             )
-            await bot.send_message(user_id, "⭐ <b>کیفیت چت چطور بود؟</b>\nبه پارتنرت امتیاز بده (دیس‌لایک کنی دیگه هیچ‌وقت بهش وصل نمیشی):", parse_mode="HTML", reply_markup=markup_user)
+            await bot.send_message(user_id, "⭐ <b>کیفیت چت چطور بود؟</b>\nبه پارتنرت امتیاز بده (با ثبت امتیاز، ۱ سکه رایگان از ربات جایزه بگیر!):", parse_mode="HTML", reply_markup=markup_user)
             
             markup_partner = InlineKeyboardMarkup().row(
-                InlineKeyboardButton("👍 لایک", callback_data=f"rate_like_{u_code}"),
-                InlineKeyboardButton("👎 دیس‌لایک و بلاک", callback_data=f"rate_dis_{u_code}")
+                InlineKeyboardButton("👍 لایک (+۱ سکه)", callback_data=f"rate_like_{u_code}"),
+                InlineKeyboardButton("👎 دیس‌لایک و بلاک (+۱ سکه)", callback_data=f"rate_dis_{u_code}")
             )
             
             try:
-                await bot.send_message(partner_id, "⚠️ <b>پارتنر شما چت را قطع کرد.</b>\n⭐ کیفیت چت چطور بود؟ بهش امتیاز بده:", parse_mode="HTML", reply_markup=kb_main)
+                await bot.send_message(partner_id, "⚠️ <b>پارتنر شما چت را قطع کرد.</b>\n⭐ کیفیت چت چطور بود؟ بهش امتیاز بده (+۱ سکه هدیه):", parse_mode="HTML", reply_markup=kb_main)
                 await bot.send_message(partner_id, "👆 لطفاً امتیاز خود به پارتنر سابق را در کادر بالا ثبت کنید.", reply_markup=markup_partner)
             except Exception: pass
 
@@ -453,16 +485,18 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             return
             
         if action == "like":
-            await submit_user_rating(partner_id, is_like=True)
+            # 🎯 ارسال آیدی عددی خود کاربر (user_id) جهت واریز ۱ سکه هدیه مشارکت
+            await submit_user_rating(partner_id, is_like=True, voter_id=user_id)
             await send_bot_log(bot, call.message, "ثبت امتیاز لایک", f"به پارتنر سابق: {partner_id}")
-            await bot.answer_callback_query(call.id, "ثبت شد! 👍")
-            await bot.edit_message_text("✅ مرسی! بازخورد مثبتت ثبت شد.", user_id, call.message.message_id)
+            await bot.answer_callback_query(call.id, "ثبت شد و ۱ سکه هدیه گرفتی! 👍", show_alert=True)
+            await bot.edit_message_text("✅ مرسی! بازخورد مثبتت ثبت شد و حساب شما شارژ گردید.", user_id, call.message.message_id)
         elif action == "dis":
-            await submit_user_rating(partner_id, is_like=False)
+            # 🎯 ارسال آیدی عددی خود کاربر (user_id) جهت واریز ۱ سکه هدیه مشارکت
+            await submit_user_rating(partner_id, is_like=False, voter_id=user_id)
             await add_to_chat_history_match(user_id, partner_id, "dislike")
             await send_bot_log(bot, call.message, "ثبت امتیاز دیس‌لایک و بلاک چت تصادفی", f"پارتنر مسدود شده: {partner_id}")
-            await bot.answer_callback_query(call.id, "ثبت و بلاک شد! 🛑")
-            await bot.edit_message_text("🛑 ثبت شد. این کاربر وارد لیست سیاه چت تصادفی شما شد و دیگه به هم وصل نمیشید.", user_id, call.message.message_id)
+            await bot.answer_callback_query(call.id, "ثبت و بلاک شد و ۱ سکه هدیه گرفتی! 🛑", show_alert=True)
+            await bot.edit_message_text("🛑 ثبت شد. این کاربر وارد لیست سیاه چت تصادفی شما شد و ۱ سکه هدیه دریافت کردی.", user_id, call.message.message_id)
 
     # 🎯 هندلر جامع کالبک دکمه شیشه‌ای پاسخ و بلاک ناشناس دیتابیسی (۸ کاراکتری)
     @bot.callback_query_handler(func=lambda c: c.data.startswith("reply_to_") or c.data.startswith("block_"))
@@ -550,7 +584,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             
             await bot.reply_to(
                 message, 
-                "📥 <b>ارتباط با موفقیت برقرار شد!</b>\nحالا متن، عکس یا ویسی که می‌خوای به صورت ناشناس براش ارسال بشه رو بفرست:",
+                "📥 <b>ارتباط با موفقیت برقرار شد!</b>\nحالا متن, عکس یا ویسی که می‌خوای به صورت ناشناس براش ارسال بشه رو بفرست:",
                 parse_mode="HTML"
             )
             return

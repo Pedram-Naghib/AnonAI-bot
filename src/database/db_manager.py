@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 # ⚙️ بخش ویژه: تنظیمات متمرکز اقتصادی ربات (قابل تغییر در آینده)
 # ==========================================
 BASE_CHAT_COST = 0       # هزینه پایه ورود به چت تصادفی
-GENDER_FILTER_COST = 0   # هزینه اضافه برای فیلتر جنسیت
+GENDER_FILTER_COST = 3   # هزینه اضافه برای فیلتر جنسیت (با توجه به استراتژی جدید به ۳ کاهش یافت)
 
 # ==========================================
 # ⚙️ تنظیمات و لایه اتصال متمرکز به Supabase
@@ -44,6 +44,7 @@ async def init_db():
             active_partner_id BIGINT DEFAULT NULL,
             queue_joined_at TIMESTAMPTZ DEFAULT NULL,
             last_compensation_at TIMESTAMPTZ DEFAULT NULL,
+            last_daily_bonus_at TIMESTAMPTZ DEFAULT NULL,
             referred_by BIGINT DEFAULT NULL,
             is_ref_rewarded BOOLEAN DEFAULT FALSE,
             gender TEXT DEFAULT NULL,
@@ -59,6 +60,7 @@ async def init_db():
     await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS rating_count INT DEFAULT 0;")
     await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT DEFAULT NULL;")
     await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS target_gender TEXT DEFAULT 'any';")
+    await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_daily_bonus_at TIMESTAMPTZ DEFAULT NULL;")
     
     # 🎯 جدول نقشه‌برداری لینک‌های فوق‌کوتاه دیتابیسی (۸ کاراکتری) برای پیام ناشناس
     await conn.execute("""
@@ -159,7 +161,7 @@ async def clear_user_state(user_id: int):
 async def get_complete_user_context(user_id: int) -> dict:
     """
     شاه‌کلید بهینه‌سازی سرعت ربات زیر بار ترافیک سنگین
-    دریافت هم‌زمان وضعیت چت، استیت FSM، تارگت ریپلای، موجودی سکه، جنسیت و شورت‌کد تنها در ۱ کوئری متمرکز
+    دریافت هم‌زمان وضعیت چت، استیت FSM، تارگت ریپلای، موجودی سکه، جنسیت و شورت‌کد تنها در ۱ ریکوئست متمرکز
     """
     conn = await get_connection()
     row = await conn.fetchrow("""
@@ -535,12 +537,14 @@ async def set_user_referrer(user_id: int, referrer_id: int, is_pure_ref: bool = 
 
 
 # ────────────────────────────────────────────────────────
-# ⭐ بخش هشتم: موتور آنتی‌ترول (محاسبه میانگین متحرک و ثبت فیلتر دیس‌لایک)
+# ⭐ بخش هشتم: موتور آنتی‌ترول و پاتک‌های اقتصادی جدید ربات
 # ────────────────────────────────────────────────────────
 
-async def submit_user_rating(target_id: int, is_like: bool):
-    """محاسبه میانگین متحرک فرمولی امتیاز آنتی‌ترول کاربران بین بازهٔ ۱.۰ تا ۵.۰"""
+async def submit_user_rating(target_id: int, is_like: bool, voter_id: int):
+    """محاسبه میانگین متحرک امتیاز آنتی‌ترول هدف + 🎁 واریز ۱ سکه هدیه به شخص امتیازدهنده"""
     conn = await get_connection()
+    
+    # ۱. محاسبه میانگین متحرک فرمولی پارتنر هدف
     row = await conn.fetchrow("SELECT rating, rating_count FROM users WHERE user_id = $1", target_id)
     if row:
         current_rating = row['rating'] or 5.0
@@ -550,6 +554,9 @@ async def submit_user_rating(target_id: int, is_like: bool):
         new_rating = ((current_rating * current_count) + new_score) / new_count
         new_rating = max(1.0, min(5.0, new_rating))
         await conn.execute("UPDATE users SET rating = $2, rating_count = $3 WHERE user_id = $1", target_id, new_rating, new_count)
+        
+    # ۲. 🎁 پاتک اقتصادی: شارژ آنی حساب شخص رأی‌دهنده با ۱ سکه هدیه به عنوان پاداش مشارکت
+    await conn.execute("UPDATE users SET coins = coins + 1 WHERE user_id = $1", voter_id)
     await conn.close()
 
 async def add_to_chat_history_match(user_id: int, partner_id: int, status_type: str):
@@ -558,3 +565,33 @@ async def add_to_chat_history_match(user_id: int, partner_id: int, status_type: 
     if status_type == "dislike":
         await conn.execute("INSERT INTO random_chat_blocks (user_id, blocked_partner_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", user_id, partner_id)
     await conn.close()
+
+async def claim_daily_bonus(user_id: int) -> str:
+    """
+    🎁 سیستم پاداش روزانه اتمیک: اعتبارسنجی قفل زمان ۲۴ ساعته و واریز ۵ سکه رایگان
+    خروجی‌ها:
+      - 'rewarded': واریز موفقیت‌آمیز ۵ سکه
+      - 'cooldown': هنوز ۲۴ ساعت سپری نشده است
+    """
+    conn = await get_connection()
+    row = await conn.fetchrow("SELECT last_daily_bonus_at FROM users WHERE user_id = $1", user_id)
+    
+    now = datetime.now()
+    if row and row['last_daily_bonus_at']:
+        last_bonus = row['last_daily_bonus_at']
+        if now - last_bonus < timedelta(days=1):
+            # محاسبه زمان باقی‌مانده تا پایان کول‌داون
+            time_left = timedelta(days=1) - (now - last_bonus)
+            hours, remainder = divmod(time_left.seconds, 3600)
+            minutes, _ = divmod(remainder, 60)
+            await conn.close()
+            return f"cooldown_{hours:02d}:{minutes:02d}"
+            
+    # واریز ۵ سکه هدیه و آپدیت مارکر زمان دیتابیس در یک تراکنش
+    await conn.execute("""
+        UPDATE users 
+        SET coins = coins + 5, last_daily_bonus_at = NOW() 
+        WHERE user_id = $1
+    """, user_id)
+    await conn.close()
+    return "rewarded"
