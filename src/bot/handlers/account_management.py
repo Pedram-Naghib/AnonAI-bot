@@ -7,9 +7,8 @@ from src.database.db_manager import (
     get_complete_user_context, block_user
 )
 
-# ۲. متدهای مربوط به ردیس و مدیریت کش را دقیقاً از ماژول پرایوت می‌آوریم
-from src.bot.redis_config import redis_client, cache_invalidate_user
-from src.bot.handlers.private_anon import send_bot_log, get_keyboards
+# ۲. متدهای مربوط به ردیس و مدیریت کش را کاملاً از لایه خنثی کانفیگ می‌آوریم
+from src.bot.redis_config import redis_client, cache_invalidate_user, send_bot_log
 
 def register_account_handlers(bot: AsyncTeleBot):
 
@@ -33,6 +32,8 @@ def register_account_handlers(bot: AsyncTeleBot):
             f"📤 | ناشناس ارسال شده: {stats['sent']}\n"
             f"⛔️ | بلاک شده‌ها: {stats['blocked']}"
         )
+        # 🔥 پاتک لوکال ایمپورت برای جلوگیری از قفل شدن لود اولیه پایتون
+        from src.bot.handlers.private_anon import get_keyboards
         kb_main, _, _ = get_keyboards()
         await bot.reply_to(message, response_text, parse_mode="HTML", reply_markup=kb_main)
 
@@ -146,7 +147,6 @@ def register_account_handlers(bot: AsyncTeleBot):
     @bot.callback_query_handler(func=lambda c: c.data in ["confirm_delete_my_data", "cancel_delete_my_data"])
     async def handle_delete_account_callbacks(call):
         user_id = call.message.chat.id
-        kb_main, _, _ = get_keyboards()
         
         if call.data == "cancel_delete_my_data":
             await bot.answer_callback_query(call.id, "عملیات حذف لغو شد. 😌")

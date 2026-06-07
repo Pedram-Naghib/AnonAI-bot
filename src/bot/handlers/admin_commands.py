@@ -1,5 +1,6 @@
 import re
 import traceback
+import asyncio
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import ReplyKeyboardRemove
 
@@ -30,7 +31,8 @@ def register_admin_handlers(bot: AsyncTeleBot):
         if message.chat.id not in SUPER_USERS: return
         try:
             text = message.text.split("/gp ")
-            await bot.send_message(GROUP_CHAT_ID, text[-1], reply_markup=ReplyKeyboardRemove())
+            if len(text) > 1:
+                await bot.send_message(GROUP_CHAT_ID, text[-1], reply_markup=ReplyKeyboardRemove())
         except Exception as e:
             print(f"❌ Error sending gp message: {e}")
 
@@ -55,14 +57,11 @@ def register_admin_handlers(bot: AsyncTeleBot):
     # ==========================================
     @bot.message_handler(commands=['db_stats'], func=lambda m: m.chat.type == "private" and m.from_user.id in SUPER_USERS)
     async def handle_god_db_stats(message):
-        # ارسال چت اکشن تایپینگ برای ادمین جهت تایید دریافت دستور
-        await bot.send_chat_action(GOD_ID, 'typing')
-        
+        await bot.send_chat_action(message.chat.id, 'typing')
         pool = await get_connection_pool()
         
         try:
             async with pool.acquire() as conn:
-                # کوئری ترکیبی برای محاسبه تعداد ارسال و دریافت هر کاربر بر اساس جدول نگاشت پیام‌ها
                 query = """
                     SELECT 
                         u.user_id, 
@@ -82,43 +81,54 @@ def register_admin_handlers(bot: AsyncTeleBot):
                         GROUP BY anon_sender_id
                     ) s ON u.user_id = s.anon_sender_id
                     ORDER BY (COALESCE(r.received_count, 0) + COALESCE(s.sent_count, 0)) DESC
-                    LIMIT 20; -- نمایش ۲۰ کاربر فعال‌تر اول جهت جلوگیری از طولانی شدن متن پیام
+                    LIMIT 40; -- سقف را بالا می‌بریم تا بعد از فیلتر بلاکی‌ها حتماً ۲۰ کاربر پر شود
                 """
                 
                 rows = await conn.fetch(query)
-                
                 if not rows:
                     await bot.reply_to(message, "📭 هیچ کاربری در دیتابیس یافت نشد.")
                     return
-                
+
+                # 🛠️ پاتک موازی ضد لیمیت تلگرام (Safe Check Worker)
+                async def check_user_block(row):
+                    uid = row['user_id']
+                    try:
+                        # تلاش برای ارسال سیگنال چت‌اکشن با تایم‌اوت کوتاه ۲ ثانیه‌ای
+                        await asyncio.wait_for(bot.send_chat_action(uid, 'typing'), timeout=2.0)
+                        return row, True
+                    except Exception:
+                        return row, False
+
+                # اجرای هم‌زمان و موازی تست بلاک بودن تمام کاربران دیتابیس
+                tasks = [check_user_block(row) for row in rows]
+                checked_results = await asyncio.gather(*tasks)
+
                 report_lines = [
                     "👑 <b>گزارش ارشد دیتابیس کاربران فعال</b>\n",
-                    "📊 <i>۲۰ کاربر برتر بر اساس بیشترین حجم تعاملات ناشناس:</i>\n"
+                    "📊 <i>کاربران برتر بر اساس بیشترین حجم تعاملات ناشناس (بلاک نکرده‌ها):</i>\n"
                 ]
                 
-                for index, row in enumerate(rows, 1):
+                valid_count = 0
+                for row, is_active in checked_results:
+                    if not is_active: continue # اگر ربات را بلاک کرده بود رد می‌شویم
+                    
+                    valid_count += 1
                     uid = row['user_id']
                     name = row['first_name'] or "Unknown"
                     username = f"@{row['username']}" if row['username'] else "بدون یوزرنیم"
                     received = row['received']
                     sent = row['sent']
                     
-                    # بررسی زنده وضعیت بلاک (فقط کاربرانی که ربات را بلاک نکرده‌اند)
-                    try:
-                        await bot.send_chat_action(uid, 'typing')
-                    except Exception:
-                        # کاربر ربات را بلاک کرده است؛ نادیده گرفته می‌شود
-                        continue
-                    
                     line = (
-                        f"{index}. 👤 <b>{name}</b> (<code>{uid}</code>) | {username}\n"
+                        f"{valid_count}. 👤 <b>{name}</b> (<code>{uid}</code>) | {username}\n"
                         f"   📥 دریافتی: <b>{received}</b> | 📤 ارسالی: <b>{sent}</b>\n"
                         f"   ➖"
                     )
                     report_lines.append(line)
-                
-                # بررسی اینکه آیا کاربری بعد از فیلتر بلاکی‌ها باقی مانده است یا خیر
-                if len(report_lines) == 2:
+                    
+                    if valid_count >= 20: break # گلچین کردن دقیق ۲۰ کاربر فعال اول
+
+                if valid_count == 0:
                     await bot.reply_to(message, "⚠️ تمام کاربران موجود در این بخش، ربات را مسدود (Block) کرده‌اند.")
                     return
                     
@@ -128,4 +138,4 @@ def register_admin_handlers(bot: AsyncTeleBot):
         except Exception as err:
             print(f"💥 Admin Stats Command Failed: {err}")
             traceback.print_exc()
-            await bot.reply_to(message, "❌ خطایی در استخراج اطلاعات از دیتابیس رخ داد.")
+            await bot.reply_to(message, "❌ خطای فنی در استخراج اطلاعات از دیتابیس رخ داد.")

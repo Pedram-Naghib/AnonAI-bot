@@ -3,7 +3,7 @@ import string
 import secrets
 import asyncpg
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # ==========================================
 # ⚙️ بخش ویژه: تنظیمات متمرکز اقتصادی ربات
@@ -23,7 +23,7 @@ DB_NAME = "postgres"
 DB_POOL = None
 
 async def get_connection_pool():
-    """ساخت یا دریافت پูล اتصالات متمرکز دیتابیس جهت بهینه‌سازی کانکشن‌ها"""
+    """ساخت یا دریافت پول اتصالات متمرکز دیتابیس جهت بهینه‌سازی کانکشن‌ها"""
     global DB_POOL
     if DB_POOL is None:
         DB_POOL = await asyncpg.create_pool(
@@ -37,7 +37,7 @@ async def get_connection():
     return await pool.acquire()
 
 # ==========================================
-# 🏁 متد اصلی مقداردهی جداول و ایندکس‌ها
+# ⚖️ متد اصلی مقداردهی جداول و ایندکس‌ها
 # ==========================================
 async def init_db():
     pool = await get_connection_pool()
@@ -239,7 +239,6 @@ async def try_matchmaking(user_id: int, stage: int) -> int:
         return await conn.fetchval(base_query, user_id, my_rating, my_target, my_gender) if stage in [1, 2] else await conn.fetchval(base_query, user_id, my_target, my_gender)
 
 async def connect_two_users(user1_id: int, user2_id: int) -> bool:
-    # جلوگیری از بن‌بست دیتابیس (Deadlock) با قفل‌گذاری اتمیک و ترتیبی
     low_id, high_id = sorted([user1_id, user2_id])
     pool = await get_connection_pool()
     async with pool.acquire() as conn:
@@ -283,8 +282,14 @@ async def apply_queue_compensation(user_id: int) -> str:
         if not row: return "failed"
             
         refund = BASE_CHAT_COST + (GENDER_FILTER_COST if row['target_gender'] in ['male', 'female'] else 0)
-        now = datetime.now()
-        if row['last_compensation_at'] and now - row['last_compensation_at'] < timedelta(hours=3):
+        
+        # 🔥 همگام‌سازی منطق زمانی با تایم‌زون TIMESTAMPTZ سرور سوپابیس
+        now = datetime.now(timezone.utc)
+        last_comp = row['last_compensation_at']
+        if last_comp and last_comp.tzinfo is None:
+            last_comp = last_comp.replace(tzinfo=timezone.utc)
+
+        if last_comp and now - last_comp < timedelta(hours=3):
             await conn.execute("UPDATE users SET chat_status = 'idle', queue_joined_at = NULL, coins = coins + $2 WHERE user_id = $1", user_id, refund)
             return "cooldown"
             
@@ -300,7 +305,6 @@ async def submit_user_rating(target_id: int, is_like: bool, voter_id: int):
         row = await conn.fetchrow("SELECT rating, rating_count FROM users WHERE user_id = $1", target_id)
         if row:
             current_rating, current_count = row['rating'] or 5.0, row['rating_count'] or 0
-            # حفظ ریتینگ مابین اعداد 1 تا 5 با فرمول دقیق کد اول
             new_rating = max(1.0, min(5.0, ((current_rating * current_count) + (5.0 if is_like else 1.0)) / (current_count + 1)))
             await conn.execute("UPDATE users SET rating = $1, rating_count = rating_count + 1 WHERE user_id = $2", new_rating, target_id)
             
@@ -317,14 +321,10 @@ async def claim_daily_bonus(user_id: int) -> str:
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT last_daily_bonus_at FROM users WHERE user_id = $1", user_id)
         
-        # استفاده از utcnow برای سازگاری ۱۰۰٪ با منطقه زمانی دیتابیس ابری Supabase
-        from datetime import timezone
         now = datetime.now(timezone.utc)
         
         if row and row['last_daily_bonus_at']:
             last_bonus = row['last_daily_bonus_at']
-            
-            # تبدیل زمان دیتابیس به UTC در صورت لزوم جهت اطمینان از هم‌نوع بودن
             if last_bonus.tzinfo is None:
                 last_bonus = last_bonus.replace(tzinfo=timezone.utc)
                 
@@ -337,16 +337,17 @@ async def claim_daily_bonus(user_id: int) -> str:
         await conn.execute("UPDATE users SET coins = coins + 5, last_daily_bonus_at = NOW() WHERE user_id = $1", user_id)
         return "rewarded"
 
-
 async def set_user_referrer(user_id: int, referrer_id: int, is_pure_ref: bool = False):
     """ثبت آیدی معرف برای کاربر جدید در صورت صحت شرایط رفرال"""
     pool = await get_connection_pool()
     async with pool.acquire() as conn:
-        # بررسی اینکه کاربر قبلاً معرف نداشته باشد و خودش هم معرف خودش نباشد
         current_ref = await conn.fetchval("SELECT referred_by FROM users WHERE user_id = $1", user_id)
         if not current_ref and user_id != referrer_id:
             await conn.execute("UPDATE users SET referred_by = $2 WHERE user_id = $1", user_id, referrer_id)
             
-            # اگر کاربر کاملاً جدید است، طبق منطق مارکتینگ شما ۱۵ سکه اولیه می‌گیرد
+            # 🔥 اصلاح منطق مارکتینگ: اگر کاربر جدید باشد کیف پولش ۱۵ تایی می‌شود
+            # اگر قدیمی باشد به پاس احترام به او سکه هدیه اضافه می‌گردد
             if is_pure_ref:
                 await conn.execute("UPDATE users SET coins = 15 WHERE user_id = $1", user_id)
+            else:
+                await conn.execute("UPDATE users SET coins = coins + 5 WHERE user_id = $1", user_id)

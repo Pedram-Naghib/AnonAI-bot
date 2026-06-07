@@ -54,7 +54,8 @@ async def background_matchmaking_worker(bot: AsyncTeleBot):
             waiting_users = await redis_client.zrange("match_queue", 0, -1, withscores=True)
             now = time.time()
             
-            # 🔥 لایه پاتک ضدچرخش (Runtime Import): ایمپورت در زمان اجرا برای جلوگیری از گره خوردن بوت اولیه پایتون
+            # 🔥 پاتک نهایی ضدچرخش (Runtime/Local Import): 
+            # ایمپورت دقیقاً در زمان اجرا انجام می‌شود تا لود فایل‌ها در زمان بوت لنگر نیندازد.
             from src.bot.handlers.private_anon import get_keyboards
             kb_main, kb_search, kb_chatting = get_keyboards()
             

@@ -15,7 +15,7 @@ from src.database.db_manager import (
     get_user_profile_stats
 )
 
-# 🔥 حل باگ اِمپورت چرخشی: دریافت ابزارهای ردیس، کش و لاگر متمرکز از فایل خنثی
+# 🔥 حل باگ اِمپورت چرخشی: دریافت تمام ابزارهای ردیس، کش و لاگر متمرکز از فایل خنثی
 from src.bot.redis_config import redis_client, log_queue, cache_set_user_context, cache_invalidate_user, send_bot_log
 
 GOD_ID = 6779908406
@@ -129,11 +129,27 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             except Exception: pass
             return
 
-        # ۲. هندلر دکمه شیشه‌ای بنر استوری
+        # ۲. هندلر دکمه شیشه‌ای بنر استوری و رفرال
         if call.data.startswith("get_my_banner_"):
             try:
-                await bot.answer_callback_query(call.id, "در حال تولید بنر اختصاصی شما...", show_alert=False)
-            except Exception: pass
+                first_name = call.from_user.first_name or "دوست"
+                short_code = call.data.split("get_my_banner_")[-1]
+                bot_info = await bot.get_me()
+                anon_link = f"https://t.me/{bot_info.username}?start={short_code}"
+                
+                banner_text = (
+                    f"سلام {first_name} هستم 😉\n"
+                    f"لینک زیر رو لمس کن و هر انتقادی که نسبت به من داری یا حرفی که تو دلت هست رو با خیال راحت بنویس و بفرست. "
+                    f"بدون اینکه از اسمت باخبر بشم پیامت به من می‌رسه. "
+                    f"خودتم می‌تونی امتحان کنی و از همه بخوای راحت و ناشناس بهت پیام بفرستن، حرفای خیلی جالبی می‌شنوی:\n\n"
+                    f"👉 {anon_link}"
+                )
+                
+                await bot.send_message(user_id, banner_text)
+                await bot.answer_callback_query(call.id, "✅ بنر شما با موفقیت ارسال شد!")
+            except Exception as e:
+                print(f"💥 Error in sending banner: {e}")
+                await bot.answer_callback_query(call.id, "❌ خطایی در ساخت بنر رخ داد.")
             return
 
         # ۳. پاسخ ناشناس از طریق دکمه شیشه‌ای پاسخ دایرکت
@@ -164,7 +180,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         await send_bot_log(bot, message, "دکمه 🔍 ارسال پیام ناشناس به آیدی خاص")
         await set_user_state(user_id, "waiting_for_username")
         await cache_invalidate_user(user_id)
-        await bot.reply_to(message, "🕶️ <b>آیدی تلگرام (Username) person مورد نظرت رو بفرست:</b>", parse_mode="HTML")
+        await bot.reply_to(message, "🕶️ <b>آیدی تلگرام (Username) شخص مورد نظرت رو بفرست:</b>", parse_mode="HTML")
 
     # ==========================================
     # 💬 هندلر جامع تونل‌زنی زنده پیام‌ها و پاسخ‌های ناشناس پیوی
@@ -201,13 +217,13 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             try:
                 await bot.copy_message(chat_id=partner_id, from_chat_id=user_id, message_id=message.message_id)
             except Exception:
-                # 🔥 ایمپورت محلی و کاملاً پویا برای از بین بردن ۱۰۰٪ باگ Circular Import دیسکونکت
+                # 🔥 ایمپورت کاملاً پویا جهت باز شدن گره لود چرخشی در زمان قطع گفتگو
                 from src.bot.handlers.random_chat import disconnect_active_chat
                 await disconnect_active_chat(user_id)
                 await cache_invalidate_user(user_id)
                 await cache_invalidate_user(partner_id)
                 kb_main, _, _ = get_keyboards()
-                await bot.send_message(user_id, "❌ ارتباط قطع شد پارتنر ربات رو بلاک کرده است.", reply_markup=kb_main)
+                await bot.send_message(user_id, "❌ ارتباط قطع شد؛ پارتنر ربات رو بلاک کرده است.", reply_markup=kb_main)
             return
 
         # حالت انتظار برای دریافت یوزرنیم مقصد

@@ -10,9 +10,8 @@ from src.database.db_manager import (
     get_complete_user_context, get_user_profile_stats
 )
 
-# ایمپورت کردن کلاینت ردیس و متدهای کش و لاگر از ماژول همجوار
-from src.bot.redis_config import redis_client, cache_invalidate_user
-from src.bot.handlers.private_anon import send_bot_log, get_keyboards
+# 🔥 دریافت متدهای لایه خنثی کش و لاگر از فایل کانفیگ برای پاره کردن حلقه ایمپورت چرخشی
+from src.bot.redis_config import redis_client, cache_invalidate_user, send_bot_log
 
 GOD_ID = 6779908406
 
@@ -25,6 +24,9 @@ def register_random_chat_handlers(bot: AsyncTeleBot):
     async def handle_start_random_chat(message):
         user_id = message.chat.id
         status, _, coins, gender = await get_user_chat_status_ext(user_id)
+        
+        # 🔥 پاتک لوکال ایمپورت: منوها را زمان اجرا فراخوانی می‌کنیم تا سیستم قفل نکند
+        from src.bot.handlers.private_anon import get_keyboards
         kb_main, kb_search, kb_chatting = get_keyboards()
         
         if status == 'chatting':
@@ -70,6 +72,9 @@ def register_random_chat_handlers(bot: AsyncTeleBot):
         target_gender = call.data.split("filter_")[-1]
         user_id = call.message.chat.id
         status, _, coins, _ = await get_user_chat_status_ext(user_id)
+        
+        # 🔥 لوکال ایمپورت منوها
+        from src.bot.handlers.private_anon import get_keyboards
         kb_main, kb_search, kb_chatting = get_keyboards()
 
         if target_gender in ['male', 'female'] and coins < 3:
@@ -111,6 +116,9 @@ def register_random_chat_handlers(bot: AsyncTeleBot):
             await redis_client.delete(f"search_meta:{user_id}")
             
         await send_bot_log(bot, message, "دکمه ❌ انصراف از صف")
+        
+        # 🔥 لوکال ایمپورت منوها
+        from src.bot.handlers.private_anon import get_keyboards
         kb_main, _, _ = get_keyboards()
         await bot.reply_to(message, "🛑 با موفقیت از صف جستجو خارج شدی و سکه‌هات برگشت خورد.", reply_markup=kb_main)
 
@@ -120,6 +128,9 @@ def register_random_chat_handlers(bot: AsyncTeleBot):
     @bot.message_handler(func=lambda m: m.text == "🛑 قطع چت فعال" and m.chat.type == "private")
     async def handle_disconnect_chat(message):
         user_id = message.chat.id
+        
+        # 🔥 لوکال ایمپورت منوها
+        from src.bot.handlers.private_anon import get_keyboards
         kb_main, _, _ = get_keyboards()
         
         context = await get_complete_user_context(user_id)
