@@ -7,9 +7,8 @@ from datetime import datetime, timedelta
 # ==========================================
 # ⚙️ بخش ویژه: تنظیمات متمرکز اقتصادی ربات (قابل تغییر در آینده)
 # ==========================================
-# 🎯 فعلاً همه هزینه‌ها ۰ (رایگان) است. بعداً راحت همین‌جا اعداد را عوض کن پدرام.
-BASE_CHAT_COST = 0       # هزینه پایه ورود به چت تصادفی (بعداً می‌کنی ۵)
-GENDER_FILTER_COST = 0   # هزینه اضافه برای فیلتر جنسیت (بعداً می‌کنی ۱۰)
+BASE_CHAT_COST = 0       # هزینه پایه ورود به چت تصادفی
+GENDER_FILTER_COST = 0   # هزینه اضافه برای فیلتر جنسیت
 
 # ==========================================
 # ⚙️ تنظیمات و لایه اتصال متمرکز به Supabase
@@ -159,8 +158,8 @@ async def clear_user_state(user_id: int):
 # ==========================================
 async def get_complete_user_context(user_id: int) -> dict:
     """
-    شاه‌کلید بهینه‌سازی سرعت ربات
-    دریافت هم‌زمان وضعیت چت، استیت FSM، تارگت ریپلای، موجودی سکه، جنسیت و شورت‌کد تنها در ۱ ریکوئست
+    شاه‌کلید بهینه‌سازی سرعت ربات زیر بار ترافیک سنگین
+    دریافت هم‌زمان وضعیت چت، استیت FSM، تارگت ریپلای، موجودی سکه، جنسیت و شورت‌کد تنها در ۱ کوئری متمرکز
     """
     conn = await get_connection()
     row = await conn.fetchrow("""
@@ -315,7 +314,7 @@ async def get_user_profile_stats(user_id: int) -> dict:
     
     received_anon_msgs = await conn.fetchval("SELECT COUNT(*) FROM message_map WHERE user_chat_id = $1", user_id)
     
-    # 🎯 قابلیت جدید: شمارش پیام‌های ناشناس ارسال شده توسط این کاربر غریبه
+    # 🎯 شمارش پیام‌های ناشناس ارسال شده توسط این کاربر غریبه برای بخش آمار من
     sent_anon_msgs = await conn.fetchval("SELECT COUNT(*) FROM message_map WHERE anon_sender_id = $1", user_id)
     
     blocked_count = await conn.fetchval("SELECT COUNT(*) FROM block_list WHERE owner_id = $1", user_id)

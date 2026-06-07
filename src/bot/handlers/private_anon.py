@@ -66,11 +66,11 @@ def get_keyboards():
 def register_private_anon_handlers(bot: AsyncTeleBot):
 
     # ==========================================
-    # ⚙️ بخش دوم: هندلر دستور /start مجهز به سیستم رفرال و رادار تبلیغات فوق‌کوتاه
+    # ⚙️ بخش دوم: هندلر دستور /start مجهز به تفکیک قطعی فلو تبلیغات و ناشناس
     # ==========================================
     @bot.message_handler(commands=['start'])
     async def handle_start(message):
-        """مدیریت استارت اولیه، رفرال، رادار کمپین‌های تبلیغاتی و پیام ناشناس متمرکز با کدهای کوتاه"""
+        """مدیریت استارت اولیه، رفرال، رادار کمپین‌های تبلیغاتی و پیام ناشناس متمرکز با تفکیک اتمیک آرگومان‌ها"""
         if message.chat.type != "private": return
         bot_info = await bot.get_me()
         command_args = message.text.split()
@@ -88,18 +88,19 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         if len(command_args) > 1:
             argument = command_args[1]
             
-            # 📢 لایه اول: رادار ردیابی کمپین‌های تبلیغاتی (مثال: ?start=ad_ecstasy)
-            if argument.startswith("ad_") and is_new_user:
-                channel_name = argument.split("ad_")[-1]
-                # ارسال لاگ هوشمند به گروه بدون استفاده از return جهت جلوگیری از قفل شدن ربات
-                await send_bot_log(
-                    bot, 
-                    message, 
-                    "📥 ورود از کمپین تبلیغاتی", 
-                    f"کاربر جدید از لینک تبلیغاتی کانال [{channel_name}] وارد شد 🔥"
-                )
+            # 📢 لایه اول: رادار ردیابی کمپین‌های تبلیغاتی
+            if argument.startswith("ad_"):
+                if is_new_user:
+                    channel_name = argument.split("ad_")[-1]
+                    await send_bot_log(
+                        bot, 
+                        message, 
+                        "📥 ورود از کمپین تبلیغاتی", 
+                        f"کاربر جدید از لینک تبلیغاتی کانال [{channel_name}] وارد شد 🔥"
+                    )
+                # بدون دستور return، اجازه می‌دهیم فلو پایین بیاید و منوی اصلی ربات برایش باز شود.
             
-            # 🔗 لایه دوم: پردازش رفرال و هدایت به پیام ناشناس دیتابیسی ۸ کاراکتری
+            # 🔗 لایه دوم: پردازش رفرال و هدایت به پیام ناشناس دیتابیسی ۸ کاراکتری (فقط در صورتی که لینک تبلیغاتی نباشد)
             else:
                 short_code = argument
                 target_owner_id = await get_user_id_by_short_code(short_code)
@@ -138,7 +139,10 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         # جریان عادی ربات در صورت استارت معمولی یا عبور بدون قطع ریکوئست از رادار تبلیغات ad_
         my_short_code = await get_or_create_short_link(user_id)
         anon_link = f"https://t.me/{bot_info.username}?start={my_short_code}"
-        await send_bot_log(bot, message, "کامند /start", f"استارت معمولی و دریافت لینک کوتاه: {my_short_code}")
+        
+        # تنها در صورتی لاگ استارت معمولی می‌فرستیم که آرگومان تبلیغاتی همراهش نباشد
+        if len(command_args) <= 1 or not command_args[1].startswith("ad_"):
+            await send_bot_log(bot, message, "کامند /start", f"استارت معمولی و دریافت لینک کوتاه: {my_short_code}")
         
         inline_kb = InlineKeyboardMarkup()
         inline_kb.add(InlineKeyboardButton("🔗 دریافت بنر استوری و لینک من", callback_data=f"get_my_banner_{my_short_code}"))
@@ -149,7 +153,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             f"👋 <b>به ربات پیام ناشناس CyberAnons خوش آمدید!</b>\n\n"
             f"اینجا یک فضای کاملاً امن، مخفی و پرسرعت برای گفتگوست 🕶️\n\n"
             f"🔗 <b>لینک اختصاصی شما:</b>\n<code>{anon_link}</code>\n\n"
-            f"👇 با دکمهٔ زیر می‌توانید بنر آماده شدهٔ این لینک را برای قرار دادنใน استوری اینستاگرام یا کانال تلگرامتان دریافت کنید:"
+            f"👇 با دکمهٔ زیر می‌توانید بنر آماده شدهٔ این لینک را برای قرار دادن در استوری اینستاگرام یا کانال تلگرامتان دریافت کنید:"
         )
         
         msg = god_text if user_id == GOD_ID else normal_text
@@ -212,7 +216,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         stats = await get_user_profile_stats(message.chat.id)
         gender_map = {"male": "🙋‍♂️ پسر", "female": "🙋‍♀️ دختر", None: "ثبت نشده ⚠️"}
         
-        # 🎯 اضافه شدن فلو نمایش ناشناس ارسال شده (stats['sent']) به خروجی نهایی
         response_text = (
             f"<b>📊 آمار و پروفایل من</b>\n\n"
             f"👤 | نام: {message.from_user.first_name}\n"
@@ -252,7 +255,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         user_id = call.message.chat.id
         bot_info = await bot.get_me()
         
-        # بهینه‌سازی: استفاده از همان لینک ناشناس فوق‌کوتاه برای سیستم دعوت رفرال کاربری
         my_short_code = await get_or_create_short_link(user_id)
         ref_link = f"https://t.me/{bot_info.username}?start={my_short_code}"  
         
@@ -336,9 +338,14 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         while elapsed < 900:  
             await asyncio.sleep(3)
             elapsed += 3
-            status, partner_id, _, _ = await get_user_chat_status_ext(user_id)
-            if status == 'idle': return  
-            if status == 'chatting' and partner_id: return
+            
+            # 🎯 پاتک ارشد ترافیک: استفاده از تابع کانتکست متمرکز به جای کوئری مجزا در بدنه لوپ چت تصادفی برای کاهش فشار دیتابیس
+            ctx = await get_complete_user_context(user_id)
+            status = ctx["chat_status"]
+            partner_id = ctx["active_partner_id"]
+            
+            if status == 'idle' or (status == 'chatting' and partner_id): 
+                return
 
             stage = 1
             if 20 <= elapsed < 40:
@@ -407,7 +414,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         user_id = message.chat.id
         kb_main, _, _ = get_keyboards()
         
-        # صید متمرکز کانتکست کاربر جهت استخراج آیدی پارتنر پیش از قطع فیزیکی ارتباط دیتابیس
         context = await get_complete_user_context(user_id)
         partner_id = context["active_partner_id"]
         
@@ -466,7 +472,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             action = "reply" if call.data.startswith("reply_to_") else "block"
             target_short_code = call.data.split("reply_to_")[-1] if action == "reply" else call.data.split("block_")[-1]
             
-            # تبدیل کد کوتاه دکمه به آیدی واقعی عددی کاربر مقصد از دیتابیس Supabase
             target_id = await get_user_id_by_short_code(target_short_code)
             
             if not target_id:
@@ -474,7 +479,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 return
                 
             if action == "reply":
-                # قفل کردن وضعیت اف‌اس‌ام روی حالت پاسخ با ثبت آیدی مقصد در جدول کاربران
                 await set_user_state(user_id, "replying_mode", target_id)
                 await bot.answer_callback_query(call.id, "✍️ حالت پاسخ فعال شد.")
                 await bot.send_message(user_id, "📥 متن یا رسانه خود را بفرستید تا برای فرستنده ارسال شود:")
@@ -500,20 +504,17 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
     async def handle_private_anon_flow(message):
         user_id = message.chat.id
         
-        # دریافت متمرکز تمام متغیرهای بافت کانتکست کاربر در قالب تنها ۱ کوئری بجای ۳ کوئری!
         context = await get_complete_user_context(user_id)
-        
         status = context["chat_status"]
         partner_id = context["active_partner_id"]
         current_state = context["anon_state"]
         reply_target_id = context["reply_target_id"]
         sender_short_code = context["short_code"]
         
-        # لایه محافظ: اگر کاربر شورت‌کد نداشت، آنی ساخته می‌شود تا سیستم قفل نکند
         if not sender_short_code:
             sender_short_code = await get_or_create_short_link(user_id)
         
-        # ۱. تونل‌زنی لایو پیام‌ها، استیکرها و گیف‌ها در چت تصادفی فعال
+        # ۱. تونل‌زنی لایو پیام‌ها در چت تصادفی فعال
         if status == 'chatting' and partner_id:
             try:
                 await bot.copy_message(chat_id=partner_id, from_chat_id=user_id, message_id=message.message_id)
@@ -530,14 +531,12 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 return
             
             target_username = message.text.strip()
-            # سرچ آیدی عددی بر اساس یوزرنیم ورودی در دیتابیس Supabase
             target_id = await get_user_id_by_username(target_username)
             
             if not target_id:
                 await bot.reply_to(
                     message, 
-                    f"❌ **کاربری با آیدی {target_username} در ربات پیدا نشد!**\n\n"
-                    f"احتمالاً هنوز ربات رو استارت نکرده. می‌تونی بنر تبلیغاتیت رو براش بفرستی تا عضو شه.",
+                    f"❌ **کاربری با آیدی {target_username} در ربات پیدا نشد!**\n\nاحتمالاً هنوز ربات رو استارت نکرده. می‌تونی بنر تبلیغاتیت رو براش بفرستی تا عضو شه.",
                     parse_mode="HTML"
                 )
                 await clear_user_state(user_id)
@@ -546,13 +545,9 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             if target_id == user_id:
                 await bot.reply_to(message, "🧠 داری به خودت پیام ناشناس می‌فرستی؟ این کارو نکن مگه اینکه بخوای کدهات رو تست کنی!")
             
-            # پیدا کردن یا ساختن شورت‌کد مقصد برای فعال کردن فلو استاندارد ناشناس
             target_short_code = await get_or_create_short_link(target_id)
-            
-            # تغییر دادن استیت کاربر به فلو اصلی ارسال ناشناس
             await set_user_state(user_id, f"sending_anon_to_{target_short_code}")
             
-            # رندر بی نقص تگ بولد HTML با افزودن parse_mode
             await bot.reply_to(
                 message, 
                 "📥 <b>ارتباط با موفقیت برقرار شد!</b>\nحالا متن، عکس یا ویسی که می‌خوای به صورت ناشناس براش ارسال بشه رو بفرست:",
@@ -617,7 +612,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 await bot.reply_to(message, "❌ خطا در ارسال پیام؛ ممکن است ربات توسط کاربر مقصد مسدود شده باشد.")
                 print("\n💥=== BUG TRACKER REPORT ===")
                 print(f"🚨 Error Message: {e}")
-                print("📝 Full Code Traceback:")
                 traceback.print_exc()
                 print("============================\n")
                 
