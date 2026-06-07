@@ -15,6 +15,9 @@ from src.database.db_manager import (
     get_user_profile_stats
 )
 
+# 🔥 حل باگ ارور disconnect_active_chat با ایمپورت صحیح از ماژول چت تصادفی
+from src.bot.handlers.random_chat import disconnect_active_chat
+
 # ==========================================
 # 🎯 اتصال اتمیک و داینامیک به ردیس رندر (بدون باگ لوکال‌هواست)
 # ==========================================
@@ -250,6 +253,57 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         await bot.send_message(user_id, "چه کاری می‌تونم برات انجام بدم? 🕶️✨", reply_markup=kb_main)
 
     # ==========================================
+    # 🔥 بخش جدید: هندلر دکمه‌های شیشه‌ای (Callback Query Handler)
+    # ==========================================
+    @bot.callback_query_handler(func=lambda call: True)
+    async def handle_callback_queries(call):
+        user_id = call.message.chat.id
+        kb_main, _, _ = get_keyboards()
+        
+        # ۱. دکمه شیشه‌ای امنیت ربات
+        if call.data == "bot_security_info":
+            security_text = (
+                "🛡️ <b>چرا ربات CyberAnons ۱۰۰٪ امن و ناشناس است؟</b>\n\n"
+                "1️⃣ <b>عدم ذخیره اطلاعات هویتی:</b> پیام‌های شما در دیتابیس به صورت رمزنگاری‌شده عبور می‌کنند و آیدی عددی شما به هیچ‌وجه برای پارتنر یا گیرنده پیام ناشناس فاش نخواهد شد.\n\n"
+                "2️⃣ <b>سیستم خودکار اتمیک:</b> مچ‌میکینگ و تبادل پیام‌ها کاملاً توسط سرور و هوش مصنوعی و بدون دخالت انسان انجام می‌شود.\n\n"
+                "3️⃣ <b>لایه امنیتی ضدتخریب (Anti-Troll):</b> کاربران مزاحم به سرعت توسط سیستم ریتینگ مسدود می‌شوند تا محیطی امن برای شما فراهم شود.\n\n"
+                "با خیال راحت ناشناس بمانید! 🕶️✨"
+            )
+            try:
+                # نمایش پیام امنیت به صورت آلرت یا ادیت متن
+                await bot.send_message(user_id, security_text, parse_mode="HTML", reply_markup=kb_main)
+                await bot.answer_callback_query(call.id, "اطلاعات امنیتی با موفقیت بارگذاری شد.")
+            except Exception: pass
+            return
+
+        # ۲. هندلر دکمه شیشه‌ای بنر استوری (در صورت نیاز به هندل کردن در این فایل)
+        if call.data.startswith("get_my_banner_"):
+            try:
+                await bot.answer_callback_query(call.id, "در حال تولید بنر اختصاصی شما...", show_alert=False)
+                # اینجا می‌توانید تابع مربوط به فرستادن بنر را صدا بزنید
+            except Exception: pass
+            return
+
+        # ۳. پاسخ ناشناس از طریق دکمه شیشه‌ای پاسخ دایرکت
+        if call.data.startswith("reply_to_"):
+            short_code = call.data.split("reply_to_")[-1]
+            await set_user_state(user_id, f"sending_anon_to_{short_code}")
+            await cache_invalidate_user(user_id)
+            await bot.send_message(user_id, "✍️ <b>پاسخ خود را بنویسید یا مدیا (عکس، وویس و...) بفرستید:</b>", parse_mode="HTML")
+            await bot.answer_callback_query(call.id)
+            return
+
+        # ۴. بلاک کردن کاربر از طریق دکمه شیشه‌ای بلاک دایرکت
+        if call.data.startswith("block_"):
+            short_code = call.data.split("block_")[-1]
+            target_id = await get_user_id_by_short_code(short_code)
+            if target_id:
+                await block_user(owner_id=user_id, blocked_id=target_id)
+                await bot.send_message(user_id, "⛔️ کاربر با موفقیت در لیست سیاه شما قرار گرفت و دیگر نمی‌تواند به شما پیام بدهد.")
+                await bot.answer_callback_query(call.id, "کاربر مسدود شد.")
+            return
+
+    # ==========================================
     # 🔍 هندلر دکمه ارسال پیام ناشناس به آیدی خاص
     # ==========================================
     @bot.message_handler(func=lambda m: m.text == "🔍 ارسال پیام ناشناس به آیدی خاص" and m.chat.type == "private")
@@ -342,7 +396,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 await bot.reply_to(message, "🚀 فرستاده شد.")
             return
 
-        # ارسال اولین پیام ناشناس به کد ۸ رقمی مقصذ
+        # ارسال اولین پیام ناشناس به کد ۸ رقمی مقصد
         if current_state.startswith("sending_anon_to_"):
             short_code = current_state.split("sending_anon_to_")[-1]
             target_id = await get_user_id_by_short_code(short_code)
