@@ -1,4 +1,3 @@
-import re
 import time
 import asyncio
 import traceback
@@ -22,11 +21,26 @@ from src.database.db_manager import (
 # ==========================================
 # 🎯 اتصال به لایه حافظه موقت اختصاصی ربات (Redis)
 # ==========================================
+# ==========================================
+# 🎯 اتصال اتمیک و داینامیک به ردیس رندر (بدون باگ لوکال‌هواست)
+# ==========================================
 try:
     import redis.asyncio as aioredis
-    # اتصال مستقیم به سرور محلی Redis (پیش‌فرض دامین لوکال پورت ۶۳۷۹)
-    redis_client = aioredis.from_url("redis://localhost:6379", decode_responses=True)
-    print("⚡ Redis cluster engine connected successfully for live-message tunneling & queues.")
+    import os
+
+    # ۱. ابتدا بررسی می‌کنیم که آیا رندر آدرس ابری را فرستاده یا خیر
+    env_redis_url = os.getenv("REDIS_URL")
+
+    if env_redis_url:
+        # اگر آدرس رندر وجود داشت، دقیقاً از همان استفاده می‌شود
+        REDIS_PROVIDER = env_redis_url
+    else:
+        # اگر لوکال بودی، اجباراً از آی‌پي عددی IPv4 استفاده میکنیم تا با ::1 مواجه نشوی
+        REDIS_PROVIDER = "redis://127.0.0.1:6379"
+
+    redis_client = aioredis.from_url(REDIS_PROVIDER, decode_responses=True)
+    print(f"⚡ Redis engine successfully initialized via: {REDIS_PROVIDER}")
+
 except Exception as redis_err:
     print(f"💥 Failed to initialize Redis cache engine: {redis_err}. Falling back to clean DB lookup.")
     redis_client = None
