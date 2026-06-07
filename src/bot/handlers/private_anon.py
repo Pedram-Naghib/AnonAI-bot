@@ -49,7 +49,7 @@ def get_keyboards():
     main = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     main.add(KeyboardButton("🎲 شروع چت تصادفی"), KeyboardButton("📊 آمار من"))
     
-    # 🎯 پاتک چیدمان: قرار گرفتن دکمه ارسال به آیدی خاص در یک ردیف اختصاصی و عریض
+    # قرار گرفتن دکمه ارسال به آیدی خاص در یک ردیف اختصاصی و عریض
     main.row(KeyboardButton("🔍 ارسال پیام ناشناس به آیدی خاص"))
     
     main.add(KeyboardButton("💰 سکه‌های من"))
@@ -66,47 +66,40 @@ def get_keyboards():
 def register_private_anon_handlers(bot: AsyncTeleBot):
 
     # ==========================================
-    # ⚙️ بخش دوم: هندلر دستور /start مجهز به سیستم بنر تبلیغاتی شیشه‌ای
+    # ⚙️ بخش دوم: هندلر دستور /start مجهز به سیستم رفرال و رادار تبلیغات فوق‌کوتاه
     # ==========================================
     @bot.message_handler(commands=['start'])
     async def handle_start(message):
-        """مدیریت استارت اولیه، رفرال صریح، رفرال نامرئی و پردازش لینک‌های کوتاه دیتابیسی ۸ کاراکتری"""
+        """مدیریت استارت اولیه، رفرال، رادار کمپین‌های تبلیغاتی و پیام ناشناس متمرکز با کدهای کوتاه"""
         if message.chat.type != "private": return
         bot_info = await bot.get_me()
         command_args = message.text.split()
         user_id = message.chat.id
         first_name = message.from_user.first_name or "دوست"
         
+        # بررسی وضعیت ثبت‌نام پیشین کاربر برای تشخیص سیستم رفرال
+        context = await get_complete_user_context(user_id)
+        is_new_user = context["short_code"] is None
+        
         await register_or_update_user(user_id, first_name, message.from_user.username)
         kb_main, _, _ = get_keyboards()
         
+        # پردازش آرگومان ورودی لینک استارت
         if len(command_args) > 1:
             argument = command_args[1]
             
-            if argument.startswith("ref_"):
-                referrer_encoded = argument.split("ref_")[-1]
-                referrer_id = decode_user_id(referrer_encoded)
-                if referrer_id and user_id != referrer_id:
-                    await set_user_referrer(user_id, referrer_id, is_pure_ref=True)
-                    await send_bot_log(bot, message, "کامند /start", f"ورود با لینک دعوت صریح معرف: {referrer_id}")
-                    
-                    try:
-                        await bot.send_message(
-                            chat_id=referrer_id, 
-                            text=f"🔔 <b>یک عضو جدید با لینک دعوت شما وارد شد!</b>\n👤 دوست شما <b>{first_name}</b> وارد ربات شد. به محض اینکه اولین 🎲 <b>چت تصادفی</b> خودش رو استارت بزنه، ۵ سکه هدیه به حسابت واریز میشه!",
-                            parse_mode="HTML"
-                        )
-                    except Exception: pass
-                        
-                    ref_welcome = (
-                        f"👋 <b>خوش اومدی!</b>\n\n"
-                        f"شما با لینک دعوت یکی از دوستانتان وارد ربات شده‌اید.\n"
-                        f"🎁 به پاس احترام، حساب شما با <b>۱۵ سکه اولیه</b> (بجای ۱۰ سکه) شارژ شد! همچنین به محض اینکه اولین 🎲 <b>چت تصادفی</b> خود را استارت بزنید، <b>۵ سکه رایگان</b> هم به معرف شما هدیه داده می‌شود.\n\n"
-                        f"الآن می‌توانید از منوی زیر استفاده کنید:"
-                    )
-                    await bot.reply_to(message, ref_welcome, parse_mode="HTML", reply_markup=kb_main)
-                    return  
+            # 📢 لایه اول: رادار ردیابی کمپین‌های تبلیغاتی (مثال: ?start=ad_ecstasy)
+            if argument.startswith("ad_"):
+                channel_name = argument.split("ad_")[-1]
+                # ارسال لاگ هوشمند به گروه بدون استفاده از return جهت جلوگیری از قفل شدن ربات
+                await send_bot_log(
+                    bot, 
+                    message, 
+                    "📥 ورود از کمپین تبلیغاتی", 
+                    f"کاربر جدید از لینک تبلیغاتی کانال [{channel_name}] وارد شد 🔥"
+                )
             
+            # 🔗 لایه دوم: پردازش رفرال و هدایت به پیام ناشناس دیتابیسی ۸ کاراکتری
             else:
                 short_code = argument
                 target_owner_id = await get_user_id_by_short_code(short_code)
@@ -115,18 +108,38 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                     if await is_user_blocked(owner_id=target_owner_id, blocked_id=user_id):
                         await bot.reply_to(message, "❌ شما توسط این کاربر بلاک شده‌اید.", reply_markup=kb_main)
                         return
-                    await set_user_referrer(user_id, target_owner_id, is_pure_ref=False)
+                    
+                    # ثبت رفرال هوشمند متمرکز (کاربر جدید پاداش ۱۵ سکه می‌گیرد)
+                    await set_user_referrer(user_id, target_owner_id, is_pure_ref=is_new_user)
+                    
+                    if is_new_user:
+                        try:
+                            await bot.send_message(
+                                chat_id=target_owner_id, 
+                                text=f"🔔 <b>یک عضو جدید با لینک شما وارد شد!</b>\n👤 دوست شما <b>{first_name}</b> وارد ربات شد. به محض اینکه اولین 🎲 <b>چت تصادفی</b> خودش رو استارت بزنه، ۵ سکه هدیه به حسابت واریز میشه!",
+                                parse_mode="HTML"
+                            )
+                        except Exception: pass
+                            
+                        ref_welcome = (
+                            f"👋 <b>خوش اومدی!</b>\n\n"
+                            f"شما با لینک یکی از دوستانتان وارد ربات شده‌اید.\n"
+                            f"🎁 به پاس احترام، حساب شما با <b>۱۵ سکه اولیه</b> (بجای ۱۰ سکه) شارژ شد! همچنین به محض اینکه اولین 🎲 <b>چت تصادفی</b> خود را استارت بزنید، <b>۵ سکه رایگان</b> هم به معرف شما هدیه داده می‌شود.\n\n"
+                            f"الآن می‌توانید از منوی زیر استفاده کنید:"
+                        )
+                        await bot.reply_to(message, ref_welcome, parse_mode="HTML", reply_markup=kb_main)
+                    
+                    # هدایت مستقیم کاربر به وضعیت ارسال پیام ناشناس به صاحب لینک
                     await set_user_state(user_id, f"sending_anon_to_{short_code}")
-                    await send_bot_log(bot, message, "کامند /start", f"کلیک روی لینک ناشناس کوتاه کاربر: {target_owner_id} (کد: {short_code})")
+                    await send_bot_log(bot, message, "کامند /start", f"کلیک روی لینک کوتاه کاربر: {target_owner_id} (کد: {short_code})")
                     await bot.reply_to(message, "📥 در حال ارسال پیام ناشناس... مدیا یا متن خود را بفرستید:", reply_markup=kb_main)
                     return
         
-        # دریافت یا ساخت کد کوتاه کاربر برای لینک ناشناس
+        # جریان عادی ربات در صورت استارت معمولی یا عبور بدون قطع ریکوئست از رادار تبلیغات ad_
         my_short_code = await get_or_create_short_link(user_id)
         anon_link = f"https://t.me/{bot_info.username}?start={my_short_code}"
         await send_bot_log(bot, message, "کامند /start", f"استارت معمولی و دریافت لینک کوتاه: {my_short_code}")
         
-        # دکمه شیشه‌ای هوشمند برای شلیک بنر آماده استوری به یوزر
         inline_kb = InlineKeyboardMarkup()
         inline_kb.add(InlineKeyboardButton("🔗 دریافت بنر استوری و لینک من", callback_data=f"get_my_banner_{my_short_code}"))
 
@@ -136,7 +149,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             f"👋 <b>به ربات پیام ناشناس CyberAnons خوش آمدید!</b>\n\n"
             f"اینجا یک فضای کاملاً امن، مخفی و پرسرعت برای گفتگوست 🕶️\n\n"
             f"🔗 <b>لینک اختصاصی شما:</b>\n<code>{anon_link}</code>\n\n"
-            f"👇 با دکمهٔ زیر می‌توانید بنر آماده شدهٔ این لینک را برای قرار دادن در استوری اینستاگرام یا کانال تلگرامتان دریافت کنید:"
+            f"👇 با دکمهٔ زیر می‌توانید بنر آماده شدهٔ این لینک را برای قرار دادنใน استوری اینستاگرام یا کانال تلگرامتان دریافت کنید:"
         )
         
         msg = god_text if user_id == GOD_ID else normal_text
@@ -181,7 +194,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         # تغییر وضعیت ماشین وضعیت کاربر به انتظار برای دریافت یوزرنیم
         await set_user_state(user_id, "waiting_for_username")
         
-        # 🎯 تصحیح فرمت متن: تبدیل به HTML استاندارد برای رندر بدون نقص بولد
         prompt_text = (
             "🕶️ <b>آیدی تلگرام (Username) شخص مورد نظرت رو بفرست:</b>\n\n"
             "⚠️ <b>نکته:</b> آیدی رو می‌تونی با @ یا بدون @ بفرستی. "
@@ -199,6 +211,8 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         await send_bot_log(bot, message, "دکمه 📊 آمار من")
         stats = await get_user_profile_stats(message.chat.id)
         gender_map = {"male": "🙋‍♂️ پسر", "female": "🙋‍♀️ دختر", None: "ثبت نشده ⚠️"}
+        
+        # 🎯 اضافه شدن فلو نمایش ناشناس ارسال شده (stats['sent']) به خروجی نهایی
         response_text = (
             f"<b>📊 آمار و پروفایل من</b>\n\n"
             f"👤 | نام: {message.from_user.first_name}\n"
@@ -207,6 +221,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             f"💰 | موجودی سکه: <b>{stats['coins']}</b>\n"
             f"⭐ | امتیاز آنتی‌ترول: <b>{stats['rating']:.1f}</b>\n"
             f"✍️ | ناشناس دریافتی: {stats['received']}\n"
+            f"📤 | ناشناس ارسال شده: {stats['sent']}\n"
             f"⛔️ | بلاک شده‌ها: {stats['blocked']}"
         )
         kb_main, _, _ = get_keyboards()
@@ -234,23 +249,26 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
     @bot.callback_query_handler(func=lambda c: c.data == "coin_help")
     async def handle_coin_help_callback(call):
         await send_bot_log(bot, call.message, "کالبک شیشه‌ای coin_help", "باز کردن راهنمای جامع اقتصاد ربات")
+        user_id = call.message.chat.id
         bot_info = await bot.get_me()
-        secret_code = encode_user_id(call.message.chat.id)
-        ref_link = f"https://t.me/{bot_info.username}?start=ref_{secret_code}"  
+        
+        # بهینه‌سازی: استفاده از همان لینک ناشناس فوق‌کوتاه برای سیستم دعوت رفرال کاربری
+        my_short_code = await get_or_create_short_link(user_id)
+        ref_link = f"https://t.me/{bot_info.username}?start={my_short_code}"  
+        
         help_text = (
             f"<b>📜 راهنمای جامع سیستم اقتصاد سکه</b>\n\n"
-            f"🪙 <b>سکه چیست?</b>\n"
+            f"🪙 <b>سکه چیست؟</b>\n"
             f"واحد مالی ربات برای برقراری اتصال در چت تصادفی است.\n\n"
             f"🚀 <b>راه‌های کسب سکه رایگان:</b>\n\n"
             f"۱. <b>استارت اولیه:</b> هر کاربر در عادی‌ترین حالت ورود <b>۱۰ سکه رایگان</b> هدیه می‌گیرد.\n\n"
             f"۲. <b>سیستم رفرال (دعوت دوستان):</b> این لینک اختصاصی شماست:\n"
             f"<code>{ref_link}</code>\n\n"
-            f"اگر دوستی با لینک بالا عضو ربات شود، حساب خودش پاداش گرفته و با <b>۱۵ سکه</b> استارت می‌زند! همچنین به محض اینکه دوست شما اولین 🎲 چت تصادفی خودش را شروع کند، <b>۵ سکه رایگان</b> به عنوان پاداش به حساب شما واریز می‌شود!\n\n"
-            f"💡 <b>پاتک ویژه (درآمد نامرئی از لینک ناشناس):</b>\n"
-            f"شاید باورت نشه، ولی حتی اگر کسی برای اولین بار با «لینک پیام ناشناس عادی» شما هم وارد ربات بشه، سیستم ما هوشمندانه اون رو به عنوان رفرال و زیرمجموعه شما ثبت می‌کند! غریبه بدون هیچ مزاحمتی پیام ناشناسش رو می‌فرسته، اما به محض اینکه اون زمان تصمیم بگیره چت تصادفی رو استارت بزنه، ۵ سکه هدیه رفرال مستقیم میاد تو کیف پول شما!\n\n"
+            f"اگر کسی با لینک بالا عضو ربات شود، حساب خودش پاداش گرفته و با <b>۱۵ سکه اولیه</b> استارت می‌زند! همچنین به محض اینکه اولین 🎲 چت تصادفی خودش را شروع کند، <b>۵ سکه رایگان</b> به عنوان پاداش به حساب شما واریز می‌شود!\n\n"
+            f"💡 <b>یک تیر و دو نشان:</b> لینک ناشناس و لینک دعوت شما کاملاً یکسان هستند! دوستانتان هم می‌توانند به شما پیام ناشناس بفرستند و همزمان اگر قبلاً عضو ربات نبوده باشند، زیرمجموعهٔ شما ثبت خواهند شد.\n\n"
             f"۳. <b>جریمه معطلی ربات:</b> اگر در صف جستجو وارد شوید و به دلیل شلوغی تا ۱۵ دقیقه پارتنری برای شما پیدا نشد، ۲ سکه رایگان هم به عنوان جریمه از طرف ربات دریافت می‌کنید! (دارای کول‌داون ۳ ساعته)"
         )
-        await bot.send_message(call.message.chat.id, help_text, parse_mode="HTML")
+        await bot.send_message(user_id, help_text, parse_mode="HTML")
         await bot.answer_callback_query(call.id)
 
 
@@ -382,13 +400,18 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
 
 
     # ==========================================
-    # 🛑 بخش هفتم: مدیریت قطع چت و فیدبک زنده سیستم آنتی‌ترول + هندلر دکمه‌های شیشه‌ای پاسخ ناشناس دیتابیسی
+    # 🛑 بخش هفتم: مدیریت قطع چت و فیدبک زنده سیستم آنتی‌ترول + سیستم نمره‌دهی اتمیک
     # ==========================================
     @bot.message_handler(func=lambda m: m.text == "🛑 قطع چت فعال" and m.chat.type == "private")
     async def handle_disconnect_chat(message):
         user_id = message.chat.id
-        partner_id = await disconnect_active_chat(user_id)
         kb_main, _, _ = get_keyboards()
+        
+        # صید متمرکز کانتکست کاربر جهت استخراج آیدی پارتنر پیش از قطع فیزیکی ارتباط دیتابیس
+        context = await get_complete_user_context(user_id)
+        partner_id = context["active_partner_id"]
+        
+        await disconnect_active_chat(user_id)
         await send_bot_log(bot, message, "دکمه 🛑 قطع چت فعال", f"قطع ارتباط با پارتنر: {partner_id}")
         await bot.reply_to(message, "🛑 شما چت را قطع کردید. برای شروع مجدد دکمه 🎲 رو بزنید.", reply_markup=kb_main)
         
@@ -406,8 +429,11 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 InlineKeyboardButton("👍 لایک", callback_data=f"rate_like_{u_code}"),
                 InlineKeyboardButton("👎 دیس‌لایک و بلاک", callback_data=f"rate_dis_{u_code}")
             )
-            await bot.send_message(partner_id, "⚠️ <b>پارتنر شما چت را قطع کرد.</b>\n⭐ کیفیت چت چطور بود? بهش امتیاز بده:", parse_mode="HTML", reply_markup=kb_main)
-            await bot.send_message(partner_id, "👆 لطفاً امتیاز خود به پارتنر سابق را در کادر بالا ثبت کنید.", reply_markup=markup_partner)
+            
+            try:
+                await bot.send_message(partner_id, "⚠️ <b>پارتنر شما چت را قطع کرد.</b>\n⭐ کیفیت چت چطور بود؟ بهش امتیاز بده:", parse_mode="HTML", reply_markup=kb_main)
+                await bot.send_message(partner_id, "👆 لطفاً امتیاز خود به پارتنر سابق را در کادر بالا ثبت کنید.", reply_markup=markup_partner)
+            except Exception: pass
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("rate_"))
     async def handle_rating_callbacks(call):
@@ -432,7 +458,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             await bot.answer_callback_query(call.id, "ثبت و بلاک شد! 🛑")
             await bot.edit_message_text("🛑 ثبت شد. این کاربر وارد لیست سیاه چت تصادفی شما شد و دیگه به هم وصل نمیشید.", user_id, call.message.message_id)
 
-    # 🎯 هندلر جامع و جدید کالبک دکمه شیشه‌ای پاسخ و بلاک ناشناس دیتابیسی (۸ کاراکتری)
+    # 🎯 هندلر جامع کالبک دکمه شیشه‌ای پاسخ و بلاک ناشناس دیتابیسی (۸ کاراکتری)
     @bot.callback_query_handler(func=lambda c: c.data.startswith("reply_to_") or c.data.startswith("block_"))
     async def handle_anon_buttons_callback(call):
         try:
@@ -467,7 +493,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
     # ==========================================
     # 💬 بخش هشتم: سیستم تونل‌زنی زنده پیام‌ها (چت تصادفی + چت ناشناس دیتابیسی مجهز به پاتک سرعت)
     # ==========================================
-    # 🎯 پاتک فیلتر الحاقی: نام دکمه جدید در شرط عدم تداخلِ متنی (m.text not in) بروزرسانی شد
     @bot.message_handler(
         content_types=['text', 'photo', 'video', 'voice', 'audio', 'sticker', 'animation'], 
         func=lambda m: m.chat.type == "private" and (m.text is None or not m.text.startswith('/')) and m.text not in ["📊 آمار من", "🎲 شروع چت تصادفی", "❌ انصراف از صف جستجو", "🛑 قطع چت فعال", "💰 سکه‌های من", "🔍 ارسال پیام ناشناس به آیدی خاص"]
@@ -527,7 +552,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             # تغییر دادن استیت کاربر به فلو اصلی ارسال ناشناس
             await set_user_state(user_id, f"sending_anon_to_{target_short_code}")
             
-            # 🎯 اضافه شدن پارامتر parse_mode برای فعال شدن تگ‌های بولد HTML
+            # رندر بی نقص تگ بولد HTML با افزودن parse_mode
             await bot.reply_to(
                 message, 
                 "📥 <b>ارتباط با موفقیت برقرار شد!</b>\nحالا متن، عکس یا ویسی که می‌خوای به صورت ناشناس براش ارسال بشه رو بفرست:",

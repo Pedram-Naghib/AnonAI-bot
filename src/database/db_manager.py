@@ -139,11 +139,11 @@ async def get_user_state(user_id: int):
     return "normal", None
 
 async def set_user_state(user_id: int, state: str, reply_target_id: int = None):
-    """به‌روزرسانی وضعیت FSM کاربر با ساختار اتمیک UPSERT"""
+    """به‌روزرسانی وضعیت FSM کاربر با ساختار اتمیک UPSERT و تعیین صریح نوع داده پارامترها"""
     conn = await get_connection()
     await conn.execute("""
         INSERT INTO users (user_id, anon_state, reply_target_id)
-        VALUES ($1, $2, $3)
+        VALUES ($1, $2::TEXT, $3::BIGINT)
         ON CONFLICT(user_id) DO UPDATE SET anon_state = EXCLUDED.anon_state, reply_target_id = EXCLUDED.reply_target_id
     """, user_id, state, reply_target_id)
     await conn.close()
@@ -306,7 +306,7 @@ async def is_user_blocked(owner_id: int, blocked_id: int) -> bool:
 # ────────────────────────────────────────────────────────
 
 async def get_user_profile_stats(user_id: int) -> dict:
-    """استخراج زندهٔ دارایی‌ها، امتیاز آنتی‌ترول, جنسیت و رکوردهای بلاک کاربر"""
+    """استخراج زندهٔ دارایی‌ها، امتیاز آنتی‌ترول، جنسیت و رکوردهای بلاک و پیام‌های کاربر"""
     conn = await get_connection()
     user_info = await conn.fetchrow("SELECT coins, rating, gender FROM users WHERE user_id = $1", user_id)
     coins = user_info['coins'] if user_info else 10
@@ -314,15 +314,26 @@ async def get_user_profile_stats(user_id: int) -> dict:
     gender = user_info['gender'] if user_info else None
     
     received_anon_msgs = await conn.fetchval("SELECT COUNT(*) FROM message_map WHERE user_chat_id = $1", user_id)
+    
+    # 🎯 قابلیت جدید: شمارش پیام‌های ناشناس ارسال شده توسط این کاربر غریبه
+    sent_anon_msgs = await conn.fetchval("SELECT COUNT(*) FROM message_map WHERE anon_sender_id = $1", user_id)
+    
     blocked_count = await conn.fetchval("SELECT COUNT(*) FROM block_list WHERE owner_id = $1", user_id)
     await conn.close()
     
-    return {"coins": coins, "rating": rating, "received": received_anon_msgs, "blocked": blocked_count, "gender": gender}
+    return {
+        "coins": coins, 
+        "rating": rating, 
+        "received": received_anon_msgs, 
+        "sent": sent_anon_msgs, 
+        "blocked": blocked_count, 
+        "gender": gender
+    }
 
 async def update_user_gender(user_id: int, gender: str):
-    """ثبت صریح یا تغییر جنسیت پایه کاربر (male / female) در اولین ورود"""
+    """ثبت صریح یا تغییر جنسیت پایه کاربر (male / female) در اولین ورود با تعیین نوع داده"""
     conn = await get_connection()
-    await conn.execute("UPDATE users SET gender = $2 WHERE user_id = $1", user_id, gender)
+    await conn.execute("UPDATE users SET gender = $2::TEXT WHERE user_id = $1", user_id, gender)
     await conn.close()
 
 
@@ -331,7 +342,7 @@ async def update_user_gender(user_id: int, gender: str):
 # ────────────────────────────────────────────────────────
 
 async def get_user_chat_status_ext(user_id: int):
-    """دریافت هم‌زمان وضعیت چت، پارتنر فعال، سکه و جنسیت جهت کاهش تعداد کوئری‌ها"""
+    """دریافت هم‌زمان وضعیت چت, پارتنر فعال، سکه و جنسیت جهت کاهش تعداد کوئری‌ها"""
     conn = await get_connection()
     row = await conn.fetchrow("SELECT chat_status, active_partner_id, coins, gender FROM users WHERE user_id = $1", user_id)
     await conn.close()
@@ -345,14 +356,14 @@ async def join_random_chat_queue(user_id: int, target_gender: str):
     """
     conn = await get_connection()
     
-    # 🎯 محاسبه داینامیک هزینه: هزینه پایه + هزینه فیلتر اختصاصی (اگر انتخاب کرده باشد)
+    # محاسبه داینامیک هزینه: هزینه پایه + هزینه فیلتر اختصاصی (اگر انتخاب کرده باشد)
     cost = BASE_CHAT_COST
     if target_gender in ['male', 'female']:
         cost += GENDER_FILTER_COST
         
     await conn.execute("""
         UPDATE users 
-        SET chat_status = 'searching', queue_joined_at = NOW(), target_gender = $2, coins = coins - $3
+        SET chat_status = 'searching', queue_joined_at = NOW(), target_gender = $2::TEXT, coins = coins - $3
         WHERE user_id = $1
     """, user_id, target_gender, cost)
     await conn.close()
@@ -511,7 +522,7 @@ async def set_user_referrer(user_id: int, referrer_id: int, is_pure_ref: bool = 
     
     if row:
         if row['referred_by'] is None and user_id != referrer_id:
-            await conn.execute("UPDATE users SET referred_by = $2 WHERE user_id = $1", user_id, referrer_id)
+            await conn.execute("UPDATE users SET referred_by = $2::BIGINT WHERE user_id = $1", user_id, referrer_id)
     else:
         initial_coins = 15 if is_pure_ref else 10
         await conn.execute("""
