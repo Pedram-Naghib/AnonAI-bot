@@ -89,7 +89,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             argument = command_args[1]
             
             # 📢 لایه اول: رادار ردیابی کمپین‌های تبلیغاتی (مثال: ?start=ad_ecstasy)
-            if argument.startswith("ad_"):
+            if argument.startswith("ad_") and is_new_user:
                 channel_name = argument.split("ad_")[-1]
                 # ارسال لاگ هوشمند به گروه بدون استفاده از return جهت جلوگیری از قفل شدن ربات
                 await send_bot_log(
