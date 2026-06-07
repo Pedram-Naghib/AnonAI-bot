@@ -8,11 +8,11 @@ from src.database.db_manager import (
     apply_queue_compensation, get_user_profile_stats
 )
 
-# ایمپورت کردن کلاینت ردیس، لایه باطل‌کننده کش و لاگر متمرکز از فایل اصلی
-from src.bot.handlers.private_anon import LOG_GROUP_ID, GOD_ID
-# بخش ایمپورت‌های بالای background_workers.py
-from src.bot.redis_config import redis_client, cache_invalidate_user, log_queue
-from src.bot.handlers.random_chat import get_keyboards
+# 🔥 حل باگ کِراش کامپایل: دریافت تمام متغیرهای اشتراکی و ثابت‌ها از لایه خنثی کانفیگ
+from src.bot.redis_config import redis_client, cache_invalidate_user, log_queue, LOG_GROUP_ID
+
+# آیدی ارشد الهه بدون نیاز به ایمپورت متقاطع
+GOD_ID = 6779908406
 
 # ==========================================
 # ⚡ ورکر پس‌زمینه لایو لاگ‌ها (جلوگیری از خفگی و فلوود API تلگرام)
@@ -53,6 +53,9 @@ async def background_matchmaking_worker(bot: AsyncTeleBot):
             # دریافت تمام کاربران داخل صف انتظار ردیس همراه با تایم ورودشان
             waiting_users = await redis_client.zrange("match_queue", 0, -1, withscores=True)
             now = time.time()
+            
+            # 🔥 لایه پاتک ضدچرخش (Runtime Import): ایمپورت در زمان اجرا برای جلوگیری از گره خوردن بوت اولیه پایتون
+            from src.bot.handlers.private_anon import get_keyboards
             kb_main, kb_search, kb_chatting = get_keyboards()
             
             for uid_str, join_time in waiting_users:

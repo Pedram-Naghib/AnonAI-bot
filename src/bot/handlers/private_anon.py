@@ -15,142 +15,11 @@ from src.database.db_manager import (
     get_user_profile_stats
 )
 
-# 🔥 حل باگ ارور disconnect_active_chat با ایمپورت صحیح از ماژول چت تصادفی
-from src.bot.handlers.random_chat import disconnect_active_chat
-
-# بخش ایمپورت‌های بالای private_anon.py
-from src.bot.redis_config import redis_client, log_queue, cache_set_user_context, cache_invalidate_user
-from src.bot.handlers.random_chat import disconnect_active_chat
+# 🔥 حل باگ اِمپورت چرخشی: دریافت ابزارهای ردیس، کش و لاگر متمرکز از فایل خنثی
+from src.bot.redis_config import redis_client, log_queue, cache_set_user_context, cache_invalidate_user, send_bot_log
 
 GOD_ID = 6779908406
 LOG_GROUP_ID = -5295499371
-
-# ==========================================
-# ⚡ ابزار کمکی کش: متدهای هم‌زمان اتمیک مدیریت حافظه موقت (Cache Helpers)
-# ==========================================
-async def cache_set_user_context(user_id: int, context_dict: dict, ttl: int = 1800):
-    if redis_client:
-        try:
-            await redis_client.set(f"user_ctx:{user_id}", json.dumps(context_dict), ex=ttl)
-        except Exception: pass
-
-async def cache_invalidate_user(user_id: int):
-    if redis_client:
-        try:
-            await redis_client.delete(f"user_ctx:{user_id}")
-        except Exception: pass
-
-# ==========================================
-# ⚡ سیستم لاگر دسته‌ای (Log Batching Worker) - جلوگیری از لیمیت تلگرام
-# ==========================================
-log_queue = asyncio.Queue()
-
-async def send_bot_log(bot: AsyncTeleBot, message, action_name: str, extra_details: str = ""):
-    try:
-        user = message.from_user
-        if user.id == 8627765327: return
-        log_text = (
-            f"📥 <b>[LOG] فعالیت جدید در ربات</b>\n"
-            f"👤 <b>کاربر:</b> {user.first_name}\n"
-            f"🪪 <b>آیدی عددی:</b> <code>{message.chat.id}</code>\n"
-            f"🆔 <b>یوزرنیم:</b> @{user.username or 'No_Username'}\n"
-            f"🛠 <b>اکشن:</b> <code>{action_name}</code>\n"
-        )
-        if extra_details: log_text += f"📝 <b>جزئیات:</b> {extra_details}\n"
-        await log_queue.put(log_text)
-    except Exception as e:
-        print(f"💥 Failed to queue log: {e}")
-
-async def background_log_worker(bot: AsyncTeleBot):
-    while True:
-        try:
-            logs_batch = []
-            log = await log_queue.get()
-            logs_batch.append(log)
-            while not log_queue.empty() and len(logs_batch) < 10:
-                logs_batch.append(log_queue.get_nowait())
-            combined_log = "\n➖➖➖➖➖➖\n".join(logs_batch)
-            await bot.send_message(LOG_GROUP_ID, combined_log, parse_mode="HTML")
-            await asyncio.sleep(4) 
-        except Exception as e:
-            print(f"💥 Log Worker Error: {e}")
-            await asyncio.sleep(5)
-
-# ==========================================
-# ⚡ ورکر پس‌زمینه مچ‌میکینگ (تسک پس‌زمینه مستقل)
-# ==========================================
-async def background_matchmaking_worker(bot: AsyncTeleBot):
-    if not redis_client: return
-    while True:
-        try:
-            waiting_users = await redis_client.zrange("match_queue", 0, -1, withscores=True)
-            now = time.time()
-            kb_main, kb_search, kb_chatting = get_keyboards()
-            
-            for uid_str, join_time in waiting_users:
-                user_id = int(uid_str)
-                elapsed = now - join_time
-                meta = await redis_client.hgetall(f"search_meta:{user_id}")
-                msg_id = int(meta.get("msg_id", 0)) if meta else 0
-                filter_text = meta.get("filter_text", "شانسی") if meta else ""
-                current_stage = int(meta.get("stage", 1)) if meta else 1
-                
-                stage = 1
-                if 20 <= elapsed < 40: stage = 2
-                elif elapsed >= 40: stage = 3
-                
-                if stage > current_stage and msg_id:
-                    await redis_client.hset(f"search_meta:{user_id}", "stage", stage)
-                    try:
-                        if stage == 2:
-                            await bot.edit_message_text(f"⚠️ <b>[مرحله ۲ - فیلتر: {filter_text}]</b> شعاع امتیاز بازتر شد؛ در حال سرچ کاربران نزدیک...", user_id, msg_id, parse_mode="HTML", reply_markup=kb_search)
-                        elif stage == 3:
-                            await bot.edit_message_text(f"🔓 <b>[مرحله ۳ - فیلتر: {filter_text}]</b> فیلترهای امتیازی برداشته شد. در حال اتصال به اولین فرد صف...", user_id, msg_id, parse_mode="HTML", reply_markup=kb_search)
-                    except Exception: pass
-                
-                if elapsed > 900:
-                    await redis_client.zrem("match_queue", uid_str)
-                    await redis_client.delete(f"search_meta:{user_id}")
-                    await leave_random_chat_queue(user_id)
-                    await cache_invalidate_user(user_id)
-                    comp_res = await apply_queue_compensation(user_id)
-                    if comp_res == "rewarded":
-                        await bot.send_message(user_id, "🎁 <b>جریمه معطلی ربات!</b>\nچون ۱۵ دقیقه معطل شدی، سکه‌های فیلتر برگشت خورد + ۲ سکه هدیه گرفتی!", parse_mode="HTML", reply_markup=kb_main)
-                    else:
-                        await bot.send_message(user_id, "🛑 به دلیل شلوغی صف از صف خارج شدید. سکه‌های شما برگشت خورد.", reply_markup=kb_main)
-                    continue
-
-                match_target = await try_matchmaking(user_id, stage)
-                if match_target:
-                    success = await connect_two_users(user_id, match_target)
-                    if success:
-                        await redis_client.zrem("match_queue", str(user_id), str(match_target))
-                        await redis_client.delete(f"search_meta:{user_id}", f"search_meta:{match_target}")
-                        await cache_invalidate_user(user_id)
-                        await cache_invalidate_user(match_target)
-                        
-                        await bot.send_message(user_id, "🎉 <b>اتصال برقرار شد!</b>\nبا هم چت کنید ⚡", parse_mode="HTML", reply_markup=kb_chatting)
-                        await bot.send_message(match_target, "🎉 <b>اتصال برقرار شد!</b>\nبا هم چت کنید ⚡", parse_mode="HTML", reply_markup=kb_chatting)
-                        await log_queue.put(f"🤝 <b>[MATCH] اتصال موفق چت تصادفی</b>\n🔗 کاربر <code>{user_id}</code> متصل شد به <code>{match_target}</code>")
-                        
-                        for current_uid, target_uid in [(user_id, match_target), (match_target, user_id)]:
-                            if current_uid == GOD_ID:
-                                p_stats = await get_user_profile_stats(target_uid)
-                                p_info = await bot.get_chat(target_uid)
-                                gender_f = {"male": "🙋‍♂️ پسر", "female": "🙋‍♀️ دختر", None: "ثبت نشده"}.get(p_stats['gender'])
-                                intel_msg = (
-                                    f"👁️‍🗨️ <b>رادار فوق‌پیشرفته اطلاعاتی (انحصاری ارباب فاطمه):</b>\n\n"
-                                    f"👤 | نام پارتنر: <b>{p_info.first_name}</b>\n"
-                                    f"🪪 | آیدی عددی: <code>{target_uid}</code>\n"
-                                    f"🆔 | یوزرنیم: @{p_info.username or 'No_Username'}\n"
-                                    f"⚥ | جنسیت: <b>{gender_f}</b>\n"
-                                    f"💰 | موجودی سکه: <b>{p_stats['coins']}</b>\n"
-                                    f"⭐ | امتیاز آنتی‌ترول: <b>{p_stats['rating']:.1f}</b>"
-                                )
-                                await bot.send_message(GOD_ID, intel_msg, parse_mode="HTML")
-        except Exception as e:
-            print(f"💥 Matchmaking Worker Error: {e}")
-        await asyncio.sleep(2)
 
 # ==========================================
 # ⌨️ بخش اول: مدیریت کیبوردهای اصلی ربات (Reply Keyboards)
@@ -238,7 +107,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         await bot.send_message(user_id, "چه کاری می‌تونم برات انجام بدم? 🕶️✨", reply_markup=kb_main)
 
     # ==========================================
-    # 🔥 بخش جدید: هندلر دکمه‌های شیشه‌ای (Callback Query Handler)
+    # 🔥 بخش سوم: هندلر دکمه‌های شیشه‌ای (Callback Query Handler)
     # ==========================================
     @bot.callback_query_handler(func=lambda call: True)
     async def handle_callback_queries(call):
@@ -255,17 +124,15 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 "با خیال راحت ناشناس بمانید! 🕶️✨"
             )
             try:
-                # نمایش پیام امنیت به صورت آلرت یا ادیت متن
                 await bot.send_message(user_id, security_text, parse_mode="HTML", reply_markup=kb_main)
                 await bot.answer_callback_query(call.id, "اطلاعات امنیتی با موفقیت بارگذاری شد.")
             except Exception: pass
             return
 
-        # ۲. هندلر دکمه شیشه‌ای بنر استوری (در صورت نیاز به هندل کردن در این فایل)
+        # ۲. هندلر دکمه شیشه‌ای بنر استوری
         if call.data.startswith("get_my_banner_"):
             try:
                 await bot.answer_callback_query(call.id, "در حال تولید بنر اختصاصی شما...", show_alert=False)
-                # اینجا می‌توانید تابع مربوط به فرستادن بنر را صدا بزنید
             except Exception: pass
             return
 
@@ -297,7 +164,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         await send_bot_log(bot, message, "دکمه 🔍 ارسال پیام ناشناس به آیدی خاص")
         await set_user_state(user_id, "waiting_for_username")
         await cache_invalidate_user(user_id)
-        await bot.reply_to(message, "🕶️ <b>آیدی تلگرام (Username) شخص مورد نظرت رو بفرست:</b>", parse_mode="HTML")
+        await bot.reply_to(message, "🕶️ <b>آیدی تلگرام (Username) person مورد نظرت رو بفرست:</b>", parse_mode="HTML")
 
     # ==========================================
     # 💬 هندلر جامع تونل‌زنی زنده پیام‌ها و پاسخ‌های ناشناس پیوی
@@ -334,6 +201,8 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             try:
                 await bot.copy_message(chat_id=partner_id, from_chat_id=user_id, message_id=message.message_id)
             except Exception:
+                # 🔥 ایمپورت محلی و کاملاً پویا برای از بین بردن ۱۰۰٪ باگ Circular Import دیسکونکت
+                from src.bot.handlers.random_chat import disconnect_active_chat
                 await disconnect_active_chat(user_id)
                 await cache_invalidate_user(user_id)
                 await cache_invalidate_user(partner_id)
