@@ -1,9 +1,13 @@
 import re
+import time
 import asyncio
 import traceback
+import json
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from src.utils.crypto import encode_user_id, decode_user_id
+
+# وارد کردن توابع پایه دیتابیس (نسخه ارتقایافته با Connection Pool)
 from src.database.db_manager import (
     register_or_update_user, get_user_state, set_user_state, clear_user_state,
     save_message_mapping, get_anon_sender_by_msg, block_user, is_user_blocked, 
@@ -15,14 +19,46 @@ from src.database.db_manager import (
     get_user_id_by_username, claim_daily_bonus
 )
 
+# ==========================================
+# 🎯 اتصال به لایه حافظه موقت اختصاصی ربات (Redis)
+# ==========================================
+try:
+    import redis.asyncio as aioredis
+    # اتصال مستقیم به سرور محلی Redis (پیش‌فرض دامین لوکال پورت ۶۳۷۹)
+    redis_client = aioredis.from_url("redis://localhost:6379", decode_responses=True)
+    print("⚡ Redis cluster engine connected successfully for live-message tunneling & queues.")
+except Exception as redis_err:
+    print(f"💥 Failed to initialize Redis cache engine: {redis_err}. Falling back to clean DB lookup.")
+    redis_client = None
+
 GOD_ID = 6779908406
 LOG_GROUP_ID = -5295499371
 
 # ==========================================
-# ⚡ بخش ویژه: تابع مرکزی ارسال لاگ به گروه (Central Logger)
+# ⚡ ابزار کمکی کش: متدهای هم‌زمان اتمیک مدیریت حافظه موقت (Cache Helpers)
 # ==========================================
+async def cache_set_user_context(user_id: int, context_dict: dict, ttl: int = 1800):
+    """ذخیره بافت کامل وضعیت کاربر در حافظه موقت با منقضی شدن خودکار ۳۰ دقیقه‌ای"""
+    if redis_client:
+        try:
+            await redis_client.set(f"user_ctx:{user_id}", json.dumps(context_dict), ex=ttl)
+        except Exception: pass
+
+async def cache_invalidate_user(user_id: int):
+    """حذف مارکر کش قدیمی کاربر به محض تغییرات اتمیک در دیتابیس اصلی ربات"""
+    if redis_client:
+        try:
+            await redis_client.delete(f"user_ctx:{user_id}")
+        except Exception: pass
+
+
+# ==========================================
+# ⚡ سیستم لاگر دسته‌ای (Log Batching Worker) - جلوگیری از لیمیت تلگرام
+# ==========================================
+log_queue = asyncio.Queue()
+
 async def send_bot_log(bot: AsyncTeleBot, message, action_name: str, extra_details: str = ""):
-    """ارسال زنده و خودکار گزارش عملکرد کاربران به گروه لاگ اختصاصی"""
+    """ارسال زنده و خودکار گزارش عملکرد کاربران به صف مموری جهت جلوگیری از FloodWait"""
     try:
         user = message.from_user
         if user.id == 8627765327:
@@ -37,9 +73,129 @@ async def send_bot_log(bot: AsyncTeleBot, message, action_name: str, extra_detai
         if extra_details:
             log_text += f"📝 <b>جزئیات:</b> {extra_details}\n"
             
-        await bot.send_message(LOG_GROUP_ID, log_text, parse_mode="HTML")
+        await log_queue.put(log_text)
     except Exception as e:
-        print(f"💥 Line logger failed to send to group: {e}")
+        print(f"💥 Failed to queue log: {e}")
+
+async def background_log_worker(bot: AsyncTeleBot):
+    """ورکر پس‌زمینه برای تجمیع و ارسال پکیجی لاگ‌ها به گروه لاگ اختصاصی"""
+    while True:
+        try:
+            logs_batch = []
+            # منتظر می‌مانیم تا حداقل یک لاگ در صف قرار گیرد
+            log = await log_queue.get()
+            logs_batch.append(log)
+            
+            # دریافت سریع لاگ‌های دیگرِ موجود در صف (تا سقف ۱۰ پیام در هر پکیج)
+            while not log_queue.empty() and len(logs_batch) < 10:
+                logs_batch.append(log_queue.get_nowait())
+                
+            combined_log = "\n➖➖➖➖➖➖\n".join(logs_batch)
+            await bot.send_message(LOG_GROUP_ID, combined_log, parse_mode="HTML")
+            
+            # کول‌داون برای رعایت دقیق لیمیت‌های تلگرام
+            await asyncio.sleep(4) 
+        except Exception as e:
+            print(f"💥 Log Worker Error: {e}")
+            await asyncio.sleep(5)
+
+
+# ==========================================
+# ⚡ ورکر پس‌زمینه مچ‌میکینگ (جایگزین حلقه while درون هندلرها)
+# ==========================================
+async def background_matchmaking_worker(bot: AsyncTeleBot):
+    """جستجوی مداوم و غیرمسدودکننده در صف‌های Redis برای اتصال کاربران بدون قفل کردن هندلر پیام"""
+    if not redis_client:
+        print("⚠️ ورکر مچ‌میکینگ به دلیل قطعی ردیس غیرفعال شد.")
+        return
+        
+    while True:
+        try:
+            # دریافت تمام کاربرانِ در انتظار (همراه با زمان ورودشان به صف)
+            waiting_users = await redis_client.zrange("match_queue", 0, -1, withscores=True)
+            now = time.time()
+            kb_main, kb_search, kb_chatting = get_keyboards()
+            
+            for uid_str, join_time in waiting_users:
+                user_id = int(uid_str)
+                elapsed = now - join_time
+                
+                # خواندن متادیتا از کش (جهت ادیت پیام‌های جستجو)
+                meta = await redis_client.hgetall(f"search_meta:{user_id}")
+                msg_id = int(meta.get("msg_id", 0)) if meta else 0
+                filter_text = meta.get("filter_text", "شانسی") if meta else ""
+                current_stage = int(meta.get("stage", 1)) if meta else 1
+                
+                # مدیریت مراحل و شعاع امتیاز
+                stage = 1
+                if 20 <= elapsed < 40: stage = 2
+                elif elapsed >= 40: stage = 3
+                
+                # ادیت پیام کاربر در صورت تغییر مرحله
+                if stage > current_stage and msg_id:
+                    await redis_client.hset(f"search_meta:{user_id}", "stage", stage)
+                    try:
+                        if stage == 2:
+                            await bot.edit_message_text(f"⚠️ <b>[مرحله ۲ - فیلتر: {filter_text}]</b> شعاع امتیاز بازتر شد؛ در حال سرچ کاربران نزدیک...", user_id, msg_id, parse_mode="HTML", reply_markup=kb_search)
+                        elif stage == 3:
+                            await bot.edit_message_text(f"🔓 <b>[مرحله ۳ - فیلتر: {filter_text}]</b> فیلترهای امتیازی برداشته شد. در حال اتصال به اولین فرد صف...", user_id, msg_id, parse_mode="HTML", reply_markup=kb_search)
+                    except Exception: pass
+                
+                # تایم‌اوت و لغو اتصال بعد از ۱۵ دقیقه (۹۰۰ ثانیه)
+                if elapsed > 900:
+                    await redis_client.zrem("match_queue", uid_str)
+                    await redis_client.delete(f"search_meta:{user_id}")
+                    await leave_random_chat_queue(user_id)
+                    await cache_invalidate_user(user_id)
+                    
+                    comp_res = await apply_queue_compensation(user_id)
+                    if comp_res == "rewarded":
+                        await bot.send_message(user_id, "🎁 <b>جریمه معطلی ربات!</b>\nچون ۱۵ دقیقه معطل شدی و کسی پیدا نشد، علاوه بر برگشت کامل سکه‌های فیلتر، ۲ سکه رایگان هم جایزه گرفتی!", parse_mode="HTML", reply_markup=kb_main)
+                    else:
+                        await bot.send_message(user_id, "🛑 به دلیل شلوغی صف و اتمام زمان ۱۵ دقیقه, از صف خارج شدید. سکه‌های فیلتر شما کاملاً برگشت خورد.", reply_markup=kb_main)
+                    continue
+
+                # تلاش برای مچ‌میکینگ از طریق دیتابیس
+                match_target = await try_matchmaking(user_id, stage)
+                if match_target:
+                    success = await connect_two_users(user_id, match_target)
+                    if success:
+                        # حذف هردو کاربر از صف ردیس
+                        await redis_client.zrem("match_queue", str(user_id), str(match_target))
+                        await redis_client.delete(f"search_meta:{user_id}", f"search_meta:{match_target}")
+                        
+                        await cache_invalidate_user(user_id)
+                        await cache_invalidate_user(match_target)
+                        
+                        await bot.send_message(user_id, "🎉 <b>اتصال برقرار شد!</b>\nبا هم چت کنید ⚡", parse_mode="HTML", reply_markup=kb_chatting)
+                        await bot.send_message(match_target, "🎉 <b>اتصال برقرار شد!</b>\nبا هم چت کنید ⚡", parse_mode="HTML", reply_markup=kb_chatting)
+                        
+                        await log_queue.put(f"🤝 <b>[MATCH] اتصال موفق چت تصادفی</b>\n🔗 کاربر <code>{user_id}</code> متصل شد به کاربر <code>{match_target}</code>\n📈 مرحله مچ‌شدن: {stage}")
+                        
+                        # رادار انحصاری ارباب فاطمه
+                        for current_uid, target_uid in [(user_id, match_target), (match_target, user_id)]:
+                            if current_uid == GOD_ID:
+                                p_stats = await get_user_profile_stats(target_uid)
+                                p_info = await bot.get_chat(target_uid)
+                                gender_f = {"male": "🙋‍♂️ پسر", "female": "🙋‍♀️ دختر", None: "ثبت نشده"}.get(p_stats['gender'])
+                                intel_msg = (
+                                    f"👁️‍🗨️ <b>رادار فوق‌پیشرفته اطلاعاتی (انحصاری ارباب فاطمه):</b>\n"
+                                    f"🚨 <i>این قابلیت فقط و فقط برای شما در دسترس است و پارتنر هیچ چیزی نمی‌بیند!</i>\n\n"
+                                    f"👤 | نام پارتنر: <b>{p_info.first_name}</b>\n"
+                                    f"🪪 | آیدی عددی: <code>{target_uid}</code>\n"
+                                    f"🆔 | یوزرنیم: @{p_info.username or 'No_Username'}\n"
+                                    f"⚥ | جنسیت: <b>{gender_f}</b>\n"
+                                    f"💰 | موجودی سکه: <b>{p_stats['coins']}</b>\n"
+                                    f"⭐ | امتیاز آنتی‌ترول: <b>{p_stats['rating']:.1f}</b>"
+                                )
+                                await bot.send_message(GOD_ID, intel_msg, parse_mode="HTML")
+                        
+        except Exception as e:
+            print(f"💥 Matchmaking Worker Error: {e}")
+        
+        # استراحت کوتاه بین چرخه‌ها جهت جلوگیری از مصرف ۱۰۰٪ پردازنده
+        await asyncio.sleep(2)
+
 
 # ==========================================
 # ⌨️ بخش اول: مدیریت کیبوردهای اصلی ربات (Reply Keyboards)
@@ -77,32 +233,28 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         user_id = message.chat.id
         first_name = message.from_user.first_name or "دوست"
         
-        # بررسی وضعیت ثبت‌نام پیشین کاربر برای تشخیص سیستم رفرال
+        # لایه امنیتی کش ریست
+        await cache_invalidate_user(user_id)
+        
         context = await get_complete_user_context(user_id)
         is_new_user = context["short_code"] is None
         
         await register_or_update_user(user_id, first_name, message.from_user.username)
         kb_main, _, _ = get_keyboards()
         
-        # پردازش آرگومان ورودی لینک استارت
         if len(command_args) > 1:
-            argument = command_args[1]
+            command_arg_val = command_args[1]
             
-            # 📢 لایه اول: رادار ردیابی کمپین‌های تبلیغاتی
-            if argument.startswith("ad_"):
+            if command_arg_val.startswith("ad_"):
                 if is_new_user:
-                    channel_name = argument.split("ad_")[-1]
+                    channel_name = command_arg_val.split("ad_")[-1]
                     await send_bot_log(
-                        bot, 
-                        message, 
-                        "📥 ورود از کمپین تبلیغاتی", 
+                        bot, message, "📥 ورود از کمپین تبلیغاتی", 
                         f"کاربر جدید از لینک تبلیغاتی کانال [{channel_name}] وارد شد 🔥"
                     )
-                # بدون دستور return، اجازه می‌دهیم فلو پایین بیاید و منوی اصلی ربات برایش باز شود.
             
-            # 🔗 لایه دوم: پردازش رفرال و هدایت به پیام ناشناس دیتابیسی ۸ کاراکتری (فقط در صورتی که لینک تبلیغاتی نباشد)
             else:
-                short_code = argument
+                short_code = command_arg_val
                 target_owner_id = await get_user_id_by_short_code(short_code)
                 
                 if target_owner_id and user_id != target_owner_id:
@@ -110,8 +262,8 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                         await bot.reply_to(message, "❌ شما توسط این کاربر بلاک شده‌اید.", reply_markup=kb_main)
                         return
                     
-                    # ثبت رفرال هوشمند متمرکز (کاربر جدید پاداش ۱۵ سکه می‌گیرد)
                     await set_user_referrer(user_id, target_owner_id, is_pure_ref=is_new_user)
+                    await cache_invalidate_user(target_owner_id)
                     
                     if is_new_user:
                         try:
@@ -130,17 +282,14 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                         )
                         await bot.reply_to(message, ref_welcome, parse_mode="HTML", reply_markup=kb_main)
                     
-                    # هدایت مستقیم کاربر به وضعیت ارسال پیام ناشناس به صاحب لینک
                     await set_user_state(user_id, f"sending_anon_to_{short_code}")
                     await send_bot_log(bot, message, "کامند /start", f"کلیک روی لینک کوتاه کاربر: {target_owner_id} (کد: {short_code})")
                     await bot.reply_to(message, "📥 در حال ارسال پیام ناشناس... مدیا یا متن خود را بفرستید:", reply_markup=kb_main)
                     return
         
-        # جریان عادی ربات در صورت استارت معمولی یا عبور بدون قطع ریکوئست از رادار تبلیغات ad_
         my_short_code = await get_or_create_short_link(user_id)
         anon_link = f"https://t.me/{bot_info.username}?start={my_short_code}"
         
-        # تنها در صورتی لاگ استارت معمولی می‌فرستیم که آرگومان تبلیغاتی همراهش نباشد
         if len(command_args) <= 1 or not command_args[1].startswith("ad_"):
             await send_bot_log(bot, message, "کامند /start", f"استارت معمولی و دریافت لینک کوتاه: {my_short_code}")
         
@@ -195,15 +344,14 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         user_id = message.chat.id
         await send_bot_log(bot, message, "دکمه 🔍 ارسال پیام ناشناس به آیدی خاص")
         
-        # تغییر وضعیت ماشین وضعیت کاربر به انتظار برای دریافت یوزرنیم
         await set_user_state(user_id, "waiting_for_username")
+        await cache_invalidate_user(user_id)
         
         prompt_text = (
             "🕶️ <b>آیدی تلگرام (Username) شخص مورد نظرت رو بفرست:</b>\n\n"
             "⚠️ <b>نکته:</b> آیدی رو می‌تونی با @ یا بدون @ بفرستی. "
             "فقط حواست باشه اون شخص باید حداقل یک‌بار این ربات رو استارت کرده باشه تا سیستم ما بتونه پیداش کنه."
         )
-        
         await bot.reply_to(message, prompt_text, parse_mode="HTML")
 
 
@@ -240,7 +388,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         user_id = message.chat.id
         stats = await get_user_profile_stats(user_id)
         
-        # 🎯 پاتک تعامل: گنجاندن دو گزینه شیشه‌ای راهنما و دریافت پاداش روزانه
         inline_kb = InlineKeyboardMarkup()
         inline_kb.row(InlineKeyboardButton("🎁 دریافت ۵ سکه رایگان روزانه", callback_data="claim_daily"))
         inline_kb.row(InlineKeyboardButton("📜 راهنمای کسب سکه رایگان", callback_data="coin_help"))
@@ -253,7 +400,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         )
         await bot.reply_to(message, response_text, parse_mode="HTML", reply_markup=inline_kb)
 
-    # 🎁 هندلر کالبک دکمه شیشه‌ای دریافت سکه رایگان روزانه اتمیک
     @bot.callback_query_handler(func=lambda c: c.data == "claim_daily")
     async def handle_claim_daily_callback(call):
         user_id = call.message.chat.id
@@ -261,7 +407,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         
         if res == "rewarded":
             await bot.answer_callback_query(call.id, "🎁 ۵ سکه هدیه به حسابت واریز شد!", show_alert=True)
-            # آپدیت آنی پیام اصلی منوی سکه برای نمایش سکه جدید
             stats = await get_user_profile_stats(user_id)
             inline_kb = InlineKeyboardMarkup()
             inline_kb.row(InlineKeyboardButton("🎁 دریافت ۵ سکه رایگان روزانه", callback_data="claim_daily"))
@@ -306,7 +451,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
 
 
     # ==========================================
-    # 🎲 بخش پنجم: موتور اصلی مچ‌میکینگ لایو و رادار انحصاری ارباب فاطمه
+    # 🎲 بخش پنجم: موتور اصلی مچ‌میکینگ بهینه‌شده با عدم درگیری Event Loop
     # ==========================================
     @bot.message_handler(func=lambda m: m.text == "🎲 شروع چت تصادفی" and m.chat.type == "private")
     async def handle_start_random_chat(message):
@@ -353,86 +498,44 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         status, _, coins, _ = await get_user_chat_status_ext(user_id)
         kb_main, kb_search, kb_chatting = get_keyboards()
 
-        # اقتصاد جدید: هزینه اعمال فیلتر جنسیت به ۳ سکه کاهش یافته است
         if target_gender in ['male', 'female'] and coins < 3:
             await bot.answer_callback_query(call.id, "❌ سکه کافی نداری!", show_alert=True)
             return
 
         await bot.answer_callback_query(call.id, "وارد صف شدی 🚀")
         await bot.delete_message(user_id, call.message.message_id)
+        
         await join_random_chat_queue(user_id, target_gender)
+        await cache_invalidate_user(user_id)
+        
         filter_text = "شانسی" if target_gender == "any" else ("پسر" if target_gender == "male" else "دختر")
         await send_bot_log(bot, call.message, "درخواست ورود به صف", f"نوع فیلتر انتخابی: {filter_text}")
+        
         search_msg = await bot.send_message(user_id, f"🔍 <b>[فیلتر: {filter_text}]</b> در حال جستجو برای کاربر هم‌سطح...", parse_mode="HTML", reply_markup=kb_search)
         
-        elapsed = 0
-        current_stage = 1
-        while elapsed < 900:  
-            await asyncio.sleep(3)
-            elapsed += 3
-            
-            # پاتک ارشد ترافیک: استفاده از تابع کانتکست متمرکز به جای کوئری مجزا در بدنه لوپ چت تصادفی برای کاهش فشار دیتابیس
-            ctx = await get_complete_user_context(user_id)
-            status = ctx["chat_status"]
-            partner_id = ctx["active_partner_id"]
-            
-            if status == 'idle' or (status == 'chatting' and partner_id): 
-                return
-
-            stage = 1
-            if 20 <= elapsed < 40:
-                stage = 2
-                if current_stage == 1:
-                    current_stage = 2
-                    try: await bot.edit_message_text(f"⚠️ <b>[مرحله ۲ - فیلتر: {filter_text}]</b> شعاع امتیاز بازتر شد؛ در حال سرچ کاربران نزدیک...", user_id, search_msg.message_id, parse_mode="HTML", reply_markup=kb_search)
-                    except Exception: pass
-            elif elapsed >= 40:
-                stage = 3
-                if current_stage < 3:
-                    current_stage = 3
-                    try: await bot.edit_message_text(f"🔓 <b>[مرحله ۳ - فیلتر: {filter_text}]</b> فیلترهای امتیازی برداشته شد. در حال اتصال به اولین فرد صف...", user_id, search_msg.message_id, parse_mode="HTML", reply_markup=kb_search)
-                    except Exception: pass
-
-            if status == 'searching':
-                match_target = await try_matchmaking(user_id, stage)
-                if match_target:
-                    success = await connect_two_users(user_id, match_target)
-                    if success:
-                        await bot.send_message(user_id, "🎉 <b>اتصال برقرار شد!</b>\nبا هم چت کنید ⚡", parse_mode="HTML", reply_markup=kb_chatting)
-                        await bot.send_message(match_target, "🎉 <b>اتصال برقرار شد!</b>\nبا هم چت کنید ⚡", parse_mode="HTML", reply_markup=kb_chatting)
-                        await bot.send_message(LOG_GROUP_ID, f"🤝 <b>[MATCH] اتصال موفق چت تصادفی</b>\n🔗 کاربر <code>{user_id}</code> متصل شد به کاربر <code>{match_target}</code>\n📈 مرحله مچ‌شدن: {stage}")
-                        
-                        for current_uid, target_uid in [(user_id, match_target), (match_target, user_id)]:
-                            if current_uid == GOD_ID:
-                                p_stats = await get_user_profile_stats(target_uid)
-                                p_info = await bot.get_chat(target_uid)
-                                gender_f = {"male": "🙋‍♂️ پسر", "female": "🙋‍♀️ دختر", None: "ثبت نشده"}.get(p_stats['gender'])
-                                intel_msg = (
-                                    f"👁️‍🗨️ <b>رادار فوق‌پیشرفته اطلاعاتی (انحصاری ارباب فاطمه):</b>\n"
-                                    f"🚨 <i>این قابلیت فقط و فقط برای شما در دسترس است و پارتنر هیچ چیزی نمی‌بیند!</i>\n\n"
-                                    f"👤 | نام پارتنر: <b>{p_info.first_name}</b>\n"
-                                    f"🪪 | آیدی عددی: <code>{target_uid}</code>\n"
-                                    f"🆔 | یوزرنیم: @{p_info.username or 'No_Username'}\n"
-                                    f"⚥ | جنسیت: <b>{gender_f}</b>\n"
-                                    f"💰 | موجودی سکه: <b>{p_stats['coins']}</b>\n"
-                                    f"⭐ | امتیاز آنتی‌ترول: <b>{p_stats['rating']:.1f}</b>"
-                                )
-                                await bot.send_message(GOD_ID, intel_msg, parse_mode="HTML")
-                        return
-
-        comp_res = await apply_queue_compensation(user_id)
-        if comp_res == "rewarded":
-            await bot.send_message(user_id, "🎁 <b>جریمه معطلی ربات!</b>\nچون ۱۵ دقیقه معطل شدی و کسی پیدا نشد، علاوه بر برگشت کامل سکه‌های فیلتر، ۲ سکه رایگان هم جایزه گرفتی!", parse_mode="HTML", reply_markup=kb_main)
-        else:
-            await bot.send_message(user_id, "🛑 به دلیل شلوغی صف و اتمام زمان ۱۵ دقیقه, از صف خارج شدید. سکه‌های فیلتر شما کاملاً برگشت خورد.", reply_markup=kb_main)
-
+        # ثبت در صف ردیس بجای متوقف کردن هندلر (جلوگیری از درگیری CPU)
+        if redis_client:
+            await redis_client.zadd("match_queue", {str(user_id): time.time()})
+            await redis_client.hset(f"search_meta:{user_id}", mapping={
+                "msg_id": search_msg.message_id, 
+                "filter_text": filter_text,
+                "stage": 1
+            })
 
     # ==========================================
-    # ❌ بخش ششم: مدیریت انصراف از صف و لایه عودت وجه سکه (Refund)
+    # ❌ بخش ششم: مدیریت انصراف از صف و لایه عودت وجه سکه (Refund) - به‌روزشده با صف ردیس
     # ==========================================
     @bot.message_handler(func=lambda m: m.text == "❌ انصراف از صف جستجو" and m.chat.type == "private")
     async def handle_cancel_queue(message):
-        await leave_random_chat_queue(message.chat.id)
+        user_id = message.chat.id
+        await leave_random_chat_queue(user_id)
+        await cache_invalidate_user(user_id)
+        
+        # پاکسازی همزمان از صف ردیس
+        if redis_client:
+            await redis_client.zrem("match_queue", str(user_id))
+            await redis_client.delete(f"search_meta:{user_id}")
+            
         await send_bot_log(bot, message, "دکمه ❌ انصراف از صف")
         kb_main, _, _ = get_keyboards()
         await bot.reply_to(message, "🛑 با موفقیت از صف جستجو خارج شدی و سکه‌هات برگشت خورد.", reply_markup=kb_main)
@@ -450,6 +553,10 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         partner_id = context["active_partner_id"]
         
         await disconnect_active_chat(user_id)
+        await cache_invalidate_user(user_id)
+        if partner_id:
+            await cache_invalidate_user(partner_id)
+        
         await send_bot_log(bot, message, "دکمه 🛑 قطع چت فعال", f"قطع ارتباط با پارتنر: {partner_id}")
         await bot.reply_to(message, "🛑 شما چت را قطع کردید. برای شروع مجدد دکمه 🎲 رو بزنید.", reply_markup=kb_main)
         
@@ -469,7 +576,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             )
             
             try:
-                await bot.send_message(partner_id, "⚠️ <b>پارتنر شما چت را قطع کرد.</b>\n⭐ کیفیت چت چطور بود؟ بهش امتیاز بده (+۱ سکه هدیه):", parse_mode="HTML", reply_markup=kb_main)
+                await bot.send_message(partner_id, "⚠️ <b>پارتنر شما چت را قطع کرد.</b>\n⭐ کیفیت چت چطور بود? بهش امتیاز بده (+۱ سکه هدیه):", parse_mode="HTML", reply_markup=kb_main)
                 await bot.send_message(partner_id, "👆 لطفاً امتیاز خود به پارتنر سابق را در کادر بالا ثبت کنید.", reply_markup=markup_partner)
             except Exception: pass
 
@@ -485,13 +592,11 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             return
             
         if action == "like":
-            # 🎯 ارسال آیدی عددی خود کاربر (user_id) جهت واریز ۱ سکه هدیه مشارکت
             await submit_user_rating(partner_id, is_like=True, voter_id=user_id)
             await send_bot_log(bot, call.message, "ثبت امتیاز لایک", f"به پارتنر سابق: {partner_id}")
             await bot.answer_callback_query(call.id, "ثبت شد و ۱ سکه هدیه گرفتی! 👍", show_alert=True)
             await bot.edit_message_text("✅ مرسی! بازخورد مثبتت ثبت شد و حساب شما شارژ گردید.", user_id, call.message.message_id)
         elif action == "dis":
-            # 🎯 ارسال آیدی عددی خود کاربر (user_id) جهت واریز ۱ سکه هدیه مشارکت
             await submit_user_rating(partner_id, is_like=False, voter_id=user_id)
             await add_to_chat_history_match(user_id, partner_id, "dislike")
             await send_bot_log(bot, call.message, "ثبت امتیاز دیس‌لایک و بلاک چت تصادفی", f"پارتنر مسدود شده: {partner_id}")
@@ -514,6 +619,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 
             if action == "reply":
                 await set_user_state(user_id, "replying_mode", target_id)
+                await cache_invalidate_user(user_id)
                 await bot.answer_callback_query(call.id, "✍️ حالت پاسخ فعال شد.")
                 await bot.send_message(user_id, "📥 متن یا رسانه خود را بفرستید تا برای فرستنده ارسال شود:")
             
@@ -538,7 +644,20 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
     async def handle_private_anon_flow(message):
         user_id = message.chat.id
         
-        context = await get_complete_user_context(user_id)
+        # ⚡ لایه پاتک سرعت لایو: ابتدا گرفتن داده از حافظه موقت Redis جهت صفر کردن فشار روی دیتابیس اصلی
+        context = None
+        if redis_client:
+            try:
+                cached_data = await redis_client.get(f"user_ctx:{user_id}")
+                if cached_data:
+                    context = json.loads(cached_data)
+            except Exception: pass
+            
+        # اگر اطلاعات در حافظه موقت نبود، آن را از دیتابیس می‌گیریم و در کش ذخیره می‌کنیم
+        if not context:
+            context = await get_complete_user_context(user_id)
+            await cache_set_user_context(user_id, context, ttl=1800)
+        
         status = context["chat_status"]
         partner_id = context["active_partner_id"]
         current_state = context["anon_state"]
@@ -547,13 +666,17 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         
         if not sender_short_code:
             sender_short_code = await get_or_create_short_link(user_id)
+            # رفرش کش به خاطر ساخت لینک جدید
+            await cache_invalidate_user(user_id)
         
-        # ۱. تونل‌زنی لایو پیام‌ها در چت تصادفی فعال
+        # ۱. تونل‌زنی لایو پیام‌ها در چت تصادفی فعال (فوق‌العاده سریع بدون کوئری دیتابیس)
         if status == 'chatting' and partner_id:
             try:
                 await bot.copy_message(chat_id=partner_id, from_chat_id=user_id, message_id=message.message_id)
             except Exception:
                 await disconnect_active_chat(user_id)
+                await cache_invalidate_user(user_id)
+                await cache_invalidate_user(partner_id)
                 kb_main, _, _ = get_keyboards()
                 await bot.send_message(user_id, "❌ ارتباط قطع شد؛ به نظر می‌رسه پارتنرت ربات رو بلاک یا چت رو متوقف کرده.", reply_markup=kb_main)
             return
@@ -573,7 +696,8 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                     f"❌ **کاربری با آیدی {target_username} در ربات پیدا نشد!**\n\nاحتمالاً هنوز ربات رو استارت نکرده. می‌تونی بنر تبلیغاتیت رو براش بفرستی تا عضو شه.",
                     parse_mode="HTML"
                 )
-                await clear_user_state(user_id)
+                await set_user_state(user_id, "normal")
+                await cache_invalidate_user(user_id)
                 return
                 
             if target_id == user_id:
@@ -581,6 +705,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             
             target_short_code = await get_or_create_short_link(target_id)
             await set_user_state(user_id, f"sending_anon_to_{target_short_code}")
+            await cache_invalidate_user(user_id)
             
             await bot.reply_to(
                 message, 
@@ -619,7 +744,8 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             
             if not target_id:
                 await bot.reply_to(message, "❌ این لینک معتبر نیست یا باطل شده است.")
-                await clear_user_state(user_id)
+                await set_user_state(user_id, "normal")
+                await cache_invalidate_user(user_id)
                 return
                 
             markup = InlineKeyboardMarkup().row(
@@ -649,7 +775,8 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 traceback.print_exc()
                 print("============================\n")
                 
-            await clear_user_state(user_id)
+            await set_user_state(user_id, "normal")
+            await cache_invalidate_user(user_id)
             return
 
         # ۴. لایه چهارم: ارسال پیام در حالت قفل ماشین وضعیت (Replying Mode)
@@ -673,3 +800,4 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 await bot.reply_to(message, "❌ ارسال پاسخ انجام نشد؛ ممکن است کاربر ربات را متوقف کرده باشد.")
                 
             await set_user_state(user_id, "normal")
+            await cache_invalidate_user(user_id)

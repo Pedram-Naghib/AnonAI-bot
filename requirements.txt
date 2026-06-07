@@ -10,3 +10,4 @@ anyio>=4.3.0
 python-dotenv>=1.0.1
 apscheduler==3.11.2
 asyncpg==0.31.0
+redis==8.0.0
