@@ -62,6 +62,12 @@ def register_admin_handlers(bot: AsyncTeleBot):
         
         try:
             async with pool.acquire() as conn:
+                # ۱. دریافت تعداد کل کاربران ثبت‌شده در دیتابیس
+                total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
+                # ۲. دریافت تعداد کاربران مسدود شناسایی‌شده
+                total_dead_users = await conn.fetchval("SELECT COUNT(*) FROM users WHERE anon_state = 'blocked_bot'")
+                
+                # ۳. استخراج کاربران فعال (آن‌هایی که از قبل به عنوان بلاک شناسایی نشده‌اند)
                 query = """
                     SELECT 
                         u.user_id, 
@@ -80,37 +86,46 @@ def register_admin_handlers(bot: AsyncTeleBot):
                         FROM message_map 
                         GROUP BY anon_sender_id
                     ) s ON u.user_id = s.anon_sender_id
+                    WHERE u.anon_state != 'blocked_bot' -- فقط کاربران زنده اسکن شوند
                     ORDER BY (COALESCE(r.received_count, 0) + COALESCE(s.sent_count, 0)) DESC
-                    LIMIT 40; -- سقف را بالا می‌بریم تا بعد از فیلتر بلاکی‌ها حتماً ۲۰ کاربر پر شود
+                    LIMIT 30;
                 """
                 
                 rows = await conn.fetch(query)
                 if not rows:
-                    await bot.reply_to(message, "📭 هیچ کاربری در دیتابیس یافت نشد.")
+                    await bot.reply_to(message, f"📭 هیچ کاربری یافت نشد.\n👥 کل اعضا: {total_users}")
                     return
 
-                # 🛠️ پاتک موازی ضد لیمیت تلگرام (Safe Check Worker)
-                async def check_user_block(row):
+                # 🛠️ پاتک موازی شناسایی و نشانه‌گذاری کاربران بلاک‌کننده در دیتابیس
+                async def check_and_clean_user(row):
                     uid = row['user_id']
                     try:
-                        # تلاش برای ارسال سیگنال چت‌اکشن با تایم‌اوت کوتاه ۲ ثانیه‌ای
-                        await asyncio.wait_for(bot.send_chat_action(uid, 'typing'), timeout=2.0)
+                        await asyncio.wait_for(bot.send_chat_action(uid, 'typing'), timeout=1.5)
                         return row, True
                     except Exception:
+                        # 🔥 کاربر ربات را بلاک کرده؛ بلافاصله وضعیتش را در دیتابیس ایزوله می‌کنیم
+                        async with pool.acquire() as db_conn:
+                            await db_conn.execute("UPDATE users SET anon_state = 'blocked_bot', chat_status = 'idle', active_partner_id = NULL WHERE user_id = $1", uid)
                         return row, False
 
-                # اجرای هم‌زمان و موازی تست بلاک بودن تمام کاربران دیتابیس
-                tasks = [check_user_block(row) for row in rows]
+                # اجرای هم‌زمان موازی تست وضعیت کاربران برتر
+                tasks = [check_and_clean_user(row) for row in rows]
                 checked_results = await asyncio.gather(*tasks)
 
+                # محاسبه مجدد لایو اعضای فعال واقعی
+                live_users_count = total_users - total_dead_users
+
                 report_lines = [
-                    "👑 <b>گزارش ارشد دیتابیس کاربران فعال</b>\n",
-                    "📊 <i>کاربران برتر بر اساس بیشترین حجم تعاملات ناشناس (بلاک نکرده‌ها):</i>\n"
+                    "👑 <b>گزارش ارشد وضعیت دیتابیس</b>\n",
+                    f"👥 کل کاربران ثبت شده: <b>{total_users}</b>",
+                    f"🟢 کاربران فعال و زنده: <b>{live_users_count}</b>",
+                    f"🔴 مسدودکنندگان شناسایی‌شده: <b>{total_dead_users}</b>\n",
+                    "📊 <i>۲۰ کاربر برتر بر اساس بیشترین حجم تعاملات ناشناس:</i>\n"
                 ]
                 
                 valid_count = 0
                 for row, is_active in checked_results:
-                    if not is_active: continue # اگر ربات را بلاک کرده بود رد می‌شویم
+                    if not is_active: continue # رد کردن کاربرانی که همین الان بلاک کردند
                     
                     valid_count += 1
                     uid = row['user_id']
@@ -126,16 +141,48 @@ def register_admin_handlers(bot: AsyncTeleBot):
                     )
                     report_lines.append(line)
                     
-                    if valid_count >= 20: break # گلچین کردن دقیق ۲۰ کاربر فعال اول
+                    if valid_count >= 20: break
 
-                if valid_count == 0:
-                    await bot.reply_to(message, "⚠️ تمام کاربران موجود در این بخش، ربات را مسدود (Block) کرده‌اند.")
-                    return
-                    
                 final_report = "\n".join(report_lines)
                 await bot.reply_to(message, final_report, parse_mode="HTML")
                 
         except Exception as err:
             print(f"💥 Admin Stats Command Failed: {err}")
             traceback.print_exc()
-            await bot.reply_to(message, "❌ خطای فنی در استخراج اطلاعات از دیتابیس رخ داد.")
+            await bot.reply_to(message, "❌ خطای فنی در استخراج اطلاعات از دیتابیس.")
+
+    # ==========================================
+    # 👑 دستور ویژه مدیریت: ارسال پیام همگانی دسته‌ای به کل ربات
+    # ==========================================
+    @bot.message_handler(commands=['bc'], func=lambda m: m.chat.type == "private" and m.from_user.id in SUPER_USERS)
+    async def handle_bulk_broadcast(message):
+        try:
+            command_text = message.text.split("/bc ", 1)
+            
+            if len(command_text) < 2:
+                await bot.reply_to(
+                    message, 
+                    "⚠️ <b>فرمت اشتباه است!</b>\n"
+                    "لطفاً متن پیام خود را با یک فاصله بعد از دستور بنویسید.\n"
+                    "مثال:\n<code>/bc سلام کاربران عزیز، نسخه جدید ربات منتشر شد!</code>", 
+                    parse_mode="HTML"
+                )
+                return
+            
+            bulk_text = command_text[1].strip()
+            
+            from src.database.db_manager import create_broadcast_campaign
+            campaign_id = await create_broadcast_campaign(bulk_text)
+            
+            await bot.reply_to(
+                message, 
+                f"🚀 <b>فرمان ارسال پیام همگانی صادر شد!</b>\n\n"
+                f"📦 کد کمپین: <code>{campaign_id}</code>\n"
+                f"📝 وضعیت: <i>در صف ارسال بک‌گراند سرور...</i>\n\n"
+                f"ربات بدون وقفه به کارش ادامه میده و پس از اتمام ارسال، گزارش نهایی رو همین‌جا برات می‌فرسته. 🕶️✨",
+                parse_mode="HTML"
+            )
+            
+        except Exception as err:
+            print(f"💥 Failed to initiate broadcast campaign: {err}")
+            await bot.reply_to(message, "❌ خطای فنی در ثبت کمپین پیام همگانی.")

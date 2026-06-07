@@ -11,7 +11,7 @@ from src.bot.handlers import register_bot_handlers
 from src.database.db_manager import init_db
 
 # 🔥 ایمپورت کردن ورکرهای پس‌زمینه جدید برای لود هم‌زمان در لوپ اصلی
-from src.bot.background_workers import background_log_worker, background_matchmaking_worker
+from src.bot.background_workers import background_log_worker, background_matchmaking_worker, background_broadcast_worker
 
 # 🎛 تنظیمات ران شدن (روی سیستم خودت False بگذار، روی سرور رندر True)
 USE_WEBHOOK = True
@@ -59,6 +59,13 @@ async def start_bot():
     # scheduler.add_job(send_daily_analytics, 'cron', hour=23, minute=30, args=[bot])
     # scheduler.start()
     # print("Base Analytics scheduler started...")
+    # خطوط قبلی مچ‌میکینگ و لاگر ...
+    print("⚡ Activating Background Workers (Log Queue & Matchmaking)...")
+    asyncio.create_task(background_log_worker(bot))
+    asyncio.create_task(background_matchmaking_worker(bot))
+    
+    # 🔥 خط جدید: فعال‌سازی ورکر همگانی دسته‌ای
+    asyncio.create_task(background_broadcast_worker(bot))
     
     # ۵. انتخاب مسیر ران کردن (وب‌هوک یا پولینگ)
     if USE_WEBHOOK:

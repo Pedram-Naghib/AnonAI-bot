@@ -140,3 +140,82 @@ async def background_matchmaking_worker(bot: AsyncTeleBot):
         
         # ۲ ثانیه استراحت برای جلوگیری از اورلود و مصرف ۱۰۰٪ پردازنده سرور رندر
         await asyncio.sleep(2)
+
+# این ایمپورت را در صورت نبودن به بالای فایل background_workers.py اضافه کن
+from src.database.db_manager import get_connection_pool
+
+# ==========================================
+# ⚡ ورکر پس‌زمینه پیام همگانی دسته‌ای (Safe Bulk Broadcast Worker)
+# ==========================================
+async def background_broadcast_worker(bot: AsyncTeleBot):
+    """اسکن دیتابیس برای ارسال پیام‌های همگانی ادمین با کنترل دقیق نرخ لیمیت تلگرام"""
+    pool = await get_connection_pool()
+    
+    while True:
+        try:
+            async with pool.acquire() as conn:
+                # پیدا کردن اولین کمپین در صف انتظار
+                campaign = await conn.fetchrow(
+                    "SELECT id, message_text FROM broadcast_campaigns WHERE status = 'pending' ORDER BY id ASC LIMIT 1"
+                )
+                
+                if campaign:
+                    campaign_id = campaign['id']
+                    text_to_send = campaign['message_text']
+                    
+                    # تغییر وضعیت کمپین به حالت در حال پردازش
+                    await conn.execute("UPDATE broadcast_campaigns SET status = 'processing' WHERE id = $1", campaign_id)
+                    print(f"📢 Campaign {campaign_id} started processing...")
+
+                    # دریافت کل آیدی‌های کاربران
+                    from src.database.db_manager import get_all_user_ids_for_broadcast
+                    user_ids = await get_all_user_ids_for_broadcast()
+                    
+                    sent_counter = 0
+                    batch_size = 25 # ارسال پکیج‌های ۲۵ تایی در ثانیه جهت رعایت گارد امنیتی ۳۰ پیام تلگرام
+                    
+                    for i in range(0, len(user_ids), batch_size):
+                        current_batch = user_ids[i:i + batch_size]
+                        
+                        # ایجاد تسک‌های هم‌زمان برای پکیج جاری جهت بالا رفتن سرعت ارسال بدون بلاک شدن
+                        async def send_single_msg(uid):
+                            try:
+                                await bot.send_message(uid, text_to_send, parse_mode="HTML")
+                                return True
+                            except Exception:
+                                return False # کاربر ربات را بلاک کرده یا آیدی نامعتبر است
+
+                        tasks = [send_single_msg(uid) for uid in current_batch]
+                        results = await asyncio.gather(*tasks)
+                        
+                        sent_counter += sum(1 for res in results if res)
+                        
+                        # به روز رسانی لحظه‌ای آمار در دیتابیس
+                        await conn.execute(
+                            "UPDATE broadcast_campaigns SET total_sent = $1 WHERE id = $2", 
+                            sent_counter, campaign_id
+                        )
+                        
+                        # استراحت حیاتی ۱.۲ ثانیه‌ای بعد از هر پکیج برای دور زدن آنتی‌اسپم تلگرام 💤
+                        await asyncio.sleep(1.2)
+                    
+                    # اتمام موفقیت‌آمیز کمپین
+                    await conn.execute("UPDATE broadcast_campaigns SET status = 'completed' WHERE id = $1", campaign_id)
+                    print(f"🏁 Campaign {campaign_id} completed successfully. Total sent: {sent_counter}")
+                    
+                    # اطلاع‌رسانی به ادمین ارشد (GOD) بعد از پایان کار
+                    try:
+                        await bot.send_message(
+                            6779908406, 
+                            f"✅ <b>ارسال پیام همگانی با موفقیت پایان یافت!</b>\n\n"
+                            f"📦 کد کمپین: <code>{campaign_id}</code>\n"
+                            f"📥 تعداد ارسال‌های موفق: <b>{sent_counter} کاربر</b>", 
+                            parse_mode="HTML"
+                        )
+                    except Exception: pass
+
+        except Exception as e:
+            print(f"💥 Broadcast Worker Error: {e}")
+            
+        # استراحت ۱۰ ثانیه‌ای ورکر برای چک کردن مجدد صف دیتابیس
+        await asyncio.sleep(10)

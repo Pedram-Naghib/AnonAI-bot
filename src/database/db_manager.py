@@ -351,3 +351,20 @@ async def set_user_referrer(user_id: int, referrer_id: int, is_pure_ref: bool = 
                 await conn.execute("UPDATE users SET coins = 15 WHERE user_id = $1", user_id)
             else:
                 await conn.execute("UPDATE users SET coins = coins + 5 WHERE user_id = $1", user_id)
+
+
+async def create_broadcast_campaign(message_text: str) -> int:
+    """ثبت یک کمپین جدید برای ارسال همگانی"""
+    pool = await get_connection_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetchval(
+            "INSERT INTO broadcast_campaigns (message_text) VALUES ($1) RETURNING id", 
+            message_text
+        )
+
+async def get_all_user_ids_for_broadcast() -> list:
+    """دریافت لیست تمام آیدی‌های عددی کاربران زنده (بدون بلاکی‌ها) جهت ارسال پیام همگانی"""
+    pool = await get_connection_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT user_id FROM users WHERE anon_state != 'blocked_bot'")
+        return [row['user_id'] for row in rows]
