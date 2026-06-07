@@ -53,7 +53,7 @@ def register_admin_handlers(bot: AsyncTeleBot):
     # ==========================================
     # 👑 دستور ویژه مدیریت: دریافت آمار پیشرفته دیتابیس کاربران فعال
     # ==========================================
-    @bot.message_handler(commands=['db_stats'], func=lambda m: m.chat.type == "private" and m.from_user.id == GOD_ID)
+    @bot.message_handler(commands=['db_stats'], func=lambda m: m.chat.type == "private" and m.from_user.id in SUPER_USERS)
     async def handle_god_db_stats(message):
         # ارسال چت اکشن تایپینگ برای ادمین جهت تایید دریافت دستور
         await bot.send_chat_action(GOD_ID, 'typing')

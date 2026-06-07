@@ -4,11 +4,10 @@ import traceback
 import json
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
-from src.utils.crypto import encode_user_id, decode_user_id
 
 # وارد کردن توابع پایه دیتابیس (نسخه ارتقایافته با Connection Pool)
 from src.database.db_manager import (
-    register_or_update_user, get_user_state, set_user_state, clear_user_state,
+    register_or_update_user, set_user_state,
     save_message_mapping, get_anon_sender_by_msg, block_user, is_user_blocked, 
     get_super_user_by_msg, get_user_profile_stats,
     get_user_chat_status_ext, join_random_chat_queue, leave_random_chat_queue,
