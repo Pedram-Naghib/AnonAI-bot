@@ -1,10 +1,12 @@
+import asyncio
+from datetime import datetime, timedelta, timezone
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# ۱. توابع خالص دیتابیسی را از db_manager می‌آوریم (بدون متدهای کش)
+# ۱. توابع خالص دیتابیسی را از db_manager می‌آوریم
 from src.database.db_manager import (
-    get_user_profile_stats, claim_daily_bonus, get_or_create_short_link,
-    get_complete_user_context, block_user
+    get_user_profile_stats, get_or_create_short_link,
+    get_complete_user_context, get_connection_pool
 )
 
 # ۲. متدهای مربوط به ردیس و مدیریت کش را کاملاً از لایه خنثی کانفیگ می‌آوریم
@@ -32,7 +34,6 @@ def register_account_handlers(bot: AsyncTeleBot):
             f"📤 | ناشناس ارسال شده: {stats['sent']}\n"
             f"⛔️ | بلاک شده‌ها: {stats['blocked']}"
         )
-        # 🔥 پاتک لوکال ایمپورت برای جلوگیری از قفل شدن لود اولیه پایتون
         from src.bot.handlers.private_anon import get_keyboards
         kb_main, _, _ = get_keyboards()
         await bot.reply_to(message, response_text, parse_mode="HTML", reply_markup=kb_main)
@@ -47,7 +48,7 @@ def register_account_handlers(bot: AsyncTeleBot):
         stats = await get_user_profile_stats(user_id)
         
         inline_kb = InlineKeyboardMarkup()
-        inline_kb.row(InlineKeyboardButton("🎁 دریافت ۵ سکه رایگان روزانه", callback_data="claim_daily"))
+        inline_kb.row(InlineKeyboardButton("🎁 شانس روزانه با مینی‌گیم تاس", callback_data="claim_daily"))
         inline_kb.row(InlineKeyboardButton("📜 راهنمای کسب سکه رایگان", callback_data="coin_help"))
         
         response_text = (
@@ -59,30 +60,117 @@ def register_account_handlers(bot: AsyncTeleBot):
         await bot.reply_to(message, response_text, parse_mode="HTML", reply_markup=inline_kb)
 
     # ==========================================
-    # 🎁 کالبک تسویه هدیه ۵ سکه روزانه با کول‌داون اتمیک
+    # 🎁 کالبک دکمه هدیه روزانه: بررسی کول‌داون و باز کردن منوی تاس
     # ==========================================
     @bot.callback_query_handler(func=lambda c: c.data == "claim_daily")
     async def handle_claim_daily_callback(call):
         user_id = call.message.chat.id
-        res = await claim_daily_bonus(user_id)
+        pool = await get_connection_pool()
         
-        if res == "rewarded":
-            await bot.answer_callback_query(call.id, "🎁 ۵ سکه هدیه به حسابت واریز شد!", show_alert=True)
-            stats = await get_user_profile_stats(user_id)
-            inline_kb = InlineKeyboardMarkup()
-            inline_kb.row(InlineKeyboardButton("🎁 دریافت ۵ سکه رایگان روزانه", callback_data="claim_daily"))
-            inline_kb.row(InlineKeyboardButton("📜 راهنمای کسب سکه رایگان", callback_data="coin_help"))
-            new_text = (
-                f"<b>💰 مدیریت کیف پول سکه</b>\n\n"
-                f"👤 | کاربر: {call.from_user.first_name}\n"
-                f"🪙 | موجودی فعلی شما: <b>{stats['coins']} سکه</b>\n\n"
-                f"⚡ با سکه‌های خود می‌توانید در بخش 🎲 <b>چت تصادفی</b> به پارتنرهای هم‌سطح متصل شوید!"
-            )
-            try: await bot.edit_message_text(new_text, user_id, call.message.message_id, parse_mode="HTML", reply_markup=inline_kb)
+        try:
+            async with pool.acquire() as conn:
+                # بررسی کول‌داون ۲۴ ساعته از دیتابیس
+                row = await conn.fetchrow("SELECT last_daily_bonus_at FROM users WHERE user_id = $1", user_id)
+                now = datetime.now(timezone.utc)
+                
+                if row and row['last_daily_bonus_at']:
+                    last_bonus = row['last_daily_bonus_at']
+                    if last_bonus.tzinfo is None:
+                        last_bonus = last_bonus.replace(tzinfo=timezone.utc)
+                        
+                    if now - last_bonus < timedelta(days=1):
+                        time_left = timedelta(days=1) - (now - last_bonus)
+                        hours, remainder = divmod(time_left.seconds, 3600)
+                        minutes, _ = divmod(remainder, 60)
+                        await bot.answer_callback_query(
+                            call.id, 
+                            f"❌ شما امروز هدیه خود را گرفته‌اید!\n⏳ زمان باقی‌مانده: {hours:02d}:{minutes:02d} ساعت", 
+                            show_alert=True
+                        )
+                        return
+
+                # اگر مجاز بود، منوی شیشه‌ای بازی تاس را روی پیام قبلی ادیت می‌کنیم
+                kb_dice = InlineKeyboardMarkup()
+                kb_dice.row(
+                    InlineKeyboardButton("🎲 بنداز بریم!", callback_data="roll_the_dice"),
+                    InlineKeyboardButton("❌ انصراف", callback_data="cancel_dice")
+                )
+                
+                dice_menu_text = (
+                    "🎲 <b>به مینی‌گیم بونوس روزانه خوش اومدی!</b>\n\n"
+                    "قوانین بازی خیلی سادست:\n"
+                    "روی دکمه زیر کلیک کن تا تاس انداخته بشه. **به اندازه عددی که تاس نشون میده (بین ۱ تا ۶ سکه) جایزه می‌گیری!**\n\n"
+                    "آماده‌ای؟ شاست رو امتحان کن 👇"
+                )
+                await bot.edit_message_text(dice_menu_text, user_id, call.message.message_id, parse_mode="HTML", reply_markup=kb_dice)
+                await bot.answer_callback_query(call.id)
+                
+        except Exception as e:
+            print(f"💥 Daily bonus check error: {e}")
+            await bot.answer_callback_query(call.id, "❌ خطایی در بررسی هدیه روزانه رخ داد.", show_alert=True)
+
+    # ==========================================
+    # 🎰 کالبک‌های اختصاصی مینی‌گیم تاس (پرتاب انیمیشن و تسویه اتمیک)
+    # ==========================================
+    @bot.callback_query_handler(func=lambda c: c.data in ["roll_the_dice", "cancel_dice"])
+    async def handle_dice_game_execution(call):
+        user_id = call.message.chat.id
+        message_id = call.message.message_id
+        
+        if call.data == "cancel_dice":
+            try:
+                await bot.answer_callback_query(call.id, "بازی لغو شد.")
+                await bot.delete_message(user_id, message_id)
             except Exception: pass
-        else:
-            time_left = res.split("cooldown_")[-1]
-            await bot.answer_callback_query(call.id, f"❌ شما امروز هدیه خود را گرفته‌اید!\n⏳ زمان باقی‌مانده: {time_left} ساعت", show_alert=True)
+            return
+
+        # اگر دکمه "بنداز بریم!" فشرده شد:
+        pool = await get_connection_pool()
+        try:
+            async with pool.acquire() as conn:
+                # قفل‌گذاری مالکیتی رو ردیف کاربر برای جلوگیری از هک کلیک هم‌زمان (Double-Click Safe)
+                row = await conn.fetchrow("SELECT last_daily_bonus_at FROM users WHERE user_id = $1 FOR UPDATE", user_id)
+                now = datetime.now(timezone.utc)
+                
+                if row and row['last_daily_bonus_at']:
+                    last_bonus = row['last_daily_bonus_at']
+                    if last_bonus.tzinfo is None:
+                        last_bonus = last_bonus.replace(tzinfo=timezone.utc)
+                    if now - last_bonus < timedelta(days=1):
+                        await bot.answer_callback_query(call.id, "⚠️ خطای همگام‌سازی! شما قبلاً شانس امروز رو بازی کردید.", show_alert=True)
+                        try: await bot.delete_message(user_id, message_id)
+                        except Exception: pass
+                        return
+
+                # پاک کردن منوی شیشه‌ای جهت باز شدن فضا برای متحرک‌سازی تاس
+                try: await bot.delete_message(user_id, message_id)
+                except Exception: pass
+                
+                # پرتاب انیمیشن زنده و واقعی تاس تلگرام 🎲
+                dice_msg = await bot.send_dice(user_id, emoji="🎲")
+                dice_value = dice_msg.dice.value # استخراج شانس کاربر (عددی بین ۱ تا ۶)
+                
+                # شارژ دیتابیس و جلو بردن تایمر کول‌داون
+                await conn.execute(
+                    "UPDATE users SET coins = coins + $1, last_daily_bonus_at = NOW() WHERE user_id = $2", 
+                    dice_value, user_id
+                )
+                await cache_invalidate_user(user_id) # پاکسازی کش ردیس برای لایو شدن آمار جدید سکه
+                
+                # ۲.۵ ثانیه صبر می‌کنیم تا انیمیشن ریختن تاس در کلاینت کاربر متوقف بشه
+                await asyncio.sleep(2.5)
+                
+                await bot.send_message(
+                    user_id,
+                    f"🎲 تاس روی عدد <b>{dice_value}</b> ایستاد!\n\n"
+                    f"🎁 کیف پول شما با موفقیت <b>+{dice_value} سکه رایگان</b> شارژ شد.\n"
+                    f"خوش‌شانس بودی! ۲۴ ساعت دیگه منتظرتم. 🕶️✨"
+                , parse_mode="HTML")
+                await bot.answer_callback_query(call.id)
+                
+        except Exception as e:
+            print(f"💥 Error processing dice roll: {e}")
+            await bot.send_message(user_id, "❌ خطای فنی در سیستم تاس‌اندازی رخ داد.")
 
     # ==========================================
     # 📜 کالبک راهنمای جامع کسب سکه و رفرال سیستم
@@ -102,7 +190,7 @@ def register_account_handlers(bot: AsyncTeleBot):
             f"واحد مالی ربات برای برقراری اتصال در چت تصادفی است.\n\n"
             f"🚀 <b>راه‌های کسب سکه رایگان:</b>\n\n"
             f"۱. <b>استارت اولیه:</b> هر کاربر در عادی‌ترین حالت ورود <b>۱۰ سکه رایگان</b> هدیه می‌گیرد.\n\n"
-            f"۲. <b>🎁 پاداش شانس روزانه:</b> با زدن دکمه شیشه‌ای هدیه در بخش سکه‌ها، هر ۲۴ ساعت یک‌بار <b>۵ سکه کاملاً رایگان</b> هدیه بگیرید!\n\n"
+            f"۲. <b>🎁 پاداش شانس روزانه:</b> با زدن دکمه شیشه‌ای هدیه در بخش سکه‌ها، هر ۲۴ ساعت یک‌بار <b>با ریختن تاس بین ۱ تا ۶ سکه کاملاً رایگان</b> جایزه بگیرید!\n\n"
             f"۳. <b>⭐ پاداش آنتی‌ترول (امتیازدهی):</b> بعد از اتمام هر چت تصادفی, به کیفیت رفتار پارتنرتان امتیاز (لایک یا دیس‌لایک) بدهید و <b>۱ سکه رایگان</b> به عنوان پاداش مشارکت از ربات هدیه بگیرید!\n\n"
             f"۴. <b>سیستم رفرال (دعوت دوستان):</b> این لینک اختصاصی شماست:\n"
             f"<code>{ref_link}</code>\n\n"
@@ -160,7 +248,6 @@ def register_account_handlers(bot: AsyncTeleBot):
             await redis_client.delete(f"search_meta:{user_id}")
         await cache_invalidate_user(user_id)
 
-        from src.database.db_manager import get_connection_pool
         pool = await get_connection_pool()
         
         try:
@@ -201,7 +288,7 @@ def register_account_handlers(bot: AsyncTeleBot):
             await bot.edit_message_text("❌ خطای فنی در پاکسازی دیتابیس رخ داد. لطفا بعداً تلاش کنید.", user_id, call.message.message_id)
 
     # ==========================================
-    # 🗑️ هندلر متنی: منوی تفکیک خالی کردن لیست‌های سیاه
+    # 📊 هندلر متنی: منوی تفکیک خالی کردن لیست‌های سیاه
     # ==========================================
     @bot.message_handler(func=lambda m: m.text == "🗑️ خالی کردن لیست سیاه" and m.chat.type == "private")
     async def handle_request_clear_blocklist(message):
@@ -233,7 +320,6 @@ def register_account_handlers(bot: AsyncTeleBot):
         user_id = call.message.chat.id
         action_type = call.data
         
-        from src.database.db_manager import get_connection_pool
         pool = await get_connection_pool()
         
         try:
