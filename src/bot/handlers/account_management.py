@@ -109,8 +109,8 @@ def register_account_handlers(bot: AsyncTeleBot):
             print(f"💥 Daily bonus check error: {e}")
             await bot.answer_callback_query(call.id, "❌ خطایی در بررسی هدیه روزانه رخ داد.", show_alert=True)
 
-    # ==========================================
-    # 🎰 کالبک‌های اختصاصی مینی‌گیم تاس (پرتاب انیمیشن و تسویه اتمیک)
+# ==========================================
+    # 🎰 کالبک‌های اختصاصی مینی‌گیم تاس (پرتاب انیمیشن و تفکیک دیالوگ‌ها)
     # ==========================================
     @bot.callback_query_handler(func=lambda c: c.data in ["roll_the_dice", "cancel_dice"])
     async def handle_dice_game_execution(call):
@@ -128,7 +128,7 @@ def register_account_handlers(bot: AsyncTeleBot):
         pool = await get_connection_pool()
         try:
             async with pool.acquire() as conn:
-                # قفل‌گذاری مالکیتی رو ردیف کاربر برای جلوگیری از هک کلیک هم‌زمان (Double-Click Safe)
+                # قفل‌گذاری برای جلوگیری از هک کلیک هم‌زمان
                 row = await conn.fetchrow("SELECT last_daily_bonus_at FROM users WHERE user_id = $1 FOR UPDATE", user_id)
                 now = datetime.now(timezone.utc)
                 
@@ -137,40 +137,72 @@ def register_account_handlers(bot: AsyncTeleBot):
                     if last_bonus.tzinfo is None:
                         last_bonus = last_bonus.replace(tzinfo=timezone.utc)
                     if now - last_bonus < timedelta(days=1):
-                        await bot.answer_callback_query(call.id, "⚠️ خطای همگام‌سازی! شما قبلاً شانس امروز رو بازی کردید.", show_alert=True)
+                        await bot.answer_callback_query(call.id, "⚠️ شما قبلاً شانس امروز رو بازی کردید.", show_alert=True)
                         try: await bot.delete_message(user_id, message_id)
                         except Exception: pass
                         return
 
-                # پاک کردن منوی شیشه‌ای جهت باز شدن فضا برای متحرک‌سازی تاس
+                # پاک کردن منوی قبلی جهت متحرک‌سازی تاس
                 try: await bot.delete_message(user_id, message_id)
                 except Exception: pass
                 
-                # پرتاب انیمیشن زنده و واقعی تاس تلگرام 🎲
+                # پرتاب انیمیشن واقعی تاس تلگرام 🎲
                 dice_msg = await bot.send_dice(user_id, emoji="🎲")
-                dice_value = dice_msg.dice.value # استخراج شانس کاربر (عددی بین ۱ تا ۶)
+                dice_value = dice_msg.dice.value # عددی بین ۱ تا ۶
                 
-                # شارژ دیتابیس و جلو بردن تایمر کول‌داون
+                # 🔥 اصلاح: تمام اعداد (حتی ۶) دیتابیس را شارژ کرده و تایمر ۲۴ ساعته را فعال می‌کنند
                 await conn.execute(
                     "UPDATE users SET coins = coins + $1, last_daily_bonus_at = NOW() WHERE user_id = $2", 
                     dice_value, user_id
                 )
-                await cache_invalidate_user(user_id) # پاکسازی کش ردیس برای لایو شدن آمار جدید سکه
                 
-                # ۲.۵ ثانیه صبر می‌کنیم تا انیمیشن ریختن تاس در کلاینت کاربر متوقف بشه
+                await cache_invalidate_user(user_id) # خالی کردن کش برای لایو شدن سکه جدید
+                
+                # ۲.۵ ثانیه صبر برای اتمام انیمیشن تاس
                 await asyncio.sleep(2.5)
                 
-                await bot.send_message(
-                    user_id,
-                    f"🎲 تاس روی عدد <b>{dice_value}</b> ایستاد!\n\n"
-                    f"🎁 کیف پول شما با موفقیت <b>+{dice_value} سکه رایگان</b> شارژ شد.\n"
-                    f"خوش‌شانس بودی! ۲۴ ساعت دیگه منتظرتم. 🕶️✨"
-                , parse_mode="HTML")
+                # 📜 تفکیک پیام‌ها بر اساس عدد تاس طبق درخواست شما
+                if dice_value in [1, 2]:
+                    result_text = (
+                        f"🎲 تاس روی عدد <b>{dice_value}</b> ایستاد!\n\n"
+                        f"💩 <b>ریدم تو شانست فردا امتحان کن رفیق!</b>\n"
+                        f"💰 کیف پول شما فقط <b>+{dice_value} سکه</b> شارژ شد."
+                    )
+                    await bot.send_message(user_id, result_text, parse_mode="HTML")
+                    
+                elif dice_value in [3, 4]:
+                    result_text = (
+                        f"🎲 تاس روی عدد <b>{dice_value}</b> ایستاد!\n\n"
+                        f"😐 <b>نه بد بود نه خوب، کاملاً معمولی!</b>\n"
+                        f"💰 کیف پول شما <b>+{dice_value} سکه</b> شارژ شد.\n"
+                        f"۲۴ ساعت دیگه بیا تا شانست رو دوباره تست کنی. 🕶️"
+                    )
+                    await bot.send_message(user_id, result_text, parse_mode="HTML")
+                    
+                elif dice_value == 5:
+                    result_text = (
+                        f"🎲 تاس روی عدد <b>{dice_value}</b> ایستاد!\n\n"
+                        f"🔥 <b>اوه چسبید! شانس بالا رو زدی پسر!</b>\n"
+                        f"💰 کیف پول شما با موفقیت <b>+{dice_value} سکه رایگان</b> شارژ شد.\n"
+                        f"پرانرژی به دنیای ناشناس‌ها ادامه بده! ✨🕶️"
+                    )
+                    await bot.send_message(user_id, result_text, parse_mode="HTML")
+                    
+                elif dice_value == 6:
+                    # 🔥 اصلاح: دکمهٔ شیشه‌ای پرتاب مجدد حذف شد و پیام سادهٔ موفقیت ارسال می‌شود
+                    result_text = (
+                        f"🎲 <b>بــــــــووووم! تاس روی عدد جادویی ۶ ایستاد!</b> 👑\n\n"
+                        f"🎉 بالاترین پاداش ممکن رو گرفتی! <b>+۶ سکه رایگان</b> به حسابت اضافه شد.\n"
+                        f"کیف پولت به حداکثر پاداش روزانه رسید. ۲۴ ساعت دیگه منتظرتم! 🕶️✨"
+                    )
+                    await bot.send_message(user_id, result_text, parse_mode="HTML")
+
                 await bot.answer_callback_query(call.id)
                 
         except Exception as e:
             print(f"💥 Error processing dice roll: {e}")
             await bot.send_message(user_id, "❌ خطای فنی در سیستم تاس‌اندازی رخ داد.")
+
 
     # ==========================================
     # 📜 کالبک راهنمای جامع کسب سکه و رفرال سیستم
@@ -228,6 +260,7 @@ def register_account_handlers(bot: AsyncTeleBot):
             "آیا کاملاً مطمئن هستید؟"
         )
         await bot.reply_to(message, warning_text, parse_mode="HTML", reply_markup=markup_confirm)
+
 
     # ==========================================
     # ⚠️ کالبک تایید نهایی و پاکسازی اتمیک جداول دیتابیس (گام دوم)

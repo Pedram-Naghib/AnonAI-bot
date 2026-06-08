@@ -220,6 +220,7 @@ async def leave_random_chat_queue(user_id: int):
             refund = BASE_CHAT_COST + (GENDER_FILTER_COST if row['target_gender'] in ['male', 'female'] else 0)
             await conn.execute("UPDATE users SET chat_status = 'idle', queue_joined_at = NULL, active_partner_id = NULL, coins = coins + $2 WHERE user_id = $1", user_id, refund)
 
+
 async def try_matchmaking(user_id: int, stage: int) -> int:
     pool = await get_connection_pool()
     async with pool.acquire() as conn:
@@ -228,15 +229,33 @@ async def try_matchmaking(user_id: int, stage: int) -> int:
             
         my_rating, my_gender, my_target = my_info['rating'] or 5.0, my_info['gender'] or 'male', my_info['target_gender'] or 'any'
         
-        rating_query = "AND u.rating BETWEEN $2 - 0.2 AND $2 + 0.2" if stage == 1 else ("AND u.rating BETWEEN $2 - 1.0 AND $2 + 1.0" if stage == 2 else "")
-        gender_filter = "AND (($3 = 'any' AND (u.target_gender = 'any' OR u.target_gender = $4)) OR ($3 != 'any' AND u.gender = $3 AND (u.target_gender = 'any' OR u.target_gender = $4)))"
+        # 🔥 اصلاح طلایی: استفاده از شرط همیشه درست (1=1) برای حفظ ترتییب پارامترهای $2 و $3 و $4
+        if stage == 1:
+            rating_query = "AND u.rating BETWEEN $2::FLOAT - 0.2 AND $2::FLOAT + 0.2"
+        elif stage == 2:
+            rating_query = "AND u.rating BETWEEN $2::FLOAT - 1.0 AND $2::FLOAT + 1.0"
+        else:
+            rating_query = "AND ($2::FLOAT = $2::FLOAT)" # همیشه درست است و پارامتر $2 را زنده نگه می‌دارد
+            
+        gender_filter = "AND (($3::TEXT = 'any' AND (u.target_gender = 'any' OR u.target_gender = $4::TEXT)) OR ($3::TEXT != 'any' AND u.gender = $3::TEXT AND (u.target_gender = 'any' OR u.target_gender = $4::TEXT)))"
         
         base_query = f"""
-            SELECT u.user_id FROM users u WHERE u.chat_status = 'searching' AND u.user_id != $1 {rating_query} {gender_filter}
-              AND NOT EXISTS (SELECT 1 FROM random_chat_blocks rcb WHERE (rcb.user_id = $1 AND rcb.blocked_partner_id = u.user_id) OR (rcb.user_id = u.user_id AND rcb.blocked_partner_id = $1))
+            SELECT u.user_id FROM users u 
+            WHERE u.chat_status = 'searching' 
+              AND u.user_id != $1::BIGINT 
+              {rating_query} 
+              {gender_filter}
+              AND NOT EXISTS (
+                  SELECT 1 FROM random_chat_blocks rcb 
+                  WHERE (rcb.user_id = $1::BIGINT AND rcb.blocked_partner_id = u.user_id) 
+                     OR (rcb.user_id = u.user_id AND rcb.blocked_partner_id = $1::BIGINT)
+              )
             ORDER BY u.rating DESC, u.queue_joined_at ASC LIMIT 1
         """
-        return await conn.fetchval(base_query, user_id, my_rating, my_target, my_gender) if stage in [1, 2] else await conn.fetchval(base_query, user_id, my_target, my_gender)
+        
+        # 🎯 حالا در هر ۳ استیج، دقیقاً همین ۴ پارامتر با ترتیب ثابت ارسال می‌شوند و دیتابیس کرش نمی‌کند
+        return await conn.fetchval(base_query, user_id, my_rating, my_target, my_gender)
+
 
 async def connect_two_users(user1_id: int, user2_id: int) -> bool:
     low_id, high_id = sorted([user1_id, user2_id])
