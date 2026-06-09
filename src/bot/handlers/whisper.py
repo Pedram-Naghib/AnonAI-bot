@@ -43,7 +43,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         description="ابتدا متن سپس یوزرنیم گیرنده رو بنویس",
                         input_message_content=InputTextMessageContent(guide_text, parse_mode="HTML"),
                         # why-us-male
-                        thumbnail_url="https://img.icons8.com/parakeet-line/48/why-us-male.png"
+                        thumbnail_url="https://img.icons8.com/sci-fi/48/question-mark.png"
                     )
                 )
                 
@@ -69,7 +69,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         input_message_content=InputTextMessageContent(req_whisper_text, parse_mode="HTML"),
                         reply_markup=kb_req_whisper,
                         # speech-bubble-with-dots
-                        thumbnail_url="https://img.icons8.com/parakeet-line/48/speech-bubble-with-dots.png"
+                        thumbnail_url="https://img.icons8.com/sci-fi/48/speech-bubble-with-dots.png"
                     )
                 )
                 
@@ -93,7 +93,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         input_message_content=InputTextMessageContent(anon_req_text, parse_mode="HTML"),
                         reply_markup=kb_anon_link,
                         # 🌐 آیکون نئون دیتا بیس/پاکت رمزنگاری شده سایبرپانک
-                        thumbnail_url="https://img.icons8.com/parakeet-line/48/fraud.png"
+                        thumbnail_url="https://img.icons8.com/sci-fi/48/fraud.png"
                     )
                 )
                 
