@@ -46,12 +46,13 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     )
                 )
                 
-                # گزینه‌ی ۲: باکس درخواست نجوای اختصاصی (مشابه تصویر image_439647.png)
+                # 🔥 گزینه‌ی ۲: باکس درخواست نجوای اختصاصی (تنظیم دقیق کادر متن تلگرام)
                 kb_req_whisper = InlineKeyboardMarkup()
                 kb_req_whisper.row(
                     InlineKeyboardButton(
-                        text=f"📥 ارسال نجوای خصوصی به {sender_name}", 
-                        switch_inline_query=f"{sender_tag if sender_tag.startswith('@') else sender_id} "
+                        text=f"📬 ارسال نجوای خصوصی به {sender_name}", 
+                        # با \n متن نجوا رو می‌فرستیم خط بعد و آیدی عددی شما رو می‌ذاریم ته کادر
+                        switch_inline_query=f"متن نجوا\n{sender_id}"
                     )
                 )
                 
@@ -71,7 +72,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     )
                 )
                 
-                # 🔥 گزینه‌ی ۳: لینک اختصاصی پیام ناشناس شیشه‌ای (دقیقاً مشابه ساختار درخواستی شما در تصویر image_4383fe.png)
+                # گزینه‌ی ۳: لینک اختصاصی پیام ناشناس شیشه‌ای
                 kb_anon_link = InlineKeyboardMarkup()
                 kb_anon_link.row(
                     InlineKeyboardButton(
