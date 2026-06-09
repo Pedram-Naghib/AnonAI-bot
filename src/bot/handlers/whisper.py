@@ -25,7 +25,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
             bot_info = await bot.get_me()
             bot_username = f"@{bot_info.username}"
             
-            # 💎 منوی چندگزینه‌ای اختصاصی و اورجینال (وقتی ورودی خالی است)
+            # 💎 منوی چندگزینه‌ای با تم دارک و سایبری (وقتی ورودی خالی است)
             if not raw_text:
                 items = []
                 
@@ -42,12 +42,12 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         title="💡 آموزش ارسال نجوا",
                         description="ابتدا متن سپس یوزرنیم گیرنده رو بنویس",
                         input_message_content=InputTextMessageContent(guide_text, parse_mode="HTML"),
-                        # 🌐 لینک فوق‌العاده پایدار و استاندارد (آیکون راهنما)
-                        thumbnail_url="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/1f4a1.png"
+                        # 🌐 آیکون نئون فیروزه‌ای هوش و ماتریکس (مغز دیجیتال/سایبر)
+                        thumbnail_url="https://img.icons8.com/nolan/96/artificial-intelligence.png"
                     )
                 )
                 
-                # گزینه‌ی ۲: باکس درخواست نجوای اختصاصی (تنظیم دقیق کادر متن تلگرام)
+                # گزینه‌ی ۲: باکس درخواست نجوای اختصاصی
                 kb_req_whisper = InlineKeyboardMarkup()
                 kb_req_whisper.row(
                     InlineKeyboardButton(
@@ -68,8 +68,8 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         description="باکس دریافت نجوای مستقیم درون گروه‌ها 🕶️",
                         input_message_content=InputTextMessageContent(req_whisper_text, parse_mode="HTML"),
                         reply_markup=kb_req_whisper,
-                        # 🌐 لینک فوق‌العاده پایدار و استاندارد (آیکون قفل)
-                        thumbnail_url="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/1f512.png"
+                        # 🌐 آیکون فوق‌العاده گنگ سپر هکری و اسکن پرایوسی نئون
+                        thumbnail_url="https://img.icons8.com/nolan/96/shield-security.png"
                     )
                 )
                 
@@ -92,8 +92,8 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         description="دریافت پیام ناشناس در گروه‌ها و کانال‌ها 🚀",
                         input_message_content=InputTextMessageContent(anon_req_text, parse_mode="HTML"),
                         reply_markup=kb_anon_link,
-                        # 🌐 لینک فوق‌العاده پایدار و استاندارد (آیکون نامه)
-                        thumbnail_url="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/1f4e9.png"
+                        # 🌐 آیکون نئون دیتا بیس/پاکت رمزنگاری شده سایبرپانک
+                        thumbnail_url="https://img.icons8.com/nolan/96/data-configuration.png"
                     )
                 )
                 
