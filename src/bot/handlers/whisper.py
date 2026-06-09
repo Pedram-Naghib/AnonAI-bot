@@ -34,7 +34,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     "🔮 <b>آموزش ارسال نجوای محرمانه:</b>\n\n"
                     "ابتدا متن سپس یوزرنیم گیرنده رو بنویس\n\n"
                     "مثال:\n"
-                    "<code>@CyberAnonsBot سلام چطوری؟ @username</code>"
+                    f"<code>{bot_username} سلام چطوری؟ @username</code>"
                 )
                 items.append(
                     InlineQueryResultArticle(
@@ -42,16 +42,16 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         title="💡 آموزش ارسال نجوا",
                         description="ابتدا متن سپس یوزرنیم گیرنده رو بنویس",
                         input_message_content=InputTextMessageContent(guide_text, parse_mode="HTML"),
-                        thumbnail_url="https://telegra.ph/file/2b662df9a572c67c51483.png"
+                        # 🌐 لینک فوق‌العاده پایدار و استاندارد (آیکون راهنما)
+                        thumbnail_url="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/1f4a1.png"
                     )
                 )
                 
-                # 🔥 گزینه‌ی ۲: باکس درخواست نجوای اختصاصی (تنظیم دقیق کادر متن تلگرام)
+                # گزینه‌ی ۲: باکس درخواست نجوای اختصاصی (تنظیم دقیق کادر متن تلگرام)
                 kb_req_whisper = InlineKeyboardMarkup()
                 kb_req_whisper.row(
                     InlineKeyboardButton(
                         text=f"📬 ارسال نجوای خصوصی به {sender_name}", 
-                        # با \n متن نجوا رو می‌فرستیم خط بعد و آیدی عددی شما رو می‌ذاریم ته کادر
                         switch_inline_query_current_chat=f"متن نجوا\n{sender_id}"
                     )
                 )
@@ -68,7 +68,8 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         description="باکس دریافت نجوای مستقیم درون گروه‌ها 🕶️",
                         input_message_content=InputTextMessageContent(req_whisper_text, parse_mode="HTML"),
                         reply_markup=kb_req_whisper,
-                        thumbnail_url="https://telegra.ph/file/6c85b19119565507743d5.png"
+                        # 🌐 لینک فوق‌العاده پایدار و استاندارد (آیکون قفل)
+                        thumbnail_url="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/1f512.png"
                     )
                 )
                 
@@ -91,7 +92,8 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         description="دریافت پیام ناشناس در گروه‌ها و کانال‌ها 🚀",
                         input_message_content=InputTextMessageContent(anon_req_text, parse_mode="HTML"),
                         reply_markup=kb_anon_link,
-                        thumbnail_url="https://telegra.ph/file/bc31a47738b55502a9b4a.png"
+                        # 🌐 لینک فوق‌العاده پایدار و استاندارد (آیکون نامه)
+                        thumbnail_url="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/1f4e9.png"
                     )
                 )
                 

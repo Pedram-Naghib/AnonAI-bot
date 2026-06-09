@@ -4,8 +4,6 @@ import uvicorn
 from fastapi import FastAPI, Request
 from telebot.types import Update
 from telebot.async_telebot import AsyncTeleBot
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
 from src.config import TELEGRAM_BOT_TOKEN
 from src.bot.handlers import register_bot_handlers
 from src.database.db_manager import init_db
@@ -26,6 +24,27 @@ ALLOWED_UPDATES = ["message", "callback_query", "message_reaction", "inline_quer
 bot = AsyncTeleBot(TELEGRAM_BOT_TOKEN)
 app = FastAPI()
 
+# ==========================================
+# 🚀 تابع اختصاصی ارسال نوتیفیکیشن لایو شدن ربات
+# ==========================================
+async def send_startup_notification(bot_instance):
+    try:
+        # چند ثانیه صبر می‌کنیم تا وب‌هوک کاملاً روی سرورهای تلگرام مستقر و تایید شود
+        await asyncio.sleep(3)
+        bot_info = await bot_instance.get_me()
+        
+        startup_msg = (
+            "🚀 <b>پلتفرم با موفقیت آپدیت شد و بالا آمد!</b>\n"
+            "───────────────────\n"
+            f"🤖 <b>ربات:</b> @{bot_info.username}\n"
+            "🟢 <b>وضعیت:</b> فعال و آمادهٔ شلیک نجوا\n"
+            "🔒 <i>لوکال مموری با موفقیت پاکسازی و مجدداً لود شد.</i>"
+        )
+        await bot_instance.send_message(8627765327, startup_msg, parse_mode="HTML")
+        print("✅ پیام استارت‌آپ با موفقیت برای ادمین ارسال شد.")
+    except Exception as e:
+        print(f"💥 خطای ارسال پیام استارت‌آپ: {e}")
+
 @app.api_route("/", methods=["GET", "HEAD"])
 async def health_check():
     return {"status": "alive"}
@@ -42,30 +61,20 @@ async def start_bot():
     print("🗄️ Initializing Databases...")
     await init_db()
     
-    # 🔌 ۲. ثبت هندلرهای اصلی ربات (شامل کلین ردیف‌های اولویت‌بندی شده)
+    # 🔌 ۲. ثبت هندلرهای اصلی ربات
     print("🔌 Registering bot handlers...")
     register_bot_handlers(bot)
     
     # 🔥 ۳. روشن کردن ورکرهای اتمیک پس‌زمینه درون Event Loop جاری
-    # این تسک‌ها به صورت غیرمسدودکننده در پس‌زمینه شروع به مچ‌میکینگ و پردازش لاگ‌ها می‌کنند
     print("⚡ Activating Background Workers (Log Queue & Matchmaking)...")
     asyncio.create_task(background_log_worker(bot))
     asyncio.create_task(background_matchmaking_worker(bot))
     
-    # ⏰ ۴. تنظیم اسکجولر گزارش ۲۴ ساعته با تزریق اِونت لوپ جاری
-    # این کار مانع از کرش کردن متد ارسال پیام ربات در بک‌آند می‌شود
-    # current_loop = asyncio.get_running_loop()
-    # scheduler = AsyncIOScheduler()
-    # scheduler.add_job(send_daily_analytics, 'cron', hour=23, minute=30, args=[bot])
-    # scheduler.start()
-    # print("Base Analytics scheduler started...")
-    # خطوط قبلی مچ‌میکینگ و لاگر ...
-    print("⚡ Activating Background Workers (Log Queue & Matchmaking)...")
-    asyncio.create_task(background_log_worker(bot))
-    asyncio.create_task(background_matchmaking_worker(bot))
-    
-    # 🔥 خط جدید: فعال‌سازی ورکر همگانی دسته‌ای
+    # 🔥 فعال‌سازی ورکر همگانی دسته‌ای
     asyncio.create_task(background_broadcast_worker(bot))
+    
+    # 🔥 ۴. فعال‌سازی موتور اعلان لایو شدن ربات در پس‌زمینه بدون مسدود کردن سرور
+    asyncio.create_task(send_startup_notification(bot))
     
     # ۵. انتخاب مسیر ران کردن (وب‌هوک یا پولینگ)
     if USE_WEBHOOK:
