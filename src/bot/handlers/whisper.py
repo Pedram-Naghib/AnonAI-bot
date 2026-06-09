@@ -42,12 +42,11 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         title="💡 آموزش ارسال نجوا",
                         description="ابتدا متن سپس یوزرنیم گیرنده رو بنویس",
                         input_message_content=InputTextMessageContent(guide_text, parse_mode="HTML"),
-                        thumbnail_url="https://telegra.ph/file/2b662df9a572c67c51483.png" # لینک پایدار تامنبل کمک
+                        thumbnail_url="https://telegra.ph/file/2b662df9a572c67c51483.png"
                     )
                 )
                 
-                # 🔥 گزینه‌ی ۲: جایگزین پیشرفته آیدی عددی (مشابه هوشمندتر تصویر image_439647.png)
-                # ساخت دکمه شیشه‌ای معکوس که فرستنده را به اینلاین ربات با تارگتِ خودش سوئیچ می‌کند
+                # گزینه‌ی ۲: باکس درخواست نجوای اختصاصی (مشابه تصویر image_439647.png)
                 kb_req_whisper = InlineKeyboardMarkup()
                 kb_req_whisper.row(
                     InlineKeyboardButton(
@@ -57,35 +56,40 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                 )
                 
                 req_whisper_text = (
-                    f"⚡ <b>CYBERANONS PRIVACY HUB</b>\n"
-                    f"─────────────────────\n"
                     f"👤 <b>کاربر:</b> {sender_name}\n"
                     f"🆔 <b>آیدی‌عددی:</b> <code>{sender_id}</code>\n\n"
-                    f"🔐 اگر می‌خوای به این شخص یه نجوای مخفی و محرمانه بفرستی که هیچ‌کس توی گروه نبینه، روی دکمه زیر کلیک کن 👇"
+                    f"📥 واسه ارسال پیام محرمانه به من کلیک کن 👇"
                 )
                 items.append(
                     InlineQueryResultArticle(
                         id='wh_menu_request_box',
-                        title="🔒 درخواست ارسال پیام محرمانه به من", # تغییر نام به فرمت دلخواه شما
+                        title="🔒 درخواست ارسال پیام محرمانه به من",
                         description="باکس دریافت نجوای مستقیم درون گروه‌ها 🕶️",
                         input_message_content=InputTextMessageContent(req_whisper_text, parse_mode="HTML"),
                         reply_markup=kb_req_whisper,
-                        thumbnail_url="https://telegra.ph/file/6c85b19119565507743d5.png" # فیکس شد: تامنبل با لود ۱۰۰٪ تضمینی
+                        thumbnail_url="https://telegra.ph/file/6c85b19119565507743d5.png"
                     )
                 )
                 
-                # گزینه‌ی ۳: لینک اختصاصی پیام ناشناس پیوی
+                # 🔥 گزینه‌ی ۳: لینک اختصاصی پیام ناشناس شیشه‌ای (دقیقاً مشابه ساختار درخواستی شما در تصویر image_4383fe.png)
+                kb_anon_link = InlineKeyboardMarkup()
+                kb_anon_link.row(
+                    InlineKeyboardButton(
+                        text="💌 ارسال پیام ناشناس", 
+                        url=f"https://t.me/{bot_info.username}?start=anon_{sender_id}"
+                    )
+                )
+                
                 anon_req_text = (
-                    f"📢 <b>صندوق پیام ناشناس من فعال شد!</b>\n\n"
-                    f"اگر حرفی، انتقادی یا نجوای محرمانه‌ای تو دلت هست که نمی‌تونی مستقیم بگی، روی لینک زیر کلیک کن و کاملاً ناشناس برام بفرست 👇\n\n"
-                    f"🔗 <a href='https://t.me/{bot_info.username}?start=anon_{sender_id}'>ارسال پیام ناشناس به {sender_name}</a>"
+                    f"برای پیام ناشناس به من دکمه زیر رو بزن 👇"
                 )
                 items.append(
                     InlineQueryResultArticle(
                         id='wh_menu_anon',
                         title="📥 لینک ناشناس اختصاصی",
                         description="دریافت پیام ناشناس در گروه‌ها و کانال‌ها 🚀",
-                        input_message_content=InputTextMessageContent(anon_req_text, parse_mode="HTML", disable_web_page_preview=True),
+                        input_message_content=InputTextMessageContent(anon_req_text, parse_mode="HTML"),
+                        reply_markup=kb_anon_link,
                         thumbnail_url="https://telegra.ph/file/bc31a47738b55502a9b4a.png"
                     )
                 )
