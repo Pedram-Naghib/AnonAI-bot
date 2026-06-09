@@ -42,8 +42,8 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         title="💡 آموزش ارسال نجوا",
                         description="ابتدا متن سپس یوزرنیم گیرنده رو بنویس",
                         input_message_content=InputTextMessageContent(guide_text, parse_mode="HTML"),
-                        # 🌐 آیکون نئون فیروزه‌ای هوش و ماتریکس (مغز دیجیتال/سایبر)
-                        thumbnail_url="https://img.icons8.com/nolan/96/artificial-intelligence.png"
+                        # why-us-male
+                        thumbnail_url="https://img.icons8.com/parakeet-line/48/why-us-male.png"
                     )
                 )
                 
@@ -68,8 +68,8 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         description="باکس دریافت نجوای مستقیم درون گروه‌ها 🕶️",
                         input_message_content=InputTextMessageContent(req_whisper_text, parse_mode="HTML"),
                         reply_markup=kb_req_whisper,
-                        # 🌐 آیکون فوق‌العاده گنگ سپر هکری و اسکن پرایوسی نئون
-                        thumbnail_url="https://img.icons8.com/nolan/96/shield-security.png"
+                        # speech-bubble-with-dots
+                        thumbnail_url="https://img.icons8.com/parakeet-line/48/speech-bubble-with-dots.png"
                     )
                 )
                 
@@ -93,7 +93,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         input_message_content=InputTextMessageContent(anon_req_text, parse_mode="HTML"),
                         reply_markup=kb_anon_link,
                         # 🌐 آیکون نئون دیتا بیس/پاکت رمزنگاری شده سایبرپانک
-                        thumbnail_url="https://img.icons8.com/nolan/96/data-configuration.png"
+                        thumbnail_url="https://img.icons8.com/parakeet-line/48/fraud.png"
                     )
                 )
                 
