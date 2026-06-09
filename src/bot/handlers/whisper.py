@@ -42,23 +42,39 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         title="💡 آموزش ارسال نجوا",
                         description="ابتدا متن سپس یوزرنیم گیرنده رو بنویس",
                         input_message_content=InputTextMessageContent(guide_text, parse_mode="HTML"),
-                        thumbnail_url="https://img.icons8.com/nolan/96/help.png"
+                        thumbnail_url="https://telegra.ph/file/2b662df9a572c67c51483.png" # لینک پایدار تامنبل کمک
                     )
                 )
                 
-                # گزینه‌ی ۲: دریافت و کپی آیدی عددی
-                id_text = f"<code>{sender_id}</code>"
+                # 🔥 گزینه‌ی ۲: جایگزین پیشرفته آیدی عددی (مشابه هوشمندتر تصویر image_439647.png)
+                # ساخت دکمه شیشه‌ای معکوس که فرستنده را به اینلاین ربات با تارگتِ خودش سوئیچ می‌کند
+                kb_req_whisper = InlineKeyboardMarkup()
+                kb_req_whisper.row(
+                    InlineKeyboardButton(
+                        text=f"📥 ارسال نجوای خصوصی به {sender_name}", 
+                        switch_inline_query=f"{sender_tag if sender_tag.startswith('@') else sender_id} "
+                    )
+                )
+                
+                req_whisper_text = (
+                    f"⚡ <b>CYBERANONS PRIVACY HUB</b>\n"
+                    f"─────────────────────\n"
+                    f"👤 <b>کاربر:</b> {sender_name}\n"
+                    f"🆔 <b>آیدی‌عددی:</b> <code>{sender_id}</code>\n\n"
+                    f"🔐 اگر می‌خوای به این شخص یه نجوای مخفی و محرمانه بفرستی که هیچ‌کس توی گروه نبینه، روی دکمه زیر کلیک کن 👇"
+                )
                 items.append(
                     InlineQueryResultArticle(
-                        id='wh_menu_id',
-                        title="🆔 آیدی عددی من",
-                        description=f"آیدی عددی شما: {sender_id} (جهت کپی کلیک کنید)",
-                        input_message_content=InputTextMessageContent(id_text, parse_mode="HTML"),
-                        thumbnail_url="https://img.icons8.com/nolan/96/user-id-with-fingerprint.png"
+                        id='wh_menu_request_box',
+                        title="🔒 درخواست ارسال پیام محرمانه به من", # تغییر نام به فرمت دلخواه شما
+                        description="باکس دریافت نجوای مستقیم درون گروه‌ها 🕶️",
+                        input_message_content=InputTextMessageContent(req_whisper_text, parse_mode="HTML"),
+                        reply_markup=kb_req_whisper,
+                        thumbnail_url="https://telegra.ph/file/6c85b19119565507743d5.png" # فیکس شد: تامنبل با لود ۱۰۰٪ تضمینی
                     )
                 )
                 
-                # گزینه‌ی ۳: لینک اختصاصی پیام ناشناس
+                # گزینه‌ی ۳: لینک اختصاصی پیام ناشناس پیوی
                 anon_req_text = (
                     f"📢 <b>صندوق پیام ناشناس من فعال شد!</b>\n\n"
                     f"اگر حرفی، انتقادی یا نجوای محرمانه‌ای تو دلت هست که نمی‌تونی مستقیم بگی، روی لینک زیر کلیک کن و کاملاً ناشناس برام بفرست 👇\n\n"
@@ -70,7 +86,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         title="📥 لینک ناشناس اختصاصی",
                         description="دریافت پیام ناشناس در گروه‌ها و کانال‌ها 🚀",
                         input_message_content=InputTextMessageContent(anon_req_text, parse_mode="HTML", disable_web_page_preview=True),
-                        thumbnail_url="https://img.icons8.com/nolan/96/filled-message.png"
+                        thumbnail_url="https://telegra.ph/file/bc31a47738b55502a9b4a.png"
                     )
                 )
                 
@@ -148,7 +164,6 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     await bot.answer_callback_query(call.id, "❌ این نجوا منقضی یا حذف شده است.", show_alert=True)
                     return
                 
-                # بررسی دسترسی (گیرنده، فرستنده و ادمین‌های اصلی پلتفرم)
                 is_auth = (
                     (data["target"] == voter_username) or 
                     (data["target"].isdigit() and int(data["target"]) == voter_id) or 
@@ -160,10 +175,8 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     await bot.answer_callback_query(call.id, f"🛑 دسترسی غیرمجاز!\nاین نجوا فقط برای {data['target']} و فرستنده آن قابل باز شدن است.", show_alert=True)
                     return
                 
-                # نمایش متن مخفی درون پاپ‌آپ خصوصی
                 await bot.answer_callback_query(call.id, f"🔒 نجوای باز شده:\n\n{data['text']}", show_alert=True)
                 
-                # تغییر وضعیت متن به "خوانده شد" با حفظ چیدمان و دکمه‌ها
                 if not data["is_opened"]:
                     data["is_opened"] = True
                     updated_text = (
@@ -172,7 +185,6 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         f"🎯 <code>{data['target']}</code>"
                     )
                     try:
-                        # دکمه‌ها بدون تغییر و حذف، مجدداً رندر باقی می‌مانند
                         await bot.edit_message_text(
                             text=updated_text, 
                             inline_message_id=call.inline_message_id, 
