@@ -21,6 +21,10 @@ def register_whisper_handlers(bot: AsyncTeleBot):
             sender_id = query.from_user.id
             sender_tag = f"@{query.from_user.username}" if query.from_user.username else sender_name
             
+            # دریافت آیدی یوزرنیم ربات به صورت داینامیک
+            bot_info = await bot.get_me()
+            bot_username = f"@{bot_info.username}"
+            
             # راهنمای شیک در صورت خالی بودن ورودی
             if not raw_text:
                 hint_text = (
@@ -60,26 +64,27 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                 "is_opened": False
             }
 
-            # 🎛 چیدمان دکمه‌ها طبق فیلتر جدید شما
+            # 🎛 چیدمان دکمه‌ها
             kb_premium = InlineKeyboardMarkup()
             kb_premium.row(
                 InlineKeyboardButton(text="📥 خواندن نجوا", callback_data=f"whopen_{w_id}"),
                 InlineKeyboardButton(text="🗑️ حذف", callback_data=f"whdel_{w_id}")
             )
 
-            # 💎 طراحی کاملاً اورجینال، خلوت و بدون متن‌های اضافه
+            # 💎 چیدمان فوق‌العاده گنگ و اختصاصی طبق ترتیب درخواستی شما:
+            # ۱. آیدی ربات | ۲. وضعیت پیام | ۳. آیدی گیرنده
             display_text = (
-                f"👤 <b>فرستنده:</b> {sender_name}\n"
-                f"🎯 <b>فقط برای:</b> <code>{target_user}</code>\n\n"
-                f"📬 در انتظار رمزگشایی..."
+                f"<b>via {bot_username}</b>\n"
+                f"📬 در انتظار خوانده شدن...\n"
+                f"🎯 <code>{target_user}</code>"
             )
             
             item = InlineQueryResultArticle(
                 id=w_id,
-                title=f"🔒 شلیک نجوای رمزنگاری شده به {target_user}",
+                title=f"🔒 ارسال پیام محرمانه به {target_user}",
                 input_message_content=InputTextMessageContent(display_text, parse_mode="HTML"),
                 reply_markup=kb_premium,
-                description=f"✉️ گیرنده: {target_user}"
+                description=f"نجوا به {target_user} ارسال شد"
             )
             await bot.answer_inline_query(query.id, [item], cache_time=0)
             
@@ -96,7 +101,10 @@ def register_whisper_handlers(bot: AsyncTeleBot):
             voter_username = f"@{call.from_user.username}".lower() if call.from_user.username else "no_user"
             voter_tag = f"@{call.from_user.username}" if call.from_user.username else call.from_user.first_name
 
-            # 1️⃣ دکمه نمایش نجوا 📥 (مجاز برای فرستنده و گیرنده)
+            bot_info = await bot.get_me()
+            bot_username = f"@{bot_info.username}"
+
+            # 1️⃣ دکمه نمایش نجوا 📥
             if call.data.startswith("whopen_"):
                 w_id = call.data.split("whopen_")[-1]
                 data = WHISPER_STORAGE.get(w_id)
@@ -105,31 +113,31 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     await bot.answer_callback_query(call.id, "❌ این نجوا منقضی یا حذف شده است.", show_alert=True)
                     return
                 
-                # 🔥 اصلاح طلایی: هم گیرنده مجاز است، هم فرستنده اصلی پیام، هم ادمین‌های ارشد
+                # بررسی دسترسی فرستنده، گیرنده و ادمین‌ها
                 is_auth = (
                     (data["target"] == voter_username) or 
                     (data["target"].isdigit() and int(data["target"]) == voter_id) or 
                     (voter_id == data["sender_id"]) or 
-                    (voter_id == 6779908406)
+                    (voter_id in [6779908406, 8627765327])
                 )
                 
                 if not is_auth:
                     await bot.answer_callback_query(call.id, f"🛑 دسترسی غیرمجاز!\nاین نجوا فقط برای {data['target']} و فرستنده آن قابل باز شدن است.", show_alert=True)
                     return
                 
-                # نمایش متن مخفی درون پاپ‌آپ خصوصی برای فرد مجاز
+                # نمایش متن مخفی درون پاپ‌آپ خصوصی تلگرام
                 await bot.answer_callback_query(call.id, f"🔒 نجوای باز شده:\n\n{data['text']}", show_alert=True)
                 
-                # اگر بار اول است که خوانده می‌شود، متن گروه را آپدیت کن و وضعیت را تغییر بده
+                # تغییر وضعیت به خوانده شده با حفظ چیدمان درخواستی شما
                 if not data["is_opened"]:
                     data["is_opened"] = True
                     updated_text = (
-                        f"👤 <b>فرستنده:</b> {data['sender_name']}\n"
-                        f"🎯 <b>فقط برای:</b> <code>{data['target']}</code>\n\n"
-                        f"✅ <b>این پیام توسط {voter_tag} خوانده شد!</b>"
+                        f"<b>via {bot_username}</b>\n"
+                        f"✅ این پیام توسط {voter_tag} خوانده شد!\n"
+                        f"🎯 <code>{data['target']}</code>"
                     )
                     try:
-                        # 🔥 دکمه‌های شیشه‌ای زیر پیام ادیت می‌شوند اما هرگز حذف نخواهند شد
+                        # دکمه‌های شیشه‌ای کاملاً پایدار می‌مانند و حذف نمی‌شوند
                         await bot.edit_message_text(
                             text=updated_text, 
                             inline_message_id=call.inline_message_id, 
@@ -152,7 +160,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     return
                 
                 WHISPER_STORAGE.pop(w_id, None)
-                await bot.edit_message_text("🗑 *این نجوای مخفی توسط فرستنده حذف شد.*", inline_message_id=call.inline_message_id, parse_mode="HTML")
+                await bot.edit_message_text("🗑 <i>این نجوای مخفی توسط فرستنده حذف شد.</i>", inline_message_id=call.inline_message_id, parse_mode="HTML")
                 await bot.answer_callback_query(call.id, "نجوا با موفقیت حذف شد.")
 
         except Exception as e:
