@@ -15,7 +15,7 @@ from src.database.db_manager import (
     get_user_profile_stats
 )
 
-# 🔥 حل باگ اِمپورت چرخشی: دریافت تمام ابزارهای ردیس، کش و لاگر متمرکز از فایل خنثی
+# دریافت تمام ابزارهای ردیس، کش و لاگر متمرکز از فایل خنثی
 from src.bot.redis_config import redis_client, log_queue, cache_set_user_context, cache_invalidate_user, send_bot_log
 
 GOD_ID = 6779908406
@@ -55,7 +55,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         
         await cache_invalidate_user(user_id)
         context = await get_complete_user_context(user_id)
-        is_new_user = context["short_code"] is None
+        is_new_user = context.get("short_code") is None
         
         await register_or_update_user(user_id, first_name, message.from_user.username)
         kb_main, _, _ = get_keyboards()
@@ -99,7 +99,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         inline_kb.row(InlineKeyboardButton("🔗 دریافت بنر استوری و لینک من", callback_data=f"get_my_banner_{my_short_code}"))
         inline_kb.row(InlineKeyboardButton("🛡️ چرا این ربات ۱۰۰٪ امن و مخفی است؟", callback_data="bot_security_info"))
 
-        god_text = f"سلام و درود ارباب فاطمه. 🙇‍♂️\nهوش مصنوعی گوش به فرمان شماست.\n───\n🔗 <b>لینک ناشناس ارباب:</b>\n{anon_link}"
+        god_text = f"سلام و درود فرشته عزیز. 🙇‍♂️\nهوش مصنوعی گوش به فرمان شماست.\n───\n🔗 <b>لینک ناشناس شما:</b>\n{anon_link}"
         normal_text = f"👋 <b>به ربات پیام ناشناس CyberAnons خوش آمدید!</b>\n\n🔗 <b>لینک اختصاصی شما:</b>\n<code>{anon_link}</code>"
         
         msg = god_text if user_id == GOD_ID else normal_text
@@ -187,7 +187,10 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
     # ==========================================
     @bot.message_handler(
         content_types=['text', 'photo', 'video', 'voice', 'audio', 'sticker', 'animation'], 
-        func=lambda m: m.chat.type == "private" and (m.text is None or not m.text.startswith('/')) and m.text not in ["📊 آمار من", "🎲 شروع چت تصادفی", "❌ انصراف از صف جستجو", "🛑 قطع چت فعال", "💰 سکه‌های من", "🔍 ارسال پیام ناشناس به آیدی خاص", "❌ حذف کامل اطلاعات من", "🗑️ خالی کردن لیست سیاه"]
+        func=lambda m: m.chat.type == "private" and (m.text is None or not m.text.startswith('/')) and m.text not in [
+            "📊 آمار من", "🎲 شروع چت تصادفی", "❌ انصراف از صف جستجو", "🛑 قطع چت فعال", 
+            "💰 سکه‌های من", "🔍 ارسال پیام ناشناس به آیدی خاص", "❌ حذف کامل اطلاعات من", "🗑️ خالی کردن لیست سیاه"
+        ]
     )
     async def handle_private_anon_flow(message):
         user_id = message.chat.id
@@ -202,11 +205,11 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             context = await get_complete_user_context(user_id)
             await cache_set_user_context(user_id, context, ttl=1800)
         
-        status = context["chat_status"]
-        partner_id = context["active_partner_id"]
-        current_state = context["anon_state"]
-        reply_target_id = context["reply_target_id"]
-        sender_short_code = context["short_code"]
+        status = context.get("chat_status")
+        partner_id = context.get("active_partner_id")
+        current_state = context.get("anon_state", "normal")
+        reply_target_id = context.get("reply_target_id")
+        sender_short_code = context.get("short_code")
         
         if not sender_short_code:
             sender_short_code = await get_or_create_short_link(user_id)
@@ -217,7 +220,6 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             try:
                 await bot.copy_message(chat_id=partner_id, from_chat_id=user_id, message_id=message.message_id)
             except Exception:
-                # 🔥 ایمپورت کاملاً پویا جهت باز شدن گره لود چرخشی در زمان قطع گفتگو
                 from src.bot.handlers.random_chat import disconnect_active_chat
                 await disconnect_active_chat(user_id)
                 await cache_invalidate_user(user_id)
@@ -229,7 +231,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         # حالت انتظار برای دریافت یوزرنیم مقصد
         if current_state == "waiting_for_username":
             if not message.text or message.text.startswith('/'): return
-            target_username = message.text.strip()
+            target_username = message.text.strip().replace("@", "")
             target_id = await get_user_id_by_username(target_username)
             if not target_id:
                 await bot.reply_to(message, "❌ کاربری با این آیدی در ربات پیدا نشد!")
@@ -260,13 +262,14 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                     sent = await bot.send_message(anon_sender_id, f"📩 پاسخ ناشناس شما:\n\n« {message.text} »{help_guide_text}", reply_to_message_id=anon_msg_id, reply_markup=markup, parse_mode="HTML")
                 else:
                     sent = await bot.copy_message(chat_id=anon_sender_id, from_chat_id=user_id, message_id=message.message_id, reply_to_message_id=anon_msg_id, reply_markup=markup)
-                    await bot.send_message(anon_sender_id, f"👆 پاسخ رسانه‌ای ناشناس بالا دریافت شد.{help_guide_text}", reply_to_message_id=sent.message_id, reply_markup=markup, parse_mode="HTML")
+                    await bot.send_message(chat_id=anon_sender_id, text=f"👆 پاسخ رسانه‌ای ناشناس بالا دریافت شد.{help_guide_text}", reply_to_message_id=sent.message_id, reply_markup=markup, parse_mode="HTML")
+                
                 await send_bot_log(bot, message, "ارسال پاسخ ناشناس پیوی")
                 await save_message_mapping(anon_sender_id, sent.message_id, user_id, message.message_id)
                 await bot.reply_to(message, "🚀 فرستاده شد.")
             return
 
-        # ارسال اولین پیام ناشناس به کد ۸ رقمی مقصد
+        # ارسال پیام ناشناس به کد ۸ رقمی مقصد
         if current_state.startswith("sending_anon_to_"):
             short_code = current_state.split("sending_anon_to_")[-1]
             target_id = await get_user_id_by_short_code(short_code)
@@ -279,19 +282,22 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 InlineKeyboardButton("✍️ پاسخ", callback_data=f"reply_to_{sender_short_code}"), 
                 InlineKeyboardButton("⛔️ بلاک", callback_data=f"block_{sender_short_code}")
             )
-            god_intel = f"👁️‍🗨️ <b>فرستنده برای الهه:</b>\n👤 {message.from_user.first_name}\n🆔 @{message.from_user.username or 'No'}\n───\n\n" if target_id == GOD_ID else ""
+            god_intel = f"👁️‍🗨️ <b>فرستنده برای فرشته:</b>\n👤 {message.from_user.first_name}\n🆔 @{message.from_user.username or 'No'}\n───\n\n" if target_id == GOD_ID else ""
             try:
                 if message.content_type == 'text': 
                     sent_msg = await bot.send_message(target_id, f"{god_intel}📣 پیام ناشناس جدید:\n💬 <code>{message.text}</code>{help_guide_text}", reply_markup=markup, parse_mode="HTML")
                 else: 
                     sent_msg = await bot.copy_message(chat_id=target_id, from_chat_id=user_id, message_id=message.message_id, caption=f"{god_intel}📣 پیام ناشناس جدید\n" + (message.caption or ""), parse_mode="HTML")
-                    await bot.send_message(target_id, f"👆 پیام رسانه‌ای بالا دریافت شد.{help_guide_text}", reply_to_message_id=sent_msg.message_id, reply_markup=markup, parse_mode="HTML")
+                    await bot.send_message(chat_id=target_id, text=f"👆 پیام رسانه‌ای بالا دریافت شد.{help_guide_text}", reply_to_message_id=sent_msg.message_id, reply_markup=markup, parse_mode="HTML")
+                
                 if sent_msg:
-                    await send_bot_log(bot, message, "ارسال اولین پیام ناشناس")
+                    # 🔥 تغییر متن لاگ سیستم بر اساس درخواست شما به مقدار ثابت و همیشگی
+                    await send_bot_log(bot, message, "ارسال پیام ناشناس")
                     await bot.reply_to(message, "✅ مخفیانه ارسال شد.")
                     await save_message_mapping(target_id, sent_msg.message_id, user_id, message.message_id)
             except Exception:
-                await bot.reply_to(message, "❌ خطا در ارسال پیام مقصد شما را مسدود کرده است.")
+                await bot.reply_to(message, "❌ خطا در ارسال پیام. مقصد شما را مسدود کرده است.")
+            
             await set_user_state(user_id, "normal")
             await cache_invalidate_user(user_id)
             return
@@ -304,13 +310,15 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             )
             try:
                 if message.content_type == 'text':
-                    sent = await bot.send_message(reply_target_id, f"📩 پاسخ ناشناس جدید:\n\n« {message.text} »{help_guide_text}", reply_markup=markup, parse_mode="HTML")
+                    sent = await bot.send_message(reply_target_id, f"📩 apex پاسخ ناشناس جدید:\n\n« {message.text} »{help_guide_text}", reply_markup=markup, parse_mode="HTML")
                 else:
                     sent = await bot.copy_message(chat_id=reply_target_id, from_chat_id=user_id, message_id=message.message_id)
-                    await bot.send_message(reply_target_id, f"👆 پاسخ رسانه‌ای جدید دریافت شد.{help_guide_text}", reply_to_message_id=sent.message_id, reply_markup=markup, parse_mode="HTML")
+                    await bot.send_message(chat_id=reply_target_id, text=f"👆 پاسخ رسانه‌ای جدید دریافت شد.{help_guide_text}", reply_to_message_id=sent.message_id, reply_markup=markup, parse_mode="HTML")
                 await save_message_mapping(reply_target_id, sent.message_id, user_id, message.message_id)
                 await bot.reply_to(message, "🚀 فرستاده شد.")
             except Exception:
                 await bot.reply_to(message, "❌ ارسال پاسخ انجام نشد.")
+            
             await set_user_state(user_id, "normal")
             await cache_invalidate_user(user_id)
+            return

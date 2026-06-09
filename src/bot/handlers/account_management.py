@@ -32,7 +32,7 @@ def register_account_handlers(bot: AsyncTeleBot):
             f"⭐ | امتیاز آنتی‌ترول: <b>{stats['rating']:.1f}</b>\n"
             f"✍️ | ناشناس دریافتی: {stats['received']}\n"
             f"📤 | ناشناس ارسال شده: {stats['sent']}\n"
-            f"⛔️ | بلاک شده‌ها: {stats['blocked']}"
+            f"✍️ | بلاک شده‌ها: {stats['blocked']}"
         )
         from src.bot.handlers.private_anon import get_keyboards
         kb_main, _, _ = get_keyboards()
@@ -96,10 +96,11 @@ def register_account_handlers(bot: AsyncTeleBot):
                     InlineKeyboardButton("❌ انصراف", callback_data="cancel_dice")
                 )
                 
+                # 🔥 اصلاح فیکس مارک‌داون دابل‌استار و همسان‌سازی با تصویر ارسالی
                 dice_menu_text = (
                     "🎲 <b>به مینی‌گیم بونوس روزانه خوش اومدی!</b>\n\n"
                     "قوانین بازی خیلی سادست:\n"
-                    "روی دکمه زیر کلیک کن تا تاس انداخته بشه. **به اندازه عددی که تاس نشون میده (بین ۱ تا ۶ سکه) جایزه می‌گیری!**\n\n"
+                    "روی دکمه زیر کلیک کن تا تاس انداخته بشه. <b>به اندازه عددی که تاس نشون میده (بین ۱ تا ۶ سکه) جایزه می‌گیری!</b>\n\n"
                     "آماده‌ای؟ شاست رو امتحان کن 👇"
                 )
                 await bot.edit_message_text(dice_menu_text, user_id, call.message.message_id, parse_mode="HTML", reply_markup=kb_dice)
@@ -109,7 +110,7 @@ def register_account_handlers(bot: AsyncTeleBot):
             print(f"💥 Daily bonus check error: {e}")
             await bot.answer_callback_query(call.id, "❌ خطایی در بررسی هدیه روزانه رخ داد.", show_alert=True)
 
-# ==========================================
+    # ==========================================
     # 🎰 کالبک‌های اختصاصی مینی‌گیم تاس (پرتاب انیمیشن و تفکیک دیالوگ‌ها)
     # ==========================================
     @bot.callback_query_handler(func=lambda c: c.data in ["roll_the_dice", "cancel_dice"])
@@ -150,7 +151,7 @@ def register_account_handlers(bot: AsyncTeleBot):
                 dice_msg = await bot.send_dice(user_id, emoji="🎲")
                 dice_value = dice_msg.dice.value # عددی بین ۱ تا ۶
                 
-                # 🔥 اصلاح: تمام اعداد (حتی ۶) دیتابیس را شارژ کرده و تایمر ۲۴ ساعته را فعال می‌کنند
+                # تمام اعداد دیتابیس را شارژ کرده و تایمر ۲۴ ساعته را فعال می‌کنند
                 await conn.execute(
                     "UPDATE users SET coins = coins + $1, last_daily_bonus_at = NOW() WHERE user_id = $2", 
                     dice_value, user_id
@@ -161,7 +162,7 @@ def register_account_handlers(bot: AsyncTeleBot):
                 # ۲.۵ ثانیه صبر برای اتمام انیمیشن تاس
                 await asyncio.sleep(2.5)
                 
-                # 📜 تفکیک پیام‌ها بر اساس عدد تاس طبق درخواست شما
+                # 📜 تفکیک پیام‌ها بر اساس عدد تاس
                 if dice_value in [1, 2]:
                     result_text = (
                         f"🎲 تاس روی عدد <b>{dice_value}</b> ایستاد!\n\n"
@@ -189,7 +190,6 @@ def register_account_handlers(bot: AsyncTeleBot):
                     await bot.send_message(user_id, result_text, parse_mode="HTML")
                     
                 elif dice_value == 6:
-                    # 🔥 اصلاح: دکمهٔ شیشه‌ای پرتاب مجدد حذف شد و پیام سادهٔ موفقیت ارسال می‌شود
                     result_text = (
                         f"🎲 <b>بــــــــووووم! تاس روی عدد جادویی ۶ ایستاد!</b> 👑\n\n"
                         f"🎉 بالاترین پاداش ممکن رو گرفتی! <b>+۶ سکه رایگان</b> به حسابت اضافه شد.\n"
@@ -202,7 +202,6 @@ def register_account_handlers(bot: AsyncTeleBot):
         except Exception as e:
             print(f"💥 Error processing dice roll: {e}")
             await bot.send_message(user_id, "❌ خطای فنی در سیستم تاس‌اندازی رخ داد.")
-
 
     # ==========================================
     # 📜 کالبک راهنمای جامع کسب سکه و رفرال سیستم
@@ -260,7 +259,6 @@ def register_account_handlers(bot: AsyncTeleBot):
             "آیا کاملاً مطمئن هستید؟"
         )
         await bot.reply_to(message, warning_text, parse_mode="HTML", reply_markup=markup_confirm)
-
 
     # ==========================================
     # ⚠️ کالبک تایید نهایی و پاکسازی اتمیک جداول دیتابیس (گام دوم)
