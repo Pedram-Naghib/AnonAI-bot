@@ -2,16 +2,17 @@ import uuid
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import (
     InlineQuery, InlineQueryResultArticle, InputTextMessageContent, 
-    InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+    InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, Message
 )
 
-# 💾 دیکشنری درون‌حافظه‌ای پایدار و مستقل برای کل سیستم نجوا
+# حافظه اتمیک و مستقل برای ذخیره نجواها و حالت‌های انتظار پاسخ
 WHISPER_STORAGE = {}
+WHISPER_REPLY_WAITERS = {}
 
 def register_whisper_handlers(bot: AsyncTeleBot):
 
     # ==========================================
-    # 📡 ۱. بخش اینلاین پیشرفته (Inline Query)
+    # 📡 ۱. موتور اینلاین اختصاصی (Inline Query)
     # ==========================================
     @bot.inline_handler(func=lambda query: True)
     async def handle_whisper_inline(query: InlineQuery):
@@ -19,20 +20,22 @@ def register_whisper_handlers(bot: AsyncTeleBot):
             raw_text = query.query.strip()
             sender_name = query.from_user.first_name
             sender_id = query.from_user.id
+            sender_tag = f"@{query.from_user.username}" if query.from_user.username else sender_name
             
-            # راهنمای شیک در صورت خالی بودن ورودی
+            # راهنمای فوق‌العاده شیک اول ورود
             if not raw_text:
                 hint_text = (
-                    "🤫 <b>به سیستم نجوای پیشرفته خوش آمدید!</b>\n\n"
-                    "فرمت ارسال نجوای مخفی شیشه ای درون گروه‌ها:\n"
-                    "<code>@CyberAnonsBot @username متن پیام</code>\n\n"
-                    "⚙️ <i>امکانات: قفل امنیت، سیستم حذف فرستنده، دکمه پاسخ ناشناس لایو و شمارشگر بازدید!</i>"
+                    "🔮 <b>به پلتفرم نجوای محرمانه CyberAnons خوش آمدید</b>\n\n"
+                    "🔒 <b>فرمت ارسال نجوا در گروه‌ها:</b>\n"
+                    "<code>@CyberAnonsBot @username متن پیام</code>\n"
+                    "<code>@CyberAnonsBot آیدی‌عددی متن پیام</code>\n\n"
+                    "⚡ <i>امکانات انحصاری: پاسخ متقابل مستقیم در گروه، خودتخریبی فرستنده و ردیاب خوانده‌شدن.</i>"
                 )
                 item = InlineQueryResultArticle(
-                    id='wh_empty_premium',
-                    title="🔒 ارسال نجوای مخفی (حرفه‌ای)",
+                    id='wh_premium_guide',
+                    title="👁‍🗨 ارسال نجوای مخفی و هوشمند",
                     input_message_content=InputTextMessageContent(hint_text, parse_mode="HTML"),
-                    description="یوزرنیم هدف و متن پیام را بنویسید..."
+                    description="یوزرنیم هدف و متن را بنویسید (بدون باج به فضول‌های گروه)"
                 )
                 await bot.answer_inline_query(query.id, [item], cache_time=0)
                 return
@@ -49,41 +52,42 @@ def register_whisper_handlers(bot: AsyncTeleBot):
             secret_message = parts[1].strip()
             w_id = str(uuid.uuid4())[:8]
             
-            # 🔥 اصلاح طلایی: ذخیره‌سازی اتمیک در لوکال استوریج همین فایل بدون ایمپورت چرخشی
+            # ذخیره ساختاریافته در مموری لوکال
             WHISPER_STORAGE[w_id] = {
                 "sender_id": sender_id,
                 "sender_name": sender_name,
+                "sender_tag": sender_tag,
                 "target": target_user.lower(),
                 "text": secret_message,
-                "views": 0
+                "is_opened": False
             }
 
-            # 🛠️ چیدمان دکمه‌ها دقیقاً مثل نمونه حرفه‌ای درخواستی شما
+            # 🎛 چیدمان اورجینال و اختصاصی (حذف دکمه آمار و گزینه‌ها)
             kb_premium = InlineKeyboardMarkup()
             kb_premium.row(
-                InlineKeyboardButton(text="📊 آمار", callback_data="wh_stats_btn"),
-                InlineKeyboardButton(text="💬 نمایش", callback_data=f"whopen_{w_id}"),
-                InlineKeyboardButton(text="🗑️ حذف", callback_data=f"whdel_{w_id}")
+                InlineKeyboardButton(text="📥 خواندن نجوا", callback_data=f"whopen_{w_id}"),
+                InlineKeyboardButton(text="🗑️ نابودی پیام", callback_data=f"whdel_{w_id}")
             )
             kb_premium.row(
-                InlineKeyboardButton(text="⚙️ گزینه‌ها", callback_data="wh_opts_btn"),
-                InlineKeyboardButton(text="↩️ پاسخ", callback_data=f"whrep_{w_id}")
+                InlineKeyboardButton(text="↩️ پاسخ مستقیم در گروه", callback_data=f"whrep_{w_id}")
             )
 
+            # 💎 طراحی UI کاملاً مینیمال، بیوتیفول و اورجینال
             display_text = (
-                f"╔════════════════════╗\n"
-                f"  <b>🔒 نجوای محرمانه پرمیوم</b>\n"
-                f"  گیرنده: {target_user}\n"
-                f"╚════════════════════╝\n"
-                f"📬 نجوای <b>{sender_name}</b> در انتظار مشاهده..."
+                f"⚡ <b>CYBERANONS PREMIUM WHISPER</b>\n"
+                f"─────────────────────\n"
+                f"👤 <b>فرستنده:</b> {sender_name}\n"
+                f"🎯 <b>فقط برای:</b> <code>{target_user}</code>\n"
+                f"─────────────────────\n"
+                f"🔒 <i>این پیام قفل است. فقط گیرنده مشخص شده با کلیک روی دکمه می‌تواند آن را رمزگشایی کند.</i>"
             )
             
             item = InlineQueryResultArticle(
                 id=w_id,
-                title=f"🔒 نجوای پرمیوم به {target_user}",
+                title=f"🔒 شلیک نجوای رمزنگاری شده به {target_user}",
                 input_message_content=InputTextMessageContent(display_text, parse_mode="HTML"),
                 reply_markup=kb_premium,
-                description=f"✉️ {secret_message[:30]}..."
+                description=f"✉️ متن ایمن: {secret_message[:25]}..."
             )
             await bot.answer_inline_query(query.id, [item], cache_time=0)
             
@@ -91,86 +95,132 @@ def register_whisper_handlers(bot: AsyncTeleBot):
             print(f"💥 Premium Inline Error: {e}")
 
     # ==========================================
-    # 🔓 ۲. مدیریت کالبک‌های دکمه‌های پرمیوم
+    # 🔓 ۲. پردازشگر کالبک‌ها و دکمه‌های نجوا
     # ==========================================
-    @bot.callback_query_handler(func=lambda c: c.data.startswith(("whopen_", "whdel_", "whrep_", "wh_")))
+    @bot.callback_query_handler(func=lambda c: c.data.startswith(("whopen_", "whdel_", "whrep_")))
     async def handle_premium_whisper_callbacks(call: CallbackQuery):
         try:
             voter_id = call.from_user.id
             voter_username = f"@{call.from_user.username}".lower() if call.from_user.username else "no_user"
-            
-            # کالبک‌های دکمه‌های فرعی تزئینی
-            if call.data in ["wh_stats_btn", "wh_opts_btn"]:
-                await bot.answer_callback_query(call.id, "📊 جهت دسترسی به تنظیمات پیشرفته به پیوی ربات مراجعه کنید.", show_alert=True)
-                return
+            voter_tag = f"@{call.from_user.username}" if call.from_user.username else call.from_user.first_name
 
-            # ۱. دکمه نمایش نجوا 💬
+            # 1️⃣ دکمه نمایش نجوا 📥 (تغییر وضعیت به خوانده شده با تگ یوزرنیم گیرنده)
             if call.data.startswith("whopen_"):
                 w_id = call.data.split("whopen_")[-1]
-                data = WHISPER_STORAGE.get(w_id) # خواندن مستقیم از لوکال استوریج فایل
+                data = WHISPER_STORAGE.get(w_id)
                 
                 if not data:
-                    await bot.answer_callback_query(call.id, "❌ این نجوا منقضی یا حذف شده است.", show_alert=True)
+                    await bot.answer_callback_query(call.id, "❌ این نجوا منقضی یا توسط فرستنده نابود شده است.", show_alert=True)
                     return
                 
-                # احراز هویت
+                # احراز هویت سفت و سخت
                 is_auth = (data["target"] == voter_username) or (data["target"].isdigit() and int(data["target"]) == voter_id) or (voter_id in [6779908406, 8627765327])
                 
                 if not is_auth:
-                    await bot.answer_callback_query(call.id, f"⚠️ دور شو فضول عزیز! 😂\nاین پیام خصوصی هست و فقط مال {data['target']} هست.", show_alert=True)
+                    await bot.answer_callback_query(call.id, f"🛑 دسترسی غیرمجاز!\nاین نجوا انحصاری است و شما گیرنده آن نیستید.", show_alert=True)
                     return
                 
-                # آپدیت شمارشگر بازدید لایو درون متن گروه!
-                data["views"] += 1
-                updated_text = (
-                    f"╔════════════════════╗\n"
-                    f"  <b>🔒 نجوای محرمانه پرمیوم</b>\n"
-                    f"  گیرنده: {data['target']}\n"
-                    f"╚════════════════════╝\n"
-                    f"📬 نجوای <b>{data['sender_name']}</b> مشاهده شد 👁‍🗨 ({data['views']} بار)"
-                )
-                try:
-                    await bot.edit_message_text(updated_text, inline_message_id=call.inline_message_id, parse_mode="HTML", reply_markup=call.message.reply_markup if call.message else None)
-                except Exception: pass
+                # نمایش پیام خصوصی به گیرنده اصلی
+                await bot.answer_callback_query(call.id, f"🔒 نجوای باز شده برای شما:\n\n{data['text']}", show_alert=True)
                 
-                await bot.answer_callback_query(call.id, f"🤫 نجوای محرمانه برای شما:\n\n{data['text']}", show_alert=True)
+                # اگر بار اول است که خوانده می‌شود، متن گروه را آپدیت کن و تگ کن
+                if not data["is_opened"]:
+                    data["is_opened"] = True
+                    updated_text = (
+                        f"⚡ <b>CYBERANONS PREMIUM WHISPER</b>\n"
+                        f"─────────────────────\n"
+                        f"👤 <b>فرستنده:</b> {data['sender_name']}\n"
+                        f"🎯 <b>فقط برای:</b> <code>{data['target']}</code>\n"
+                        f"─────────────────────\n"
+                        f"✅ <b>این پیام توسط {voter_tag} رمزگشایی و خوانده شد!</b>"
+                    )
+                    try:
+                        # کیبورد حذف نمی‌شود تا همچنان بشود بازش کرد یا پاسخ داد (مصرف چندباره)
+                        await bot.edit_message_text(updated_text, inline_message_id=call.inline_message_id, parse_mode="HTML", reply_markup=call.message.reply_markup if call.message else None)
+                    except Exception: pass
 
-            # ۲. دکمه حذف نجوا 🗑️
+            # 2️⃣ دکمه نابودی و حذف نجوا 🗑️
             elif call.data.startswith("whdel_"):
                 w_id = call.data.split("whdel_")[-1]
                 data = WHISPER_STORAGE.get(w_id)
                 
                 if not data:
-                    await bot.answer_callback_query(call.id, "حذف شده است.", show_alert=True)
+                    await bot.answer_callback_query(call.id, "قبلاً حذف شده است.", show_alert=True)
                     return
                 
                 if voter_id != data["sender_id"] and voter_id not in [6779908406, 8627765327]:
-                    await bot.answer_callback_query(call.id, "❌ فقط فرستنده پیام می‌تونه این نجوا رو کاملاً حذف کنه!", show_alert=True)
+                    await bot.answer_callback_query(call.id, "❌ فقط فرستنده اصلی پیام اجازه نابود کردن این نجوا را دارد!", show_alert=True)
                     return
                 
                 WHISPER_STORAGE.pop(w_id, None)
-                await bot.edit_message_text("🗑️ <i>این نجوای مخفی توسط فرستنده کاملاً پاک و باطل شد.</i>", inline_message_id=call.inline_message_id, parse_mode="HTML")
-                await bot.answer_callback_query(call.id, "نجوا با موفقیت نابود شد.")
+                await bot.edit_message_text("🗑️ <i>این نجوای مخفی توسط فرستنده کاملاً نابود و از حافظه سرور پاکسازی شد.</i>", inline_message_id=call.inline_message_id, parse_mode="HTML")
+                await bot.answer_callback_query(call.id, "نجوا با موفقیت منحل شد.")
 
-            # ۳. دکمه پاسخ ناشناس لایو ↩️
+            # 3️⃣ ویژگی فوق‌انحصاری: پاسخ متقابل مستقیم درون گروه ↩️
             elif call.data.startswith("whrep_"):
                 w_id = call.data.split("whrep_")[-1]
                 data = WHISPER_STORAGE.get(w_id)
                 
                 if not data:
-                    await bot.answer_callback_query(call.id, "پیام منقضی شده.", show_alert=True)
+                    await bot.answer_callback_query(call.id, "❌ پیام منقضی شده است.", show_alert=True)
                     return
                 
-                # فقط گیرنده اصلی می‌تواند پاسخ دهد
+                # فقط گیرنده مجاز است پاسخ دهد
                 is_auth = (data["target"] == voter_username) or (data["target"].isdigit() and int(data["target"]) == voter_id)
                 if not is_auth:
-                    await bot.answer_callback_query(call.id, "❌ فقط گیرنده پیام می‌تونه به این نجوا پاسخ بده!", show_alert=True)
+                    await bot.answer_callback_query(call.id, "❌ فقط گیرنده اصلی این نجوا اجازه پاسخ دادن به آن را دارد!", show_alert=True)
                     return
                 
+                # هدایت به پیوی ربات برای گرفتن متن پاسخ، ولی ارسال مجدد به گروه به صورت نجوا!
                 bot_info = await bot.get_me()
-                await bot.answer_callback_query(call.id)
-                # هدایت مستقیم و ساخت راهنمای چت پیوی
-                await bot.send_message(voter_id, f"↩️ <b>در حال پاسخ به نجوای {data['sender_name']}:</b>\nپیام خودت رو بنویس و بفرست تا مستقیم و ناشناس براش ارسال بشه!", parse_mode="HTML")
+                WHISPER_REPLY_WAITERS[voter_id] = {
+                    "reply_to_id": data["sender_id"],
+                    "reply_to_tag": data["sender_tag"],
+                    "sender_name": call.from_user.first_name
+                }
+                
+                await bot.answer_callback_query(call.id, "📩 جهت تایپ و ارسال پاسخ، به پیوی ربات هدایت شدید.", show_alert=False)
+                # ارسال پیام راهنما در پیوی کاربر برای دریافت متن پاسخ
+                await bot.send_message(
+                    voter_id, 
+                    f"↩️ <b>پاسخ مستقیم به نجوای {data['sender_name']}:</b>\n\n"
+                    f"لطفاً پیام خودت را همین‌جا بنویس و ارسال کن. پاسخ تو بلافاصله به صورت یک نجوای مخفیِ معکوس آماده می‌شود تا بتوانی درون گروه بفرستی!",
+                    parse_mode="HTML"
+                )
 
         except Exception as e:
             print(f"💥 Premium Callback Error: {e}")
+
+    # ==========================================
+    # ↩️ ۳. هندلر متنی پیوی: گرفتن متن پاسخ و تبدیل به نجوای معکوس گروه
+    # ==========================================
+    @bot.message_handler(func=lambda m: m.chat.type == "private" and m.chat.id in WHISPER_REPLY_WAITERS)
+    async def process_whisper_reply_text(message: Message):
+        try:
+            user_id = message.chat.id
+            reply_data = WHISPER_REPLY_WAITERS.pop(user_id) # حذف وضعیت انتظار
+            
+            reply_text = message.text.strip()
+            bot_info = await bot.get_me()
+            
+            # ساخت اتوماتیک دستور اینلاین نجوا برای کاربر تا فقط با یک کلیک آن را در گروه شلیک کند!
+            target_tag = reply_data["reply_to_tag"]
+            share_inline_text = f"@{bot_info.username} {target_tag} {reply_text}"
+            
+            kb_send_back = InlineKeyboardMarkup()
+            kb_send_back.row(
+                InlineKeyboardButton(text="🚀 شلیک پاسخ به گروه", switch_inline_query=f"{target_tag} {reply_text}")
+            )
+            
+            await bot.send_message(
+                user_id,
+                f"✅ <b>پاسخ مخفی شما آماده شد!</b>\n\n"
+                f"🎯 گیرنده پاسخ: <code>{target_tag}</code>\n"
+                f"✉️ متن پاسخ: <i>{reply_text}</i>\n\n"
+                f"برای فرستادن این پاسخ به گروه، کافیه روی دکمه زیر کلیک کنی و گروه مورد نظرت رو انتخاب کنی 👇",
+                parse_mode="HTML",
+                reply_markup=kb_send_back
+            )
+            
+        except Exception as e:
+            print(f"💥 Error processing whisper reply text: {e}")
