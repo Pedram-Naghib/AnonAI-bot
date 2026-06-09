@@ -34,7 +34,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     "🔮 <b>آموزش ارسال نجوای محرمانه:</b>\n\n"
                     "ابتدا متن سپس یوزرنیم گیرنده رو بنویس\n\n"
                     "مثال:\n"
-                    "<code>{bot_username} سلام چطوری؟ @username</code>"
+                    "<code>@CyberAnonsBot سلام چطوری؟ @username</code>"
                 )
                 items.append(
                     InlineQueryResultArticle(
@@ -52,7 +52,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     InlineKeyboardButton(
                         text=f"📬 ارسال نجوای خصوصی به {sender_name}", 
                         # با \n متن نجوا رو می‌فرستیم خط بعد و آیدی عددی شما رو می‌ذاریم ته کادر
-                        switch_inline_query=f"متن نجوا\n{sender_id}"
+                        switch_inline_query_current_chat=f"متن نجوا\n{sender_id}"
                     )
                 )
                 
