@@ -1,194 +1,89 @@
-import uuid
+import os
+import asyncio
+import uvicorn
+from fastapi import FastAPI, Request
+from telebot.types import Update
 from telebot.async_telebot import AsyncTeleBot
-from telebot.types import (
-    InlineQuery, InlineQueryResultArticle, InputTextMessageContent, 
-    InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-)
-from src.database.db_manager import get_connection_pool
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-def register_whisper_handlers(bot: AsyncTeleBot):
+from src.config import TELEGRAM_BOT_TOKEN
+from src.bot.handlers import register_bot_handlers
+from src.database.db_manager import init_db
 
-    # ==========================================
-    # 📡 ۱. بخش اینلاین پیشرفته (Inline Query)
-    # ==========================================
-    @bot.inline_handler(func=lambda query: True)
-    async def handle_whisper_inline(query: InlineQuery):
-        try:
-            raw_text = query.query.strip()
-            sender_name = query.from_user.first_name
-            sender_id = query.from_user.id
-            
-            # راهنمای شیک در صورت خالی بودن ورودی
-            if not raw_text:
-                hint_text = (
-                    "🤫 <b>به سیستم نجوای پیشرفته خوش آمدید!</b>\n\n"
-                    "فرمت ارسال نجوای مخفی شیشه ای درون گروه‌ها:\n"
-                    "<code>@CyberAnonsBot @username متن پیام</code>\n\n"
-                    "⚙️ <i>امکانات: قفل امنیت، سیستم حذف فرستنده، دکمه پاسخ ناشناس لایو و شمارشگر بازدید!</i>"
-                )
-                item = InlineQueryResultArticle(
-                    id='wh_empty_premium',
-                    title="🔒 ارسال نجوای مخفی (حرفه‌ای)",
-                    input_message_content=InputTextMessageContent(hint_text, parse_mode="HTML"),
-                    description="یوزرنیم هدف و متن پیام را بنویسید..."
-                )
-                await bot.answer_inline_query(query.id, [item], cache_time=0)
-                return
+# 🔥 ایمپورت کردن ورکرهای پس‌زمینه جدید برای لود هم‌زمان در لوپ اصلی
+from src.bot.background_workers import background_log_worker, background_matchmaking_worker, background_broadcast_worker
 
-            if not raw_text.startswith("@") and not raw_text.split(" ")[0].isdigit():
-                return
+# 🎛 تنظیمات ران شدن (روی سیستم خودت False بگذار، روی سرور رندر True)
+USE_WEBHOOK = True
 
-            parts = raw_text.split(" ", 1)
-            target_user = parts[0].strip()
-            
-            if len(parts) < 2 or not parts[1].strip():
-                return
-                
-            secret_message = parts[1].strip()
-            w_id = str(uuid.uuid4())[:8]
-            
-            # 💾 ذخیره سازی ساختاریافته در جدول اختصاصی دیتابیس (باید کوئری آن را در init_db بزنی)
-            pool = await get_connection_pool()
-            async with pool.acquire() as conn:
-                await conn.execute(
-                    """
-                    INSERT INTO message_map (user_chat_id, user_msg_id, anon_sender_id, anon_msg_id) 
-                    VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING
-                    """, 
-                    sender_id, 0, 0, 0 # ساختار فرعی برای عدم کرش جدول فعلی‌ات
-                )
-                # برای سادگی و سرعت، از حافظه گلوبال موقت با ساختار جدید استفاده می‌کنیم
-                from main import app
-                if not hasattr(app, 'whisper_db'):
-                    app.whisper_db = {}
-                app.whisper_db[w_id] = {
-                    "sender_id": sender_id,
-                    "sender_name": sender_name,
-                    "target": target_user.lower(),
-                    "text": secret_message,
-                    "views": 0
-                }
+WEBHOOK_HOST = "anonai-bot.onrender.com"
+WEBHOOK_PORT = int(os.environ.get("PORT", 8000))
+WEBHOOK_URL = f"https://{WEBHOOK_HOST}/webhook/{TELEGRAM_BOT_TOKEN}"
 
-            # 🛠️ چیدمان دکمه‌ها دقیقاً مثل نمونه درخواستی شما
-            kb_premium = InlineKeyboardMarkup()
-            kb_premium.row(
-                InlineKeyboardButton(text="📊 آمار", callback_data="wh_stats_btn"),
-                InlineKeyboardButton(text="💬 نمایش", callback_data=f"whopen_{w_id}"),
-                InlineKeyboardButton(text="🗑️ حذف", callback_data=f"whdel_{w_id}")
-            )
-            kb_premium.row(
-                InlineKeyboardButton(text="⚙️ گزینه‌ها", callback_data="wh_opts_btn"),
-                InlineKeyboardButton(text="↩️ پاسخ", callback_data=f"whrep_{w_id}")
-            )
+# لیست آپدیت‌های مجاز برای لاگ‌گیری چت‌ها و ری‌آکشن‌ها
+ALLOWED_UPDATES = ["message", "callback_query", "message_reaction", "inline_query", "chosen_inline_result"]
 
-            display_text = (
-                f"via @{bot.get_my_description().name if hasattr(bot, 'name') else 'CyberAnonsBot'}\n"
-                f"╔════════════════════╗\n"
-                f"  <b>Pedram</b>\n"
-                f"  {target_user}\n"
-                f"╚════════════════════╝\n"
-                f"📬 نجوای <b>{sender_name}</b> در انتظار مشاهده..."
-            )
-            
-            item = InlineQueryResultArticle(
-                id=w_id,
-                title= f"🔒 نجوای پرمیوم به {target_user}",
-                input_message_content=InputTextMessageContent(display_text, parse_mode="HTML"),
-                reply_markup=kb_premium,
-                description=f"✉️ {secret_message[:30]}"
-            )
-            await bot.answer_inline_query(query.id, [item], cache_time=0)
-            
-        except Exception as e:
-            print(f"💥 Premium Inline Error: {e}")
+bot = AsyncTeleBot(TELEGRAM_BOT_TOKEN)
+app = FastAPI()
 
-    # ==========================================
-    # 🔓 ۲. مدیریت تمام کالبک‌های دکمه‌های پرمیوم
-    # ==========================================
-    @bot.callback_query_handler(func=lambda c: c.data.startswith(("whopen_", "whdel_", "whrep_", "wh_")))
-    async def handle_premium_whisper_callbacks(call: CallbackQuery):
-        try:
-            from main import app
-            db = getattr(app, 'whisper_db', {})
-            voter_id = call.from_user.id
-            voter_username = f"@{call.from_user.username}".lower() if call.from_user.username else "no_user"
-            
-            # کالبک‌های دکمه‌های فرعی تزئینی
-            if call.data in ["wh_stats_btn", "wh_opts_btn"]:
-                await bot.answer_callback_query(call.id, "📊 جهت دسترسی به تنظیمات پیشرفته به پیوی ربات مراجعه کنید.", show_alert=True)
-                return
+@app.api_route("/", methods=["GET", "HEAD"])
+async def health_check():
+    return {"status": "alive"}
 
-            # ۱. دکمه نمایش نجوا 💬
-            if call.data.startswith("whopen_"):
-                w_id = call.data.split("whopen_")[-1]
-                data = db.get(w_id)
-                
-                if not data:
-                    await bot.answer_callback_query(call.id, "❌ این نجوا منقضی یا حذف شده است.", show_alert=True)
-                    return
-                
-                # احراز هویت
-                is_auth = (data["target"] == voter_username) or (data["target"].isdigit() and int(data["target"]) == voter_id) or (voter_id in [6779908406, 8627765327])
-                
-                if not is_auth:
-                    await bot.answer_callback_query(call.id, f"⚠️ دور شو فضول عزیز! 😂\nاین پیام فقط مال {data['target']} هست.", show_alert=True)
-                    return
-                
-                # آپدیت شمارشگر بازدید لایو درون متن گروه!
-                data["views"] += 1
-                updated_text = (
-                    f"via @CyberAnonsBot\n"
-                    f"╔════════════════════╗\n"
-                    f"  <b>Pedram</b>\n"
-                    f"  {data['target']}\n"
-                    f"╚════════════════════╝\n"
-                    f"📬 نجوای <b>{data['sender_name']}</b> مشاهده شد 👁‍🗨 ({data['views']} بار)"
-                )
-                try:
-                    await bot.edit_message_text(updated_text, inline_message_id=call.inline_message_id, parse_mode="HTML", reply_markup=call.message.reply_markup if call.message else None)
-                except Exception: pass
-                
-                await bot.answer_callback_query(call.id, f"🤫 نجوای محرمانه برای شما:\n\n{data['text']}", show_alert=True)
+@app.post(f"/webhook/{TELEGRAM_BOT_TOKEN}")
+async def telegram_webhook(request: Request):
+    json_string = await request.json()
+    update = Update.de_json(json_string)
+    await bot.process_new_updates([update])
+    return {"status": "ok"}
 
-            # ۲. دکمه حذف نجوا 🗑️
-            elif call.data.startswith("whdel_"):
-                w_id = call.data.split("whdel_")[-1]
-                data = db.get(w_id)
-                
-                if not data:
-                    await bot.answer_callback_query(call.id, "حذف شده است.", show_alert=True)
-                    return
-                
-                if voter_id != data["sender_id"] and voter_id not in [6779908406, 8627765327]:
-                    await bot.answer_callback_query(call.id, "❌ فقط فرستنده پیام می‌تونه این نجوا رو کاملاً حذف کنه!", show_alert=True)
-                    return
-                
-                db.pop(w_id, None)
-                await bot.edit_message_text("🗑️ <i>این نجوای مخفی توسط فرستنده کاملاً پاک و باطل شد.</i>", inline_message_id=call.inline_message_id, parse_mode="HTML")
-                await bot.answer_callback_query(call.id, "نجوا با موفقیت نابود شد.")
+async def start_bot():
+    # ۱. مقداردهی اولیه دیتابیس ابری سوپابیس
+    print("🗄️ Initializing Databases...")
+    await init_db()
+    
+    # 🔌 ۲. ثبت هندلرهای اصلی ربات (شامل کلین ردیف‌های اولویت‌بندی شده)
+    print("🔌 Registering bot handlers...")
+    register_bot_handlers(bot)
+    
+    # 🔥 ۳. روشن کردن ورکرهای اتمیک پس‌زمینه درون Event Loop جاری
+    # این تسک‌ها به صورت غیرمسدودکننده در پس‌زمینه شروع به مچ‌میکینگ و پردازش لاگ‌ها می‌کنند
+    print("⚡ Activating Background Workers (Log Queue & Matchmaking)...")
+    asyncio.create_task(background_log_worker(bot))
+    asyncio.create_task(background_matchmaking_worker(bot))
+    
+    # ⏰ ۴. تنظیم اسکجولر گزارش ۲۴ ساعته با تزریق اِونت لوپ جاری
+    # این کار مانع از کرش کردن متد ارسال پیام ربات در بک‌آند می‌شود
+    # current_loop = asyncio.get_running_loop()
+    # scheduler = AsyncIOScheduler()
+    # scheduler.add_job(send_daily_analytics, 'cron', hour=23, minute=30, args=[bot])
+    # scheduler.start()
+    # print("Base Analytics scheduler started...")
+    # خطوط قبلی مچ‌میکینگ و لاگر ...
+    print("⚡ Activating Background Workers (Log Queue & Matchmaking)...")
+    asyncio.create_task(background_log_worker(bot))
+    asyncio.create_task(background_matchmaking_worker(bot))
+    
+    # 🔥 خط جدید: فعال‌سازی ورکر همگانی دسته‌ای
+    asyncio.create_task(background_broadcast_worker(bot))
+    
+    # ۵. انتخاب مسیر ران کردن (وب‌هوک یا پولینگ)
+    if USE_WEBHOOK:
+        print("🔔 Setting up Webhook...")
+        await bot.remove_webhook()
+        # ست کردن وب‌هوک همراه با فیلتر آپدیت‌ها
+        await bot.set_webhook(url=WEBHOOK_URL, allowed_updates=ALLOWED_UPDATES)
+        
+        config = uvicorn.Config(app=app, host="0.0.0.0", port=WEBHOOK_PORT, loop="asyncio")
+        server = uvicorn.Server(config)
+        await server.serve()
+    else:
+        print("🔄 Starting Long Polling...")
+        await bot.remove_webhook()
+        print("🤖 CyberAnons is online via Polling...")
+        # اجرای بدون وقفه پولینگ لوکال
+        await bot.infinity_polling(logger_level=20, allowed_updates=ALLOWED_UPDATES)
 
-            # ۳. دکمه پاسخ ناشناس لایو ↩️
-            elif call.data.startswith("whrep_"):
-                w_id = call.data.split("whrep_")[-1]
-                data = db.get(w_id)
-                
-                if not data:
-                    await bot.answer_callback_query(call.id, "پیام منقضی شده.", show_alert=True)
-                    return
-                
-                # فقط گیرنده اصلی می‌تواند پاسخ دهد
-                is_auth = (data["target"] == voter_username) or (data["target"].isdigit() and int(data["target"]) == voter_id)
-                if not is_auth:
-                    await bot.answer_callback_query(call.id, "❌ فقط گیرنده پیام می‌تونه به این نجوا پاسخ بده!", show_alert=True)
-                    return
-                
-                bot_info = await bot.get_me()
-                # فرستادن کاربر به پیوی ربات همراه با دیپ‌لینک پاسخ اختصاصی
-                await bot.answer_callback_query(call.id)
-                # ایجاد یک دکمه برای سوییچ به پیوی جهت پاسخ دادن
-                share_url = f"https://t.me/{bot_info.username}?start=repwh_{data['sender_id']}"
-                # هدایت مستقیم تلگرامی با نوتیف باز کردن ربات
-                await bot.send_message(voter_id, f"↩️ <b>در حال پاسخ به نجوای {data['sender_name']}:</b>\nپیام خودت رو بنویس و بفرست تا مستقیم و ناشناس براش ارسال بشه!", parse_mode="HTML")
-
-        except Exception as e:
-            print(f"💥 Premium Callback Error: {e}")
+if __name__ == "__main__":
+    # اجرای استاندارد ناهمگام کل ساختار سرور
+    asyncio.run(start_bot())
