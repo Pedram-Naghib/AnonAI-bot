@@ -25,23 +25,59 @@ def register_whisper_handlers(bot: AsyncTeleBot):
             bot_info = await bot.get_me()
             bot_username = f"@{bot_info.username}"
             
-            # راهنمای شیک در صورت خالی بودن ورودی
+            # 💎 منوی چندگزینه‌ای اختصاصی و اورجینال (وقتی ورودی خالی است)
             if not raw_text:
-                hint_text = (
-                    "🔮 <b>به سیستم نجوای محرمانه CyberAnons خوش آمدید</b>\n\n"
-                    "🔒 <b>فرمت ارسال نجوا در گروه‌ها:</b>\n"
-                    "<code>@CyberAnonsBot @username متن پیام</code>\n"
-                    "<code>@CyberAnonsBot آیدی‌عددی متن پیام</code>"
+                items = []
+                
+                # گزینه‌ی ۱: آموزش ارسال نجوا
+                guide_text = (
+                    "🔮 <b>آموزش ارسال نجوای محرمانه:</b>\n\n"
+                    "ابتدا متن سپس یوزرنیم گیرنده رو بنویس\n\n"
+                    "مثال:\n"
+                    "<code>{bot_username} سلام چطوری؟ @username</code>"
                 )
-                item = InlineQueryResultArticle(
-                    id='wh_premium_guide',
-                    title="👁‍🗨 ارسال نجوای مخفی و هوشمند",
-                    input_message_content=InputTextMessageContent(hint_text, parse_mode="HTML"),
-                    description="یوزرنیم هدف و متن را بنویسید"
+                items.append(
+                    InlineQueryResultArticle(
+                        id='wh_menu_guide',
+                        title="💡 آموزش ارسال نجوا",
+                        description="ابتدا متن سپس یوزرنیم گیرنده رو بنویس",
+                        input_message_content=InputTextMessageContent(guide_text, parse_mode="HTML"),
+                        thumbnail_url="https://img.icons8.com/nolan/96/help.png"
+                    )
                 )
-                await bot.answer_inline_query(query.id, [item], cache_time=0)
+                
+                # گزینه‌ی ۲: دریافت و کپی آیدی عددی
+                id_text = f"<code>{sender_id}</code>"
+                items.append(
+                    InlineQueryResultArticle(
+                        id='wh_menu_id',
+                        title="🆔 آیدی عددی من",
+                        description=f"آیدی عددی شما: {sender_id} (جهت کپی کلیک کنید)",
+                        input_message_content=InputTextMessageContent(id_text, parse_mode="HTML"),
+                        thumbnail_url="https://img.icons8.com/nolan/96/user-id-with-fingerprint.png"
+                    )
+                )
+                
+                # گزینه‌ی ۳: لینک اختصاصی پیام ناشناس
+                anon_req_text = (
+                    f"📢 <b>صندوق پیام ناشناس من فعال شد!</b>\n\n"
+                    f"اگر حرفی، انتقادی یا نجوای محرمانه‌ای تو دلت هست که نمی‌تونی مستقیم بگی، روی لینک زیر کلیک کن و کاملاً ناشناس برام بفرست 👇\n\n"
+                    f"🔗 <a href='https://t.me/{bot_info.username}?start=anon_{sender_id}'>ارسال پیام ناشناس به {sender_name}</a>"
+                )
+                items.append(
+                    InlineQueryResultArticle(
+                        id='wh_menu_anon',
+                        title="📥 لینک ناشناس اختصاصی",
+                        description="دریافت پیام ناشناس در گروه‌ها و کانال‌ها 🚀",
+                        input_message_content=InputTextMessageContent(anon_req_text, parse_mode="HTML", disable_web_page_preview=True),
+                        thumbnail_url="https://img.icons8.com/nolan/96/filled-message.png"
+                    )
+                )
+                
+                await bot.answer_inline_query(query.id, items, cache_time=0)
                 return
 
+            # بررسی فرمت ارسال پیام
             if not raw_text.startswith("@") and not raw_text.split(" ")[0].isdigit():
                 return
 
@@ -64,15 +100,14 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                 "is_opened": False
             }
 
-            # 🎛 چیدمان دکمه‌ها
+            # 🎛 چیدمان دکمه‌های شیشه‌ای زیر نجوا
             kb_premium = InlineKeyboardMarkup()
             kb_premium.row(
                 InlineKeyboardButton(text="📥 خواندن نجوا", callback_data=f"whopen_{w_id}"),
                 InlineKeyboardButton(text="🗑️ حذف", callback_data=f"whdel_{w_id}")
             )
 
-            # 💎 چیدمان فوق‌العاده گنگ و اختصاصی طبق ترتیب درخواستی شما:
-            # ۱. آیدی ربات | ۲. وضعیت پیام | ۳. آیدی گیرنده
+            # 💎 چیدمان دقیقاً بر اساس ترتیب درخواستی شما
             display_text = (
                 f"<b>via {bot_username}</b>\n"
                 f"📬 در انتظار خوانده شدن...\n"
@@ -104,7 +139,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
             bot_info = await bot.get_me()
             bot_username = f"@{bot_info.username}"
 
-            # 1️⃣ دکمه نمایش نجوا 📥
+            # 1️⃣ دکمه نمایش نجوا (📥 خواندن نجوا)
             if call.data.startswith("whopen_"):
                 w_id = call.data.split("whopen_")[-1]
                 data = WHISPER_STORAGE.get(w_id)
@@ -113,7 +148,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     await bot.answer_callback_query(call.id, "❌ این نجوا منقضی یا حذف شده است.", show_alert=True)
                     return
                 
-                # بررسی دسترسی فرستنده، گیرنده و ادمین‌ها
+                # بررسی دسترسی (گیرنده، فرستنده و ادمین‌های اصلی پلتفرم)
                 is_auth = (
                     (data["target"] == voter_username) or 
                     (data["target"].isdigit() and int(data["target"]) == voter_id) or 
@@ -125,10 +160,10 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     await bot.answer_callback_query(call.id, f"🛑 دسترسی غیرمجاز!\nاین نجوا فقط برای {data['target']} و فرستنده آن قابل باز شدن است.", show_alert=True)
                     return
                 
-                # نمایش متن مخفی درون پاپ‌آپ خصوصی تلگرام
+                # نمایش متن مخفی درون پاپ‌آپ خصوصی
                 await bot.answer_callback_query(call.id, f"🔒 نجوای باز شده:\n\n{data['text']}", show_alert=True)
                 
-                # تغییر وضعیت به خوانده شده با حفظ چیدمان درخواستی شما
+                # تغییر وضعیت متن به "خوانده شد" با حفظ چیدمان و دکمه‌ها
                 if not data["is_opened"]:
                     data["is_opened"] = True
                     updated_text = (
@@ -137,7 +172,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         f"🎯 <code>{data['target']}</code>"
                     )
                     try:
-                        # دکمه‌های شیشه‌ای کاملاً پایدار می‌مانند و حذف نمی‌شوند
+                        # دکمه‌ها بدون تغییر و حذف، مجدداً رندر باقی می‌مانند
                         await bot.edit_message_text(
                             text=updated_text, 
                             inline_message_id=call.inline_message_id, 
@@ -146,7 +181,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         )
                     except Exception: pass
 
-            # 2️⃣ دکمه حذف نجوا 🗑️
+            # 2️⃣ دکمه حذف نجوا (🗑️ حذف)
             elif call.data.startswith("whdel_"):
                 w_id = call.data.split("whdel_")[-1]
                 data = WHISPER_STORAGE.get(w_id)
