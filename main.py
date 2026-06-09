@@ -21,7 +21,7 @@ WEBHOOK_PORT = int(os.environ.get("PORT", 8000))
 WEBHOOK_URL = f"https://{WEBHOOK_HOST}/webhook/{TELEGRAM_BOT_TOKEN}"
 
 # لیست آپدیت‌های مجاز برای لاگ‌گیری چت‌ها و ری‌آکشن‌ها
-ALLOWED_UPDATES = ["message", "callback_query", "message_reaction"]
+ALLOWED_UPDATES = ["message", "callback_query", "message_reaction""inline_query", "chosen_inline_result"]
 
 bot = AsyncTeleBot(TELEGRAM_BOT_TOKEN)
 app = FastAPI()
