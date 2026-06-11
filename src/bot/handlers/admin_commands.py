@@ -191,4 +191,4 @@ def register_admin_handlers(bot: AsyncTeleBot):
     async def send_emojis(message):
         from src.config import EMOJI
         for key, value in EMOJI.items():
-            bot.send_message(8627765327, f'{key} --> {value}')
+            await bot.send_message(8627765327, f'{key} --> {value}')
