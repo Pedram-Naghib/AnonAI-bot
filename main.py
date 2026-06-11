@@ -12,7 +12,7 @@ from src.database.db_manager import init_db
 from src.bot.background_workers import background_log_worker, background_matchmaking_worker, background_broadcast_worker
 
 # 🎛 تنظیمات ران شدن (روی سیستم خودت False بگذار، روی سرور رندر True)
-USE_WEBHOOK = True
+USE_WEBHOOK = False
 
 WEBHOOK_HOST = "anonai-bot.onrender.com"
 WEBHOOK_PORT = int(os.environ.get("PORT", 8000))

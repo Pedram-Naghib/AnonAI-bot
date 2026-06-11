@@ -186,3 +186,9 @@ def register_admin_handlers(bot: AsyncTeleBot):
         except Exception as err:
             print(f"💥 Failed to initiate broadcast campaign: {err}")
             await bot.reply_to(message, "❌ خطای فنی در ثبت کمپین پیام همگانی.")
+
+    @bot.message_handler(command=["emoji"], func=lambda m: m.chat.type == "private" and m.from_user.id in SUPER_USERS)
+    async def send_emojis(message):
+        from src.config import EMOJI
+        for key, value in EMOJI.items():
+            bot.send_message(8627765327, f'{key} --> {value}')
