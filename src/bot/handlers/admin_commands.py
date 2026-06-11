@@ -187,8 +187,17 @@ def register_admin_handlers(bot: AsyncTeleBot):
             print(f"💥 Failed to initiate broadcast campaign: {err}")
             await bot.reply_to(message, "❌ خطای فنی در ثبت کمپین پیام همگانی.")
 
-    @bot.message_handler(command=["emoji"], func=lambda m: m.chat.type == "private" and m.from_user.id in SUPER_USERS)
+    # ==========================================
+    # 🎰 دستور تِست و دریافت لیست کامل اموجی‌های پرمیوم ست شده
+    # ==========================================
+    # 🔥 رفع باگ دستور commands و داینامیک کردن آیدی چت فرستنده
+    @bot.message_handler(commands=["emoji"], func=lambda m: m.chat.id == 8627765327)
     async def send_emojis(message):
-        from src.config import EMOJI
-        for key, value in EMOJI.items():
-            await bot.send_message(8627765327, f'{key} --> {value}')
+        try:
+            from src.config import EMOJI
+            
+            # ارسال تکی برای مشخص شدن تفکیک رندر شدن کدهای اموجی
+            for key, value in EMOJI.items():
+                await bot.send_message(message.chat.id, f"📌 <b>Key:</b> `{key}`\n🔮 <b>Render:</b> {value}", parse_mode="HTML")
+        except Exception as e:
+            print(f"💥 Error printing emojis: {e}")
