@@ -25,24 +25,23 @@ def register_whisper_handlers(bot: AsyncTeleBot):
             bot_info = await bot.get_me()
             bot_username = f"@{bot_info.username}"
             
-            # 💎 منوی چندگزینه‌ای با تم دارک و سایبری (وقتی ورودی خالی است)
+            # 💎 منوی چندگزینه‌ای اختصاصی (وقتی ورودی خالی است)
             if not raw_text:
                 items = []
                 
                 # گزینه‌ی ۱: آموزش ارسال نجوا
                 guide_text = (
                     "🔮 <b>آموزش ارسال نجوای محرمانه:</b>\n\n"
-                    "ابتدا متن سپس یوزرنیم گیرنده رو بنویس\n\n"
+                    "ابتدا متن نجوا رو بنویس و در خط بعد آیدی گیرنده رو قرار بده\n\n"
                     "مثال:\n"
-                    f"<code>{bot_username} سلام چطوری؟ @username</code>"
+                    f"<code>{bot_username} سلام چطوری؟\n{sender_id}</code>"
                 )
                 items.append(
                     InlineQueryResultArticle(
                         id='wh_menu_guide',
                         title="💡 آموزش ارسال نجوا",
-                        description="ابتدا متن سپس یوزرنیم گیرنده رو بنویس",
+                        description="ابتدا متن سپس آیدی گیرنده را بنویسید",
                         input_message_content=InputTextMessageContent(guide_text, parse_mode="HTML"),
-                        # why-us-male
                         thumbnail_url="https://img.icons8.com/sci-fi/48/question-mark.png"
                     )
                 )
@@ -52,6 +51,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                 kb_req_whisper.row(
                     InlineKeyboardButton(
                         text=f"📬 ارسال نجوای خصوصی به {sender_name}", 
+                        # قرار گرفتن متن نجوا و آیدی عددی شما در خط بعدی
                         switch_inline_query_current_chat=f"متن نجوا\n{sender_id}"
                     )
                 )
@@ -68,7 +68,6 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         description="باکس دریافت نجوای مستقیم درون گروه‌ها 🕶️",
                         input_message_content=InputTextMessageContent(req_whisper_text, parse_mode="HTML"),
                         reply_markup=kb_req_whisper,
-                        # speech-bubble-with-dots
                         thumbnail_url="https://img.icons8.com/sci-fi/48/speech-bubble-with-dots.png"
                     )
                 )
@@ -92,7 +91,6 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         description="دریافت پیام ناشناس در گروه‌ها و کانال‌ها 🚀",
                         input_message_content=InputTextMessageContent(anon_req_text, parse_mode="HTML"),
                         reply_markup=kb_anon_link,
-                        # 🌐 آیکون نئون دیتا بیس/پاکت رمزنگاری شده سایبرپانک
                         thumbnail_url="https://img.icons8.com/sci-fi/48/fraud.png"
                     )
                 )
@@ -100,17 +98,27 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                 await bot.answer_inline_query(query.id, items, cache_time=0)
                 return
 
-            # بررسی فرمت ارسال پیام
-            if not raw_text.startswith("@") and not raw_text.split(" ")[0].isdigit():
+            # ==========================================
+            # 🛠️ موتور هوشمند تفکیک ۳ بخشی (متن نجوا + آیدی گیرنده)
+            # ==========================================
+            lines = [line.strip() for line in raw_text.split('\n') if line.strip()]
+            
+            if len(lines) >= 2:
+                # فرمت چند خطی: خط آخر آیدی گیرنده، خطوط قبل متن نجوا
+                target_user = lines[-1]
+                secret_message = "\n".join(lines[:-1])
+            else:
+                # فرمت تک خطی: تفکیک بر اساس آخرین فاصله (Space) کادر پیام
+                parts = raw_text.rsplit(" ", 1)
+                if len(parts) < 2:
+                    return
+                secret_message = parts[0].strip()
+                target_user = parts[1].strip()
+
+            # بررسی فرمت آیدی گیرنده (باید با @ شروع شود یا عدد خالص باشد)
+            if not target_user.startswith("@") and not target_user.isdigit():
                 return
 
-            parts = raw_text.split(" ", 1)
-            target_user = parts[0].strip()
-            
-            if len(parts) < 2 or not parts[1].strip():
-                return
-                
-            secret_message = parts[1].strip()
             w_id = str(uuid.uuid4())[:8]
             
             # ذخیره ساختاریافته در مموری لوکال
@@ -130,7 +138,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                 InlineKeyboardButton(text="🗑️ حذف", callback_data=f"whdel_{w_id}")
             )
 
-            # 💎 چیدمان دقیقاً بر اساس ترتیب درخواستی شما
+            # 💎 نمایش وضعیت با اموجی‌های عادی استاندارد تلگرام
             display_text = (
                 f"<b>via {bot_username}</b>\n"
                 f"📬 در انتظار خوانده شدن...\n"
