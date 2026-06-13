@@ -51,7 +51,6 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                 kb_req_whisper.row(
                     InlineKeyboardButton(
                         text=f"📬 ارسال نجوای خصوصی به {sender_name}", 
-                        # قرار گرفتن متن نجوا و آیدی عددی شما در خط بعدی
                         switch_inline_query_current_chat=f"متن نجوا\n{sender_id}"
                     )
                 )
@@ -104,24 +103,20 @@ def register_whisper_handlers(bot: AsyncTeleBot):
             lines = [line.strip() for line in raw_text.split('\n') if line.strip()]
             
             if len(lines) >= 2:
-                # فرمت چند خطی: خط آخر آیدی گیرنده، خطوط قبل متن نجوا
                 target_user = lines[-1]
                 secret_message = "\n".join(lines[:-1])
             else:
-                # فرمت تک خطی: تفکیک بر اساس آخرین فاصله (Space) کادر پیام
                 parts = raw_text.rsplit(" ", 1)
                 if len(parts) < 2:
                     return
                 secret_message = parts[0].strip()
                 target_user = parts[1].strip()
 
-            # بررسی فرمت آیدی گیرنده (باید با @ شروع شود یا عدد خالص باشد)
             if not target_user.startswith("@") and not target_user.isdigit():
                 return
 
             w_id = str(uuid.uuid4())[:8]
             
-            # ذخیره ساختاریافته در مموری لوکال
             WHISPER_STORAGE[w_id] = {
                 "sender_id": sender_id,
                 "sender_name": sender_name,
@@ -131,14 +126,12 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                 "is_opened": False
             }
 
-            # 🎛 چیدمان دکمه‌های شیشه‌ای زیر نجوا
             kb_premium = InlineKeyboardMarkup()
             kb_premium.row(
                 InlineKeyboardButton(text="📥 خواندن نجوا", callback_data=f"whopen_{w_id}"),
                 InlineKeyboardButton(text="🗑️ حذف", callback_data=f"whdel_{w_id}")
             )
 
-            # 💎 نمایش وضعیت با اموجی‌های عادی استاندارد تلگرام
             display_text = (
                 f"📬 در انتظار خوانده شدن...\n"
                 f"🎯 <code>{target_user}</code>"
@@ -166,8 +159,12 @@ def register_whisper_handlers(bot: AsyncTeleBot):
             voter_username = f"@{call.from_user.username}".lower() if call.from_user.username else "no_user"
             voter_tag = f"@{call.from_user.username}" if call.from_user.username else call.from_user.first_name
 
-            bot_info = await bot.get_me()
-            bot_username = f"@{bot_info.username}"
+            # ساختاربندی مجدد دکمه‌ها جهت لود پایدار اینلاین
+            kb_refresh = InlineKeyboardMarkup()
+            kb_refresh.row(
+                InlineKeyboardButton(text="📥 خواندن نجوا", callback_data=f"{call.data}"),
+                InlineKeyboardButton(text="🗑️ حذف", callback_data=f"whdel_{call.data.split('_')[-1]}")
+            )
 
             # 1️⃣ دکمه نمایش نجوا (📥 خواندن نجوا)
             if call.data.startswith("whopen_"):
@@ -178,7 +175,6 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     await bot.answer_callback_query(call.id, "❌ این نجوا منقضی یا حذف شده است.", show_alert=True)
                     return
                 
-                # بررسی دسترسی: گیرنده، فرستنده و ادمین‌ها مجاز به خواندن هستند
                 is_auth = (
                     (data["target"] == voter_username) or 
                     (data["target"].isdigit() and int(data["target"]) == voter_id) or 
@@ -190,10 +186,10 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     await bot.answer_callback_query(call.id, f"🛑 دسترسی غیرمجاز!\nاین نجوا فقط برای {data['target']} و فرستنده آن قابل باز شدن است.", show_alert=True)
                     return
                 
-                # نمایش پاپ‌آپ حاوی متن نجوا (بدون محدودیت تعداد دفعات خواندن)
+                # نمایش پاپ‌آپ حاوی متن نجوا
                 await bot.answer_callback_query(call.id, f"🔒 نجوای باز شده:\n\n{data['text']}", show_alert=True)
                 
-                # تغییر وضعیت ظاهر پیام در گروه به حالت «خوانده شد» فقط در اولین کلیک مجاز
+                # تغییر متن به حالت خوانده شده (فقط در اولین کلیک)
                 if not data["is_opened"]:
                     data["is_opened"] = True
                     updated_text = (
@@ -201,21 +197,15 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         f"🎯 <code>{data['target']}</code>"
                     )
                     try:
+                        # ادیت امن متنی به همراه دکمه‌های ریفرش‌شده برای پیام‌های اینلاین
                         await bot.edit_message_text(
                             text=updated_text, 
                             inline_message_id=call.inline_message_id, 
                             parse_mode="HTML", 
-                            # 🛠️ اصلاح: دکمه‌ها را دوباره ست می‌کنیم تا حذف نشوند
-                            reply_markup=call.message.reply_markup if call.message else call.message.reply_markup
+                            reply_markup=kb_refresh
                         )
-                    except Exception: 
-                        # هندل کردن ادیت در حالت اینلاین برای حفظ دکمه‌ها
-                        try:
-                            await bot.edit_message_reply_markup(
-                                inline_message_id=call.inline_message_id,
-                                reply_markup=call.message.reply_markup if call.message else kb_premium
-                            )
-                        except Exception: pass
+                    except Exception as e:
+                        print(f"⚠️ Edit fail ignored: {e}")
 
             # 2️⃣ دکمه حذف نجوا (🗑️ حذف)
             elif call.data.startswith("whdel_"):
