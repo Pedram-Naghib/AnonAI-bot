@@ -4,6 +4,7 @@ from telebot.types import (
     InlineQuery, InlineQueryResultArticle, InputTextMessageContent, 
     InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 )
+from src.config import EMOJI
 
 # حافظه اتمیک و مستقل برای ذخیره نجواها
 WHISPER_STORAGE = {}
@@ -56,9 +57,9 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                 )
                 
                 req_whisper_text = (
-                    f"👤 <b>کاربر:</b> {sender_name}\n"
-                    f"🆔 <b>آیدی‌عددی:</b> <code>{sender_id}</code>\n\n"
-                    f"📥 واسه ارسال پیام محرمانه به من کلیک کن 👇"
+                    f"{EMOJI['profile']} <b>کاربر:</b> {sender_name}\n"
+                    f"{EMOJI['id']} <b>آیدی‌عددی:</b> <code>{sender_id}</code>\n\n"
+                    f"{EMOJI['mail']} واسه ارسال پیام محرمانه به من کلیک کن 👇"
                 )
                 items.append(
                     InlineQueryResultArticle(
@@ -81,7 +82,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                 )
                 
                 anon_req_text = (
-                    f"برای پیام ناشناس به من دکمه زیر رو بزن 👇"
+                    f"برای پیام ناشناس به من دکمه زیر رو بزن {EMOJI['down']}"
                 )
                 items.append(
                     InlineQueryResultArticle(
@@ -133,8 +134,8 @@ def register_whisper_handlers(bot: AsyncTeleBot):
             )
 
             display_text = (
-                f"📬 در انتظار خوانده شدن...\n"
-                f"🎯 <code>{target_user}</code>"
+                f"{EMOJI['whisper_wait']} در انتظار خوانده شدن...\n"
+                f"{EMOJI['target']} <code>{target_user}</code>"
             )
             
             item = InlineQueryResultArticle(
@@ -191,8 +192,8 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                 if not data["is_opened"] and is_target:
                     data["is_opened"] = True
                     updated_text = (
-                        f"✅ این پیام توسط {voter_tag} خوانده شد!\n"
-                        f"🎯 <code>{data['target']}</code>"
+                        f"{EMOJI['whisper_read']} این پیام توسط {voter_tag} خوانده شد!\n"
+                        f"{EMOJI['target']} <code>{data['target']}</code>"
                     )
                     try:
                         await bot.edit_message_text(
@@ -218,7 +219,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     return
                 
                 WHISPER_STORAGE.pop(w_id, None)
-                await bot.edit_message_text("🗑 <i>این نجوای مخفی توسط فرستنده حذف شد.</i>", inline_message_id=call.inline_message_id, parse_mode="HTML")
+                await bot.edit_message_text(f"{EMOJI['trash']} <i>این نجوای مخفی توسط فرستنده حذف شد.</i>", inline_message_id=call.inline_message_id, parse_mode="HTML")
                 await bot.answer_callback_query(call.id, "نجوا با موفقیت حذف شد.")
 
         except Exception as e:
