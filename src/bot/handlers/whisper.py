@@ -140,7 +140,6 @@ def register_whisper_handlers(bot: AsyncTeleBot):
 
             # 💎 نمایش وضعیت با اموجی‌های عادی استاندارد تلگرام
             display_text = (
-                f"<b>via {bot_username}</b>\n"
                 f"📬 در انتظار خوانده شدن...\n"
                 f"🎯 <code>{target_user}</code>"
             )
@@ -179,6 +178,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     await bot.answer_callback_query(call.id, "❌ این نجوا منقضی یا حذف شده است.", show_alert=True)
                     return
                 
+                # بررسی دسترسی: گیرنده، فرستنده و ادمین‌ها مجاز به خواندن هستند
                 is_auth = (
                     (data["target"] == voter_username) or 
                     (data["target"].isdigit() and int(data["target"]) == voter_id) or 
@@ -190,12 +190,13 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     await bot.answer_callback_query(call.id, f"🛑 دسترسی غیرمجاز!\nاین نجوا فقط برای {data['target']} و فرستنده آن قابل باز شدن است.", show_alert=True)
                     return
                 
+                # نمایش پاپ‌آپ حاوی متن نجوا (بدون محدودیت تعداد دفعات خواندن)
                 await bot.answer_callback_query(call.id, f"🔒 نجوای باز شده:\n\n{data['text']}", show_alert=True)
                 
+                # تغییر وضعیت ظاهر پیام در گروه به حالت «خوانده شد» فقط در اولین کلیک مجاز
                 if not data["is_opened"]:
                     data["is_opened"] = True
                     updated_text = (
-                        f"<b>via {bot_username}</b>\n"
                         f"✅ این پیام توسط {voter_tag} خوانده شد!\n"
                         f"🎯 <code>{data['target']}</code>"
                     )
@@ -204,9 +205,17 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                             text=updated_text, 
                             inline_message_id=call.inline_message_id, 
                             parse_mode="HTML", 
-                            reply_markup=call.message.reply_markup if call.message else None
+                            # 🛠️ اصلاح: دکمه‌ها را دوباره ست می‌کنیم تا حذف نشوند
+                            reply_markup=call.message.reply_markup if call.message else call.message.reply_markup
                         )
-                    except Exception: pass
+                    except Exception: 
+                        # هندل کردن ادیت در حالت اینلاین برای حفظ دکمه‌ها
+                        try:
+                            await bot.edit_message_reply_markup(
+                                inline_message_id=call.inline_message_id,
+                                reply_markup=call.message.reply_markup if call.message else kb_premium
+                            )
+                        except Exception: pass
 
             # 2️⃣ دکمه حذف نجوا (🗑️ حذف)
             elif call.data.startswith("whdel_"):

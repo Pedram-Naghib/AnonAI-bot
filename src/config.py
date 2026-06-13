@@ -38,6 +38,7 @@ EMOJI = {
     "thunder" : "<tg-emoji emoji-id='5456140674028019486'>⚡️</tg-emoji>",
     "update" : "<tg-emoji emoji-id='4956371914323920049'>🔄</tg-emoji>",
     "ok" : "<tg-emoji emoji-id='4956649845952611245'>🔄</tg-emoji>",
+    "sus" : "<tg-emoji emoji-id='5253645558865756077'>😁</tg-emoji>",
     }
     # LOVE_LETTER = "<tg-emoji emoji-id='5431239810239106666'>💌</tg-emoji>"
     # ROCKET_SHOCK = "<tg-emoji emoji-id='5431239810239107777'>🚀</tg-emoji>"
