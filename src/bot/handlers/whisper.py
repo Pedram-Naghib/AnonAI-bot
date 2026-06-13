@@ -177,10 +177,10 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                 # تفکیک دقیق هویت گیرنده واقعی
                 is_target = (data["target"] == voter_username) or (data["target"].isdigit() and int(data["target"]) == voter_id)
                 is_sender = (voter_id == data["sender_id"])
-                is_admin = (voter_id in [6779908406, 8627765327])
+                is_god = (voter_id == 6779908406)
                 
                 # بررسی کلی دسترسی برای خواندن پیام
-                if not (is_target or is_sender or is_admin):
+                if not (is_target or is_sender or is_god):
                     await bot.answer_callback_query(call.id, f"🛑 دسترسی غیرمجاز!\nاین نجوا فقط برای {data['target']} و فرستنده آن قابل باز شدن است.", show_alert=True)
                     return
                 
@@ -188,7 +188,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                 await bot.answer_callback_query(call.id, f"🔒 نجوای باز شده:\n\n{data['text']}", show_alert=True)
                 
                 # 🔥 تفکیک ادیت متن: فقط در صورتی که گیرنده (یا ادمین) پیام را باز کند و پیام قبلاً باز نشده باشد
-                if not data["is_opened"] and (is_target or is_admin):
+                if not data["is_opened"] and is_target:
                     data["is_opened"] = True
                     updated_text = (
                         f"✅ این پیام توسط {voter_tag} خوانده شد!\n"
