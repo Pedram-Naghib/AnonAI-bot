@@ -174,24 +174,21 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     await bot.answer_callback_query(call.id, "❌ این نجوا منقضی یا حذف شده است.", show_alert=True)
                     return
                 
-                # بررسی دقیق دسترسی: فقط گیرنده، فرستنده و ادمین‌ها مجاز به باز کردن هستند
-                is_auth = (
-                    (data["target"] == voter_username) or 
-                    (data["target"].isdigit() and int(data["target"]) == voter_id) or 
-                    (voter_id == data["sender_id"]) or 
-                    (voter_id in [6779908406, 8627765327])
-                )
+                # تفکیک دقیق هویت گیرنده واقعی
+                is_target = (data["target"] == voter_username) or (data["target"].isdigit() and int(data["target"]) == voter_id)
+                is_sender = (voter_id == data["sender_id"])
+                is_admin = (voter_id in [6779908406, 8627765327])
                 
-                if not is_auth:
-                    # افراد غریبه بدون تاثیرگذاری روی متن گروه، فقط این پاپ‌آپ مسدودسازی را دریافت می‌کنند
+                # بررسی کلی دسترسی برای خواندن پیام
+                if not (is_target or is_sender or is_admin):
                     await bot.answer_callback_query(call.id, f"🛑 دسترسی غیرمجاز!\nاین نجوا فقط برای {data['target']} و فرستنده آن قابل باز شدن است.", show_alert=True)
                     return
                 
-                # نمایش پاپ‌آپ حاوی متن نجوا برای افراد مجاز
+                # نمایش متن نجوا در پاپ‌آپ برای فرستنده، گیرنده و ادمین
                 await bot.answer_callback_query(call.id, f"🔒 نجوای باز شده:\n\n{data['text']}", show_alert=True)
                 
-                # 🔥 اصلاح: تغییر متن چت گروه فقط و فقط با تایید هویت کاربران مجاز اجرا می‌شود
-                if not data["is_opened"]:
+                # 🔥 تفکیک ادیت متن: فقط در صورتی که گیرنده (یا ادمین) پیام را باز کند و پیام قبلاً باز نشده باشد
+                if not data["is_opened"] and (is_target or is_admin):
                     data["is_opened"] = True
                     updated_text = (
                         f"✅ این پیام توسط {voter_tag} خوانده شد!\n"
