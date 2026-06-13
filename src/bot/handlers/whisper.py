@@ -159,7 +159,6 @@ def register_whisper_handlers(bot: AsyncTeleBot):
             voter_username = f"@{call.from_user.username}".lower() if call.from_user.username else "no_user"
             voter_tag = f"@{call.from_user.username}" if call.from_user.username else call.from_user.first_name
 
-            # ساختاربندی مجدد دکمه‌ها جهت لود پایدار اینلاین
             kb_refresh = InlineKeyboardMarkup()
             kb_refresh.row(
                 InlineKeyboardButton(text="📥 خواندن نجوا", callback_data=f"{call.data}"),
@@ -175,6 +174,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     await bot.answer_callback_query(call.id, "❌ این نجوا منقضی یا حذف شده است.", show_alert=True)
                     return
                 
+                # بررسی دقیق دسترسی: فقط گیرنده، فرستنده و ادمین‌ها مجاز به باز کردن هستند
                 is_auth = (
                     (data["target"] == voter_username) or 
                     (data["target"].isdigit() and int(data["target"]) == voter_id) or 
@@ -183,13 +183,14 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                 )
                 
                 if not is_auth:
+                    # افراد غریبه بدون تاثیرگذاری روی متن گروه، فقط این پاپ‌آپ مسدودسازی را دریافت می‌کنند
                     await bot.answer_callback_query(call.id, f"🛑 دسترسی غیرمجاز!\nاین نجوا فقط برای {data['target']} و فرستنده آن قابل باز شدن است.", show_alert=True)
                     return
                 
-                # نمایش پاپ‌آپ حاوی متن نجوا
+                # نمایش پاپ‌آپ حاوی متن نجوا برای افراد مجاز
                 await bot.answer_callback_query(call.id, f"🔒 نجوای باز شده:\n\n{data['text']}", show_alert=True)
                 
-                # تغییر متن به حالت خوانده شده (فقط در اولین کلیک)
+                # 🔥 اصلاح: تغییر متن چت گروه فقط و فقط با تایید هویت کاربران مجاز اجرا می‌شود
                 if not data["is_opened"]:
                     data["is_opened"] = True
                     updated_text = (
@@ -197,7 +198,6 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                         f"🎯 <code>{data['target']}</code>"
                     )
                     try:
-                        # ادیت امن متنی به همراه دکمه‌های ریفرش‌شده برای پیام‌های اینلاین
                         await bot.edit_message_text(
                             text=updated_text, 
                             inline_message_id=call.inline_message_id, 
