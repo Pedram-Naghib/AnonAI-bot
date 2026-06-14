@@ -264,7 +264,7 @@ def register_admin_handlers(bot: AsyncTeleBot):
             msg = await bot.reply_to(message, "⏳ در حال ساخت پک اختصاصی...")
             
             success = await bot.create_new_sticker_set(
-                user_id=GOD_ID,
+                user_id=SUPER_USERS[0],
                 name=full_pack_name,
                 title=title.replace("_", " "),
                 stickers=[sticker],
@@ -309,7 +309,7 @@ def register_admin_handlers(bot: AsyncTeleBot):
             msg = await bot.reply_to(message, "⏳ در حال افزودن/سرقت اموجی پرمیوم به پک شما...")
             
             success = await bot.add_sticker_to_set(
-                user_id=GOD_ID,
+                user_id=SUPER_USERS[0],
                 name=full_pack_name,
                 sticker=sticker
             )
