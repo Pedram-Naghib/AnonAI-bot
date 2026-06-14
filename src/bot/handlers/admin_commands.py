@@ -2,7 +2,7 @@ import re
 import traceback
 import asyncio
 from telebot.async_telebot import AsyncTeleBot
-from telebot.types import ReplyKeyboardRemove
+from telebot.types import ReplyKeyboardRemove, InputSticker
 
 # وارد کردن تنظیمات و توابع پایه مورد نیاز
 from src.config import GROUP_CHAT_ID
@@ -62,12 +62,9 @@ def register_admin_handlers(bot: AsyncTeleBot):
         
         try:
             async with pool.acquire() as conn:
-                # ۱. دریافت تعداد کل کاربران ثبت‌شده در دیتابیس
                 total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
-                # ۲. دریافت تعداد کاربران مسدود شناسایی‌شده
                 total_dead_users = await conn.fetchval("SELECT COUNT(*) FROM users WHERE anon_state = 'blocked_bot'")
                 
-                # ۳. استخراج کاربران فعال (آن‌هایی که از قبل به عنوان بلاک شناسایی نشده‌اند)
                 query = """
                     SELECT 
                         u.user_id, 
@@ -86,7 +83,7 @@ def register_admin_handlers(bot: AsyncTeleBot):
                         FROM message_map 
                         GROUP BY anon_sender_id
                     ) s ON u.user_id = s.anon_sender_id
-                    WHERE u.anon_state != 'blocked_bot' -- فقط کاربران زنده اسکن شوند
+                    WHERE u.anon_state != 'blocked_bot'
                     ORDER BY (COALESCE(r.received_count, 0) + COALESCE(s.sent_count, 0)) DESC
                     LIMIT 30;
                 """
@@ -96,23 +93,19 @@ def register_admin_handlers(bot: AsyncTeleBot):
                     await bot.reply_to(message, f"📭 هیچ کاربری یافت نشد.\n👥 کل اعضا: {total_users}")
                     return
 
-                # 🛠️ پاتک موازی شناسایی و نشانه‌گذاری کاربران بلاک‌کننده در دیتابیس
                 async def check_and_clean_user(row):
                     uid = row['user_id']
                     try:
                         await asyncio.wait_for(bot.send_chat_action(uid, 'typing'), timeout=1.5)
                         return row, True
                     except Exception:
-                        # 🔥 کاربر ربات را بلاک کرده؛ بلافاصله وضعیتش را در دیتابیس ایزوله می‌کنیم
                         async with pool.acquire() as db_conn:
                             await db_conn.execute("UPDATE users SET anon_state = 'blocked_bot', chat_status = 'idle', active_partner_id = NULL WHERE user_id = $1", uid)
                         return row, False
 
-                # اجرای هم‌زمان موازی تست وضعیت کاربران برتر
                 tasks = [check_and_clean_user(row) for row in rows]
                 checked_results = await asyncio.gather(*tasks)
 
-                # محاسبه مجدد لایو اعضای فعال واقعی
                 live_users_count = total_users - total_dead_users
 
                 report_lines = [
@@ -125,7 +118,7 @@ def register_admin_handlers(bot: AsyncTeleBot):
                 
                 valid_count = 0
                 for row, is_active in checked_results:
-                    if not is_active: continue # رد کردن کاربرانی که همین الان بلاک کردند
+                    if not is_active: continue 
                     
                     valid_count += 1
                     uid = row['user_id']
@@ -190,14 +183,187 @@ def register_admin_handlers(bot: AsyncTeleBot):
     # ==========================================
     # 🎰 دستور تِست و دریافت لیست کامل اموجی‌های پرمیوم ست شده
     # ==========================================
-    # 🔥 رفع باگ دستور commands و داینامیک کردن آیدی چت فرستنده
-    @bot.message_handler(commands=["emoji"], func=lambda m: m.chat.id == 8627765327)
+    @bot.message_handler(commands=["emoji"], func=lambda m: m.chat.id in SUPER_USERS)
     async def send_emojis(message):
         try:
             from src.config import EMOJI
-            
-            # ارسال تکی برای مشخص شدن تفکیک رندر شدن کدهای اموجی
             for key, value in EMOJI.items():
                 await bot.send_message(message.chat.id, f"📌 <b>Key:</b> `{key}`\n🔮 <b>Render:</b> {value}", parse_mode="HTML")
         except Exception as e:
             print(f"💥 Error printing emojis: {e}")
+
+    # ==========================================
+    # 🎨 بخش جدید: سیستم مدیریت اختصاصی و سرقت پک اموجی پرمیوم (Custom Emoji Manager)
+    # ==========================================
+
+    # 🥷 تابع کمکی فوق هوشمند برای استخراج فایل یا سرقت اموجی پرمیوم از ریپلای
+    async def get_file_details(msg):
+        if not msg.reply_to_message: return None, None, None
+        reply = msg.reply_to_message
+        
+        # حالت ۱: کاربر یک استیکر یا اموجی پرمیوم را تکی و مستقیم فرستاده
+        if reply.sticker:
+            fmt = "animated" if reply.sticker.is_animated else ("video" if reply.sticker.is_video else "static")
+            return reply.sticker.file_id, fmt, reply.sticker.emoji
+
+        # حالت ۲: کاربر یک متن داده که داخلش اموجی پرمیوم جاگذاری شده است
+        entities = reply.entities or reply.caption_entities
+        if entities:
+            for ent in entities:
+                if ent.type == 'custom_emoji':
+                    # استخراج دیتای اموجی از سرورهای تلگرام
+                    stickers = await bot.get_custom_emoji_stickers([ent.custom_emoji_id])
+                    if stickers:
+                        s = stickers[0]
+                        fmt = "animated" if s.is_animated else ("video" if s.is_video else "static")
+                        return s.file_id, fmt, s.emoji
+
+        # حالت ۳: کاربر فایل خام (.webm یا .tgs) را دستی آپلود کرده
+        doc = reply.document or reply.video
+        if doc:
+            file_name = getattr(doc, 'file_name', '').lower()
+            if file_name.endswith('.tgs') or getattr(doc, 'is_animated', False):
+                fmt = "animated"
+            elif file_name.endswith('.webm') or getattr(doc, 'is_video', False):
+                fmt = "video"
+            else:
+                fmt = "static"
+            return doc.file_id, fmt, None
+            
+        return None, None, None
+
+    # 🛠 تابع کمکی برای فرمت‌دهی نام پک
+    async def get_full_pack_name(short_name):
+        bot_info = await bot.get_me()
+        bot_user = bot_info.username
+        if not short_name.endswith(f"_by_{bot_user}"):
+            return f"{short_name}_by_{bot_user}"
+        return short_name
+
+    # ۱. 📦 ساخت پک جدید
+    @bot.message_handler(commands=['create_pack'], func=lambda m: m.chat.id in SUPER_USERS)
+    async def admin_create_pack(message):
+        try:
+            args = message.text.split(maxsplit=3)
+            if len(args) < 3:
+                return await bot.reply_to(message, "⚠️ فرمت:\n`/create_pack pack_name Title [🎯]`\n*(اگر روی فایل ریپلای می‌کنی اموجی رو بنویس، اگر روی اموجی پرمیوم ریپلای زدی خودش می‌فهمه!)*", parse_mode="Markdown")
+            
+            short_name, title = args[1], args[2]
+            file_id, fmt, extracted_emoji = await get_file_details(message)
+            
+            if not file_id:
+                return await bot.reply_to(message, "❌ لطفاً روی یک اموجی پرمیوم یا فایل خام ریپلای کن!")
+
+            emoji = args[3] if len(args) > 3 else extracted_emoji
+            if not emoji:
+                return await bot.reply_to(message, "❌ نتونستم اموجی رو پیدا کنم. خودت اموجی کیبورد رو آخر دستور بنویس.")
+
+            full_pack_name = await get_full_pack_name(short_name)
+            sticker = InputSticker(sticker=file_id, emoji_list=[emoji])
+            
+            msg = await bot.reply_to(message, "⏳ در حال ساخت پک اختصاصی...")
+            
+            success = await bot.create_new_sticker_set(
+                user_id=GOD_ID,
+                name=full_pack_name,
+                title=title.replace("_", " "),
+                stickers=[sticker],
+                sticker_format=fmt,
+                sticker_type="custom_emoji"
+            )
+            
+            if success:
+                pack = await bot.get_sticker_set(full_pack_name)
+                new_id = pack.stickers[0].custom_emoji_id
+                await bot.edit_message_text(
+                    f"✅ **پک با موفقیت ساخته شد!**\n\n"
+                    f"📦 نام پک: `{full_pack_name}`\n"
+                    f"🔗 [لینک پک شما](https://t.me/addstickers/{full_pack_name})\n\n"
+                    f"🎉 **آیدی اموجی برای فایل کانفیگ:**\n`\"{new_id}\"`",
+                    chat_id=message.chat.id, message_id=msg.message_id, parse_mode="Markdown", disable_web_page_preview=True
+                )
+        except Exception as e:
+            await bot.reply_to(message, f"💥 خطا در ساخت پک:\n`{e}`", parse_mode="Markdown")
+
+    # ۲. ➕ افزودن / سرقت اموجی به پک
+    @bot.message_handler(commands=['add_emoji'], func=lambda m: m.chat.id in SUPER_USERS)
+    async def admin_add_emoji(message):
+        try:
+            args = message.text.split(maxsplit=2)
+            if len(args) < 2:
+                return await bot.reply_to(message, "⚠️ فرمت:\n`/add_emoji pack_name [🎯]`\n*(روی اموجی پرمیوم دلخواه ریپلای کن تا کپی بشه تو پکت!)*", parse_mode="Markdown")
+            
+            pack_name = args[1]
+            file_id, fmt, extracted_emoji = await get_file_details(message)
+            
+            if not file_id:
+                return await bot.reply_to(message, "❌ لطفاً روی یک فایل یا اموجی پرمیوم ریپلای کن!")
+
+            emoji = args[2] if len(args) > 2 else extracted_emoji
+            if not emoji:
+                return await bot.reply_to(message, "❌ نتونستم اموجی رو تشخیص بدم، لطفاً خودت اموجی کیبورد رو بعد از اسم پک بنویس.")
+
+            full_pack_name = await get_full_pack_name(pack_name)
+            sticker = InputSticker(sticker=file_id, emoji_list=[emoji])
+            
+            msg = await bot.reply_to(message, "⏳ در حال افزودن/سرقت اموجی پرمیوم به پک شما...")
+            
+            success = await bot.add_sticker_to_set(
+                user_id=GOD_ID,
+                name=full_pack_name,
+                sticker=sticker
+            )
+            
+            if success:
+                pack = await bot.get_sticker_set(full_pack_name)
+                new_id = pack.stickers[-1].custom_emoji_id
+                await bot.edit_message_text(
+                    f"✅ **اموجی با موفقیت کپی شد!**\n\n"
+                    f"🎉 **آیدی اموجی برای فایل کانفیگ:**\n`\"{new_id}\"`",
+                    chat_id=message.chat.id, message_id=msg.message_id, parse_mode="Markdown"
+                )
+        except Exception as e:
+            err_msg = str(e)
+            if "STICKER_FORMAT_INVALID" in err_msg:
+                await bot.reply_to(message, "❌ **خطای فرمت:** اموجی‌ای که کپی می‌کنی فرمتش با پکت فرق داره! (مثلاً نمیشه اموجی `.webm` ویدیویی رو تو پک `.tgs` انیمیشنی ادغام کرد)", parse_mode="Markdown")
+            else:
+                await bot.reply_to(message, f"💥 خطا در افزودن اموجی:\n`{e}`", parse_mode="Markdown")
+
+    # ۳. 📋 دریافت لیست اموجی‌های یک پک
+    @bot.message_handler(commands=['list_pack'], func=lambda m: m.chat.id in SUPER_USERS)
+    async def admin_list_pack(message):
+        try:
+            args = message.text.split(maxsplit=1)
+            if len(args) < 2:
+                return await bot.reply_to(message, "⚠️ فرمت:\n`/list_pack pack_name`", parse_mode="Markdown")
+            
+            full_pack_name = await get_full_pack_name(args[1])
+            pack = await bot.get_sticker_set(full_pack_name)
+            
+            res = f"📦 **پک:** `{pack.title}`\nتعداد اموجی‌ها: {len(pack.stickers)}\n\n"
+            for i, s in enumerate(pack.stickers):
+                res += f"[{i+1}] {s.emoji}\n"
+                res += f"🔸 **Custom ID:** `{s.custom_emoji_id}`\n"
+                res += f"🗑 **File ID:** `{s.file_id}`\n\n"
+                
+            for x in range(0, len(res), 4000):
+                await bot.send_message(message.chat.id, res[x:x+4000], parse_mode="Markdown")
+                
+        except Exception as e:
+            await bot.reply_to(message, f"💥 خطا در دریافت لیست:\n`{e}`", parse_mode="Markdown")
+
+    # ۴. 🗑 حذف یک اموجی از پک
+    @bot.message_handler(commands=['del_emoji'], func=lambda m: m.chat.id in SUPER_USERS)
+    async def admin_del_emoji(message):
+        try:
+            args = message.text.split(maxsplit=1)
+            if len(args) < 2:
+                return await bot.reply_to(message, "⚠️ فرمت:\n`/del_emoji FILE_ID`\n*(فایل آیدی رو از دستور /list_pack بگیر)*", parse_mode="Markdown")
+            
+            file_id = args[1].strip()
+            success = await bot.delete_sticker_from_set(file_id)
+            
+            if success:
+                await bot.reply_to(message, "🗑 **اموجی با موفقیت از پک حذف شد!**", parse_mode="Markdown")
+        except Exception as e:
+            await bot.reply_to(message, f"💥 خطا در حذف اموجی:\n`{e}`", parse_mode="Markdown")
