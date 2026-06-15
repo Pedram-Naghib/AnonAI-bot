@@ -77,6 +77,7 @@ EMOJI = {
     "crcl_yes" : '<tg-emoji emoji-id="5873104109237706731">✔️</tg-emoji>',
     "coin" : '<tg-emoji emoji-id="5872982376979636091">💰</tg-emoji>',
     "bot" : '<tg-emoji emoji-id="5872875896150432628">🤖</tg-emoji>',
+    "mail" : '<tg-emoji emoji-id="5872780380372737109">📨</tg-emoji>',
 }
 
 # LOVE_LETTER = '<tg-emoji emoji-id="5431239810239106666">💌</tg-emoji>'
