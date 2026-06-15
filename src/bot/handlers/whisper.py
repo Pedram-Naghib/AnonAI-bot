@@ -133,6 +133,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                 InlineKeyboardButton(text="🗑️ حذف", callback_data=f"whdel_{w_id}")
             )
 
+            # ارسال اولیه (تلگرام در این لایه اموجی پرمیوم را فیلتر و به استاتیک تبدیل می‌کند)
             display_text = (
                 f"{EMOJI['whisper_wait']} در انتظار خوانده شدن...\n"
                 f"{EMOJI['target']} <code>{target_user}</code>"
@@ -141,7 +142,6 @@ def register_whisper_handlers(bot: AsyncTeleBot):
             item = InlineQueryResultArticle(
                 id=w_id,
                 title=f"🔒 ارسال پیام محرمانه به {target_user}",
-                # 🔥 اصلاح کلیدی: فعال کردن parse_mode برای لود شدن اموجی‌های پک اختصاصی در لایه اول اینلاین
                 input_message_content=InputTextMessageContent(display_text, parse_mode="HTML"),
                 reply_markup=kb_premium,
                 description=f"نجوا به {target_user} ارسال شد"
@@ -176,6 +176,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     await bot.answer_callback_query(call.id, "❌ این نجوا منقضی یا حذف شده است.", show_alert=True)
                     return
                 
+                # تفکیک دقیق هویت گیرنده واقعی
                 is_target = (data["target"] == voter_username) or (data["target"].isdigit() and int(data["target"]) == voter_id)
                 is_sender = (voter_id == data["sender_id"])
                 is_god = (voter_id == 6779908406)
@@ -221,3 +222,41 @@ def register_whisper_handlers(bot: AsyncTeleBot):
 
         except Exception as e:
             print(f"💥 Premium Callback Error: {e}")
+
+    # ==========================================
+    # ⚡ ۳. ترفند هکری: ادیت درجا بعد از ارسال اینلاین
+    # ==========================================
+    @bot.chosen_inline_handler(func=lambda chosen_result: True)
+    async def handle_chosen_inline(chosen_result):
+        try:
+            # آیدی نجوا رو از همون result_id که بالا ست کردیم می‌گیریم
+            w_id = chosen_result.result_id
+            inline_message_id = chosen_result.inline_message_id
+            
+            # فقط نجوای اصلی رو ادیت می‌کنیم (منوهای راهنما رو کاری نداریم)
+            if inline_message_id and w_id in WHISPER_STORAGE:
+                data = WHISPER_STORAGE[w_id]
+                target_user = data["target"]
+                
+                # همون دکمه‌های همیشگی
+                kb_premium = InlineKeyboardMarkup()
+                kb_premium.row(
+                    InlineKeyboardButton(text="📥 خواندن نجوا", callback_data=f"whopen_{w_id}"),
+                    InlineKeyboardButton(text="🗑️ حذف", callback_data=f"whdel_{w_id}")
+                )
+                
+                # 🔥 متن نهایی با اموجی پرمیوم (چون ادیت هست، تلگرام گیر نمیده و نئونی میشه!)
+                premium_text = (
+                    f"{EMOJI['whisper_wait']} در انتظار خوانده شدن...\n"
+                    f"{EMOJI['target']} <code>{target_user}</code>"
+                )
+                
+                # ادیت آنی در کسری از ثانیه
+                await bot.edit_message_text(
+                    text=premium_text,
+                    inline_message_id=inline_message_id,
+                    parse_mode="HTML",
+                    reply_markup=kb_premium
+                )
+        except Exception as e:
+            print(f"💥 Auto-Edit Bypass Error: {e}")
