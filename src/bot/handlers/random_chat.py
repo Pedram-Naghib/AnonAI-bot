@@ -10,7 +10,7 @@ from src.database.db_manager import (
     get_complete_user_context, get_user_profile_stats
 )
 
-# 🔥 دریافت متدهای لایه خنثی کش و لاگر از فایل کانفیگ برای پاره کردن حلقه ایمپورت چرخشی
+# دریافت متدهای لایه خنثی کش و لاگر از فایل کانفیگ
 from src.config import EMOJI
 from src.bot.redis_config import redis_client, cache_invalidate_user, send_bot_log
 
@@ -26,32 +26,33 @@ def register_random_chat_handlers(bot: AsyncTeleBot):
         user_id = message.chat.id
         status, _, coins, gender = await get_user_chat_status_ext(user_id)
         
-        # 🔥 پاتک لوکال ایمپورت: منوها را زمان اجرا فراخوانی می‌کنیم تا سیستم قفل نکند
+        # 🔥 پاتک لوکال ایمپورت منوها
         from src.bot.handlers.private_anon import get_keyboards
         kb_main, kb_search, kb_chatting = get_keyboards()
         
         if status == 'chatting':
-            await bot.reply_to(message, f"{EMOJI['caution']} شما در یک چت فعال هستید! اول باید با دکمه زیر چت قبلی رو قطع کنی.", reply_markup=kb_chatting)
+            await bot.reply_to(message, f"{EMOJI['caution']['html']} شما در یک چت فعال هستید! اول باید با دکمه زیر چت قبلی رو قطع کنی.", reply_markup=kb_chatting)
             return
         if status == 'searching':
-            await bot.reply_to(message, f"{EMOJI['magnifiyer']} شما در صف جستجو هستید...", reply_markup=kb_search)
+            await bot.reply_to(message, f"{EMOJI['magnifiyer']['html']} شما در صف جستجو هستید...", reply_markup=kb_search)
             return
 
         if not gender:
+            # 💎 استفاده از کلید ['char'] روی دکمه‌ها برای فعال‌سازی رندر پرمیوم متحرک
             markup_gender = InlineKeyboardMarkup().row(
-                InlineKeyboardButton(text=f"{EMOJI['right']} پسرم", callback_data="set_gender_male"),
-                InlineKeyboardButton(text=f"{EMOJI['left']} دخترم", callback_data="set_gender_female")
+                InlineKeyboardButton(text=f"{EMOJI['right']['char']} پسرم", callback_data="set_gender_male"),
+                InlineKeyboardButton(text=f"{EMOJI['left']['char']} دخترم", callback_data="set_gender_female")
             )
-            await bot.reply_to(message, f"{EMOJI['caution']} <b>برای استفاده از چت تصادفی ابتدا باید جنسیت خودت رو تعیین کنی:</b>\n(این اطلاعات فقط یک‌بار دریافت میشه و قابل تغییر نیست)", parse_mode="HTML", reply_markup=markup_gender)
+            await bot.reply_to(message, f"{EMOJI['caution']['html']} <b>برای استفاده از چت تصادفی ابتدا باید جنسیت خودت رو تعیین کنی:</b>\n(این اطلاعات فقط یک‌بار دریافت میشه و قابل تغییر نیست)", parse_mode="HTML", reply_markup=markup_gender)
             return
 
         markup_filter = InlineKeyboardMarkup().add(
-            InlineKeyboardButton(text=f"{EMOJI['sus']} شانسی و کاملاً رایگان", callback_data="filter_any")
+            InlineKeyboardButton(text=f"{EMOJI['sus']['char']} شانسی و کاملاً رایگان", callback_data="filter_any")
         ).row(
-            InlineKeyboardButton(text=f"{EMOJI['right']} فقط اتصال به پسر (۳ سکه)", callback_data="filter_male"),
-            InlineKeyboardButton(text=f"{EMOJI['left']} فقط اتصال به دختر (۳ سکه)", callback_data="filter_female")
+            InlineKeyboardButton(text=f"{EMOJI['right']['char']} فقط اتصال به پسر (۳ سکه)", callback_data="filter_male"),
+            InlineKeyboardButton(text=f"{EMOJI['left']['char']} فقط اتصال به دختر (۳ سکه)", callback_data="filter_female")
         )
-        await bot.reply_to(message, f"{EMOJI['thunder']} <b>نوع اتصال چت تصادفی رو انتخاب کن:</b>\n{EMOJI['coin']} موجودی فعلی شما: {coins} سکه", parse_mode="HTML", reply_markup=markup_filter)
+        await bot.reply_to(message, f"{EMOJI['thunder']['html']} <b>نوع اتصال چت تصادفی رو انتخاب کن:</b>\n{EMOJI['coin']['html']} موجودی فعلی شما: {coins} سکه", parse_mode="HTML", reply_markup=markup_filter)
 
     # ==========================================
     # ⚥ کالبک ثبت جنسیت اولیه کاربر
@@ -63,7 +64,7 @@ def register_random_chat_handlers(bot: AsyncTeleBot):
         await update_user_gender(user_id, gender_selected)
         await send_bot_log(bot, call.message, "ثبت جنسیت نهایی", f"انتخاب جنسیت اصلی: {gender_selected}")
         await bot.answer_callback_query(call.id, "جنسیت شما با موفقیت ثبت شد! 🎉")
-        await bot.edit_message_text(f"{EMOJI['crcl_yes']} جنسیت شما ثبت شد. حالا می‌توانی دوباره دکمه 🎲 <b>شروع چت تصادفی</b> را بزنی تا فیلترها باز شوند!", user_id, call.message.message_id, parse_mode="HTML")
+        await bot.edit_message_text(f"{EMOJI['crcl_yes']['html']} جنسیت شما ثبت شد. حالا می‌توانی دوباره دکمه 🎲 <b>شروع چت تصادفی</b> را بزنی تا فیلترها باز شوند!", user_id, call.message.message_id, parse_mode="HTML")
 
     # ==========================================
     # 🚀 کالبک انتخاب فیلتر و ورود سریع به صف اولویت‌دار ردیس
@@ -90,7 +91,7 @@ def register_random_chat_handlers(bot: AsyncTeleBot):
         filter_text = "شانسی" if target_gender == "any" else ("پسر" if target_gender == "male" else "دختر")
         await send_bot_log(bot, call.message, "درخواست ورود به صف", f"نوع فیلتر انتخابی: {filter_text}")
         
-        search_msg = await bot.send_message(user_id, f"{EMOJI['magnifiyer']} <b>[فیلتر: {filter_text}]</b> در حال جستجو برای کاربر هم‌سطح...", parse_mode="HTML", reply_markup=kb_search)
+        search_msg = await bot.send_message(user_id, f"{EMOJI['magnifiyer']['html']} <b>[فیلتر: {filter_text}]</b> در حال جستجو برای کاربر هم‌سطح...", parse_mode="HTML", reply_markup=kb_search)
         
         if redis_client:
             await redis_client.zadd("match_queue", {str(user_id): time.time()})
@@ -117,7 +118,7 @@ def register_random_chat_handlers(bot: AsyncTeleBot):
         
         from src.bot.handlers.private_anon import get_keyboards
         kb_main, _, _ = get_keyboards()
-        await bot.reply_to(message, f"{EMOJI['banned']} با موفقیت از صف جستجو خارج شدی و سکه‌هات برگشت خورد.", reply_markup=kb_main)
+        await bot.reply_to(message, f"{EMOJI['banned']['html']} با موفقیت از صف جستجو خارج شدی و سکه‌هات برگشت خورد.", reply_markup=kb_main)
 
     # ==========================================
     # 🛑 هندلر متنی: قطع چت فعال و بازخورد سیستم آنتی‌ترول
@@ -138,26 +139,27 @@ def register_random_chat_handlers(bot: AsyncTeleBot):
             await cache_invalidate_user(partner_id)
         
         await send_bot_log(bot, message, "دکمه 🛑 قطع چت فعال", f"قطع ارتباط با پارتنر: {partner_id}")
-        await bot.reply_to(message, f"{EMOJI['banned']} شما چت را قطع کردید. برای شروع مجدد دکمه 🎲 رو بزنید.", reply_markup=kb_main)
+        await bot.reply_to(message, f"{EMOJI['banned']['html']} شما چت را قطع کردید. برای شروع مجدد دکمه 🎲 رو بزنید.", reply_markup=kb_main)
         
         if partner_id:
             p_code = await get_or_create_short_link(partner_id)
             u_code = await get_or_create_short_link(user_id)
             
+            # 💎 اعمال ترفند ساختار داینامیک ['char'] روی دکمه‌های فیدبک و لایک
             markup_user = InlineKeyboardMarkup().row(
-                InlineKeyboardButton(text=f"{EMOJI['ok']} لایک (+۱ سکه)", callback_data=f"rate_like_{p_code}"),
-                InlineKeyboardButton(text=f"{EMOJI['ban']} دیس‌لایک و بلاک (+۱ سکه)", callback_data=f"rate_dis_{p_code}")
+                InlineKeyboardButton(text=f"{EMOJI['ok']['char']} لایک (+۱ سکه)", callback_data=f"rate_like_{p_code}"),
+                InlineKeyboardButton(text=f"{EMOJI['ban']['char']} دیس‌لایک و بلاک (+۱ سکه)", callback_data=f"rate_dis_{p_code}")
             )
-            await bot.send_message(user_id, f"{EMOJI['qe']} <b>کیفیت چت چطور بود؟</b>\nبه پارتنرت امتیاز بده (با ثبت امتیاز، ۱ سکه رایگان از ربات جایزه بگیر!):", parse_mode="HTML", reply_markup=markup_user)
+            await bot.send_message(user_id, f"{EMOJI['qe']['html']} <b>کیفیت چت چطور بود؟</b>\nبه پارتنرت امتیاز بده (با ثبت امتیاز، ۱ سکه رایگان از ربات جایزه بگیر!):", parse_mode="HTML", reply_markup=markup_user)
             
             markup_partner = InlineKeyboardMarkup().row(
-                InlineKeyboardButton(text=f"{EMOJI['ok']} لایک (+۱ سکه)", callback_data=f"rate_like_{u_code}"),
-                InlineKeyboardButton(text=f"{EMOJI['ban']} دیس‌لایک و بلاک (+۱ سکه)", callback_data=f"rate_dis_{u_code}")
+                InlineKeyboardButton(text=f"{EMOJI['ok']['char']} لایک (+۱ سکه)", callback_data=f"rate_like_{u_code}"),
+                InlineKeyboardButton(text=f"{EMOJI['ban']['char']} دیس‌لایک و بلاک (+۱ سکه)", callback_data=f"rate_dis_{u_code}")
             )
             
             try:
-                await bot.send_message(partner_id, f"{EMOJI['caution']} <b>پارتنر شما چت را قطع کرد.</b>\n{EMOJI['qe']} کیفیت چت چطور بود؟ بهش امتیاز بده (+۱ سکه هدیه):", parse_mode="HTML", reply_markup=kb_main)
-                await bot.send_message(partner_id, f"{EMOJI['up']} لطفاً امتیاز خود به پارتنر سابق را در کادر بالا ثبت کنید.", reply_markup=markup_partner)
+                await bot.send_message(partner_id, f"{EMOJI['caution']['html']} <b>پارتنر شما چت را قطع کرد.</b>\n{EMOJI['qe']['html']} کیفیت چت چطور بود؟ بهش امتیاز بده (+۱ سکه هدیه):", parse_mode="HTML", reply_markup=kb_main)
+                await bot.send_message(partner_id, f"{EMOJI['up']['html']} لطفاً امتیاز خود به پارتنر سابق را در کادر بالا ثبت کنید.", reply_markup=markup_partner)
             except Exception: pass
 
     # ==========================================
@@ -178,10 +180,10 @@ def register_random_chat_handlers(bot: AsyncTeleBot):
             await submit_user_rating(partner_id, is_like=True, voter_id=user_id)
             await send_bot_log(bot, call.message, "ثبت امتیاز لایک", f"به پارتنر سابق: {partner_id}")
             await bot.answer_callback_query(call.id, "ثبت شد و ۱ سکه هدیه گرفتی! 👍", show_alert=True)
-            await bot.edit_message_text(f"{EMOJI['crcl_yes']} مرسی! بازخورد مثبتت ثبت شد و حساب شما شارژ گردید.", user_id, call.message.message_id)
+            await bot.edit_message_text(f"{EMOJI['crcl_yes']['html']} Meresi! بازخورد مثبتت ثبت شد و حساب شما شارژ گردید.", user_id, call.message.message_id)
         elif action == "dis":
             await submit_user_rating(partner_id, is_like=False, voter_id=user_id)
             await add_to_chat_history_match(user_id, partner_id, "dislike")
             await send_bot_log(bot, call.message, "ثبت امتیاز دیس‌لایک و بلاک چت تصادفی", f"پارتنر مسدود شده: {partner_id}")
             await bot.answer_callback_query(call.id, "ثبت و بلاک شد و ۱ سکه هدیه گرفتی! 🛑", show_alert=True)
-            await bot.edit_message_text(f"{EMOJI['banned']} ثبت شد. این کاربر وارد لیست سیاه چت تصادفی شما شد و ۱ سکه هدیه دریافت کردی.", user_id, call.message.message_id)
+            await bot.edit_message_text(f"{EMOJI['banned']['html']} ثبت شد. این کاربر وارد لیست سیاه چت تصادفی شما شد و ۱ سکه هدیه دریافت کردی.", user_id, call.message.message_id)
