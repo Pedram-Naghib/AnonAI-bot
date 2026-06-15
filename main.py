@@ -33,13 +33,13 @@ async def send_startup_notification(bot_instance):
         await asyncio.sleep(3)
         bot_info = await bot_instance.get_me()
         
-        # 💎 نئونی و پرمیوم کردن پیام استارت‌آپ با استفاده از دیکشنری EMOJI منبع
+        # 💎 اعمال لایه ['html'] دیکشنری جدید برای رندر انیمیشن‌های لایو پکت در بدنه پیام
         startup_msg = (
-            f"{EMOJI['thunder']} <b>پلتفرم با موفقیت آپدیت شد و بالا آمد!</b>\n"
+            f"{EMOJI['thunder']['html']} <b>پلتفرم با موفقیت آپدیت شد و بالا آمد!</b>\n"
             "───────────────────\n"
-            f"{EMOJI['bot']} <b>ربات:</b> @{bot_info.username}\n"
-            f"{EMOJI['green_dot']} <b>وضعیت:</b> فعال و آمادهٔ شلیک نجوا\n"
-            f"{EMOJI['lock']} <i>لوکال مموری با موفقیت پاکسازی و مجدداً لود شد.</i>"
+            f"{EMOJI['bot']['html']} <b>ربات:</b> @{bot_info.username}\n"
+            f"{EMOJI['green_dot']['html']} <b>وضعیت:</b> فعال و آمادهٔ شلیک نجوا\n"
+            f"{EMOJI['lock']['html']} <i>لوکال مموری با موفقیت پاکسازی و مجدداً لود شد.</i>"
         )
         await bot_instance.send_message(8627765327, startup_msg, parse_mode="HTML")
         print("✅ پیام استارت‌آپ با موفقیت برای ادمین ارسال شد.")
