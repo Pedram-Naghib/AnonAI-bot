@@ -1,369 +1,259 @@
-import re
-import traceback
-import asyncio
+import uuid
 from telebot.async_telebot import AsyncTeleBot
-from telebot.types import ReplyKeyboardRemove, InputSticker
+from telebot.types import (
+    InlineQuery, InlineQueryResultArticle, InputTextMessageContent, 
+    InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+)
+from src.config import EMOJI
 
-# وارد کردن تنظیمات و توابع پایه مورد نیاز
-from src.config import GROUP_CHAT_ID
-from src.database.db_manager import get_connection_pool
+# حافظه اتمیک و مستقل برای ذخیره نجواها
+WHISPER_STORAGE = {}
 
-GOD_ID = 6779908406          
-SUPER_USERS = [8627765327, 6779908406]
-
-def register_admin_handlers(bot: AsyncTeleBot):
+def register_whisper_handlers(bot: AsyncTeleBot):
 
     # ==========================================
-    # ⚙️ دستور دریافت آیدی چت یا گروه
+    # 📡 ۱. موتور اینلاین اختصاصی (Inline Query)
     # ==========================================
-    @bot.message_handler(commands=['id'])
-    async def handle_get_chat_id(message):
+    @bot.inline_handler(func=lambda query: True)
+    async def handle_whisper_inline(query: InlineQuery):
         try:
-            await bot.reply_to(message, f"🆔 آیدی این چت/گروه: `{message.chat.id}`\n", parse_mode="Markdown")
-        except Exception as e:
-            print(f"❌ Error sending ID: {e}")
-
-    # ==========================================
-    # ⚙️ دستور ارسال پیام مستقیم به گروه از طریق ربات
-    # ==========================================
-    @bot.message_handler(commands=['gp'])
-    async def handle_send_msg_to_gp(message):
-        if message.chat.id not in SUPER_USERS: return
-        try:
-            text = message.text.split("/gp ")
-            if len(text) > 1:
-                await bot.send_message(GROUP_CHAT_ID, text[-1], reply_markup=ReplyKeyboardRemove())
-        except Exception as e:
-            print(f"❌ Error sending gp message: {e}")
-
-    # ==========================================
-    # ⚙️ دستور ریپلای خودکار روی لینک‌های پرایوت گروه
-    # ==========================================
-    @bot.message_handler(regexp=r"^https:\/\/t\.me\/c\/1434396268\/(\d+)\s+(.*)")
-    async def handle_auto_reply_by_link(message):
-        if message.chat.id not in SUPER_USERS: return
-        try:
-            match = re.match(r"^https:\/\/t\.me\/c\/1434396268\/(\d+)\s+(.*)", message.text)
-            if match:
-                reply_to_msg_id = int(match.group(1))
-                clean_text = match.group(2)
-                await bot.send_message(GROUP_CHAT_ID, text=clean_text, reply_to_message_id=reply_to_msg_id, reply_markup=ReplyKeyboardRemove())
-                await bot.reply_to(message, f"🎯 روی پیام `{reply_to_msg_id}` ریپلای شد!")
-        except Exception as e:
-            print(f"❌ Error in link auto-reply: {e}")
-
-    # ==========================================
-    # 👑 دستور ویژه مدیریت: دریافت آمار پیشرفته دیتابیس کاربران فعال
-    # ==========================================
-    @bot.message_handler(commands=['db_stats'], func=lambda m: m.chat.type == "private" and m.from_user.id in SUPER_USERS)
-    async def handle_god_db_stats(message):
-        await bot.send_chat_action(message.chat.id, 'typing')
-        pool = await get_connection_pool()
-        
-        try:
-            async with pool.acquire() as conn:
-                total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
-                total_dead_users = await conn.fetchval("SELECT COUNT(*) FROM users WHERE anon_state = 'blocked_bot'")
+            raw_text = query.query.strip()
+            sender_name = query.from_user.first_name
+            sender_id = query.from_user.id
+            sender_tag = f"@{query.from_user.username}" if query.from_user.username else sender_name
+            
+            # دریافت آیدی یوزرنیم ربات به صورت داینامیک
+            bot_info = await bot.get_me()
+            bot_username = f"@{bot_info.username}"
+            
+            # 💎 منوی چندگزینه‌ای اختصاصی (وقتی ورودی خالی است)
+            if not raw_text:
+                items = []
                 
-                query = """
-                    SELECT 
-                        u.user_id, 
-                        u.first_name, 
-                        u.username,
-                        COALESCE(r.received_count, 0) AS received,
-                        COALESCE(s.sent_count, 0) AS sent
-                    FROM users u
-                    LEFT JOIN (
-                        SELECT user_chat_id, COUNT(*) AS received_count 
-                        FROM message_map 
-                        GROUP BY user_chat_id
-                    ) r ON u.user_id = r.user_chat_id
-                    LEFT JOIN (
-                        SELECT anon_sender_id, COUNT(*) AS sent_count 
-                        FROM message_map 
-                        GROUP BY anon_sender_id
-                    ) s ON u.user_id = s.anon_sender_id
-                    WHERE u.anon_state != 'blocked_bot'
-                    ORDER BY (COALESCE(r.received_count, 0) + COALESCE(s.sent_count, 0)) DESC
-                    LIMIT 30;
-                """
-                
-                rows = await conn.fetch(query)
-                if not rows:
-                    await bot.reply_to(message, f"📭 هیچ کاربری یافت نشد.\n👥 کل اعضا: {total_users}")
-                    return
-
-                async def check_and_clean_user(row):
-                    uid = row['user_id']
-                    try:
-                        await asyncio.wait_for(bot.send_chat_action(uid, 'typing'), timeout=1.5)
-                        return row, True
-                    except Exception:
-                        async with pool.acquire() as db_conn:
-                            await db_conn.execute("UPDATE users SET anon_state = 'blocked_bot', chat_status = 'idle', active_partner_id = NULL WHERE user_id = $1", uid)
-                        return row, False
-
-                tasks = [check_and_clean_user(row) for row in rows]
-                checked_results = await asyncio.gather(*tasks)
-
-                live_users_count = total_users - total_dead_users
-
-                report_lines = [
-                    "👑 <b>گزارش ارشد وضعیت دیتابیس</b>\n",
-                    f"👥 کل کاربران ثبت شده: <b>{total_users}</b>",
-                    f"🟢 کاربران فعال و زنده: <b>{live_users_count}</b>",
-                    f"🔴 مسدودکنندگان شناسایی‌شده: <b>{total_dead_users}</b>\n",
-                    "📊 <i>۲۰ کاربر برتر بر اساس بیشترین حجم تعاملات ناشناس:</i>\n"
-                ]
-                
-                valid_count = 0
-                for row, is_active in checked_results:
-                    if not is_active: continue 
-                    
-                    valid_count += 1
-                    uid = row['user_id']
-                    name = row['first_name'] or "Unknown"
-                    username = f"@{row['username']}" if row['username'] else "بدون یوزرنیم"
-                    received = row['received']
-                    sent = row['sent']
-                    
-                    line = (
-                        f"{valid_count}. 👤 <b>{name}</b> (<code>{uid}</code>) | {username}\n"
-                        f"   📥 دریافتی: <b>{received}</b> | 📤 ارسالی: <b>{sent}</b>\n"
-                        f"   ➖"
+                # گزینه‌ی ۱: آموزش ارسال نجوا
+                guide_text = (
+                    f"{EMOJI['ball']} <b>آموزش ارسال نجوای محرمانه:</b>\n\n"
+                    "ابتدا متن نجوا رو بنویس و در خط بعد آیدی گیرنده رو قرار بده\n\n"
+                    "مثال:\n"
+                    f"<code>{bot_username} سلام چطوری؟\n{sender_id}</code>"
+                )
+                items.append(
+                    InlineQueryResultArticle(
+                        id='wh_menu_guide',
+                        title="💡 آموزش ارسال نجوا",
+                        description="ابتدا متن سپس آیدی گیرنده را بنویسید",
+                        input_message_content=InputTextMessageContent(guide_text, parse_mode="HTML"),
+                        thumbnail_url="https://img.icons8.com/sci-fi/48/question-mark.png"
                     )
-                    report_lines.append(line)
-                    
-                    if valid_count >= 20: break
-
-                final_report = "\n".join(report_lines)
-                await bot.reply_to(message, final_report, parse_mode="HTML")
-                
-        except Exception as err:
-            print(f"💥 Admin Stats Command Failed: {err}")
-            traceback.print_exc()
-            await bot.reply_to(message, "❌ خطای فنی در استخراج اطلاعات از دیتابیس.")
-
-    # ==========================================
-    # 👑 دستور ویژه مدیریت: ارسال پیام همگانی دسته‌ای به کل ربات
-    # ==========================================
-    @bot.message_handler(commands=['bc'], func=lambda m: m.chat.type == "private" and m.from_user.id in SUPER_USERS)
-    async def handle_bulk_broadcast(message):
-        try:
-            command_text = message.text.split("/bc ", 1)
-            
-            if len(command_text) < 2:
-                await bot.reply_to(
-                    message, 
-                    "⚠️ <b>فرمت اشتباه است!</b>\n"
-                    "لطفاً متن پیام خود را با یک فاصله بعد از دستور بنویسید.\n"
-                    "مثال:\n<code>/bc سلام کاربران عزیز، نسخه جدید ربات منتشر شد!</code>", 
-                    parse_mode="HTML"
                 )
+                
+                # گزینه‌ی ۲: باکس درخواست نجوای اختصاصی
+                kb_req_whisper = InlineKeyboardMarkup()
+                kb_req_whisper.row(
+                    InlineKeyboardButton(
+                        text=f"📬 ارسال نجوای خصوصی به {sender_name}", 
+                        switch_inline_query_current_chat=f"متن نجوا\n{sender_id}"
+                    )
+                )
+                
+                req_whisper_text = (
+                    f"{EMOJI['profile']} <b>کاربر:</b> {sender_name}\n"
+                    f"{EMOJI['id']} <b>آیدی‌عددی:</b> <code>{sender_id}</code>\n\n"
+                    f"{EMOJI['recieve']} واسه ارسال پیام محرمانه به من کلیک کن 👇"
+                )
+                items.append(
+                    InlineQueryResultArticle(
+                        id='wh_menu_request_box',
+                        title="🔒 درخواست ارسال پیام محرمانه به من",
+                        description="باکس دریافت نجوای مستقیم درون گروه‌ها 🕶️",
+                        input_message_content=InputTextMessageContent(req_whisper_text, parse_mode="HTML"),
+                        reply_markup=kb_req_whisper,
+                        thumbnail_url="https://img.icons8.com/sci-fi/48/speech-bubble-with-dots.png"
+                    )
+                )
+                
+                # گزینه‌ی ۳: لینک اختصاصی پیام ناشناس شیشه‌ای
+                kb_anon_link = InlineKeyboardMarkup()
+                kb_anon_link.row(
+                    InlineKeyboardButton(
+                        text="💌 ارسال پیام ناشناس", 
+                        url=f"https://t.me/{bot_info.username}?start=anon_{sender_id}"
+                    )
+                )
+                
+                anon_req_text = (
+                    f"برای پیام ناشناس به من دکمه زیر رو بزن {EMOJI['down']}"
+                )
+                items.append(
+                    InlineQueryResultArticle(
+                        id='wh_menu_anon',
+                        title="📥 لینک ناشناس اختصاصی",
+                        description="دریافت پیام ناشناس در گروه‌ها و کانال‌ها 🚀",
+                        input_message_content=InputTextMessageContent(anon_req_text, parse_mode="HTML"),
+                        reply_markup=kb_anon_link,
+                        thumbnail_url="https://img.icons8.com/sci-fi/48/fraud.png"
+                    )
+                )
+                
+                await bot.answer_inline_query(query.id, items, cache_time=0)
                 return
+
+            # ==========================================
+            # 🛠️ موتور هوشمند تفکیک ۳ بخشی (متن نجوا + آیدی گیرنده)
+            # ==========================================
+            lines = [line.strip() for line in raw_text.split('\n') if line.strip()]
             
-            bulk_text = command_text[1].strip()
-            
-            from src.database.db_manager import create_broadcast_campaign
-            campaign_id = await create_broadcast_campaign(bulk_text)
-            
-            await bot.reply_to(
-                message, 
-                f"🚀 <b>فرمان ارسال پیام همگانی صادر شد!</b>\n\n"
-                f"📦 کد کمپین: <code>{campaign_id}</code>\n"
-                f"📝 وضعیت: <i>در صف ارسال بک‌گراند سرور...</i>\n\n"
-                f"ربات بدون وقفه به کارش ادامه میده و پس از اتمام ارسال، گزارش نهایی رو همین‌جا برات می‌فرسته. 🕶️✨",
-                parse_mode="HTML"
-            )
-            
-        except Exception as err:
-            print(f"💥 Failed to initiate broadcast campaign: {err}")
-            await bot.reply_to(message, "❌ خطای فنی در ثبت کمپین پیام همگانی.")
-
-    # ==========================================
-    # 🎰 دستور تِست و دریافت لیست کامل اموجی‌های پرمیوم ست شده
-    # ==========================================
-    @bot.message_handler(commands=["emoji"], func=lambda m: m.chat.id in SUPER_USERS)
-    async def send_emojis(message):
-        try:
-            from src.config import EMOJI
-            for key, value in EMOJI.items():
-                await bot.send_message(message.chat.id, f"📌 <b>Key:</b> `{key}`\n🔮 <b>Render:</b> {value}", parse_mode="HTML")
-        except Exception as e:
-            print(f"💥 Error printing emojis: {e}")
-
-    # ==========================================
-    # 🎨 بخش جدید: سیستم مدیریت اختصاصی و سرقت پک اموجی پرمیوم (Custom Emoji Manager)
-    # ==========================================
-
-    # 🥷 تابع کمکی فوق هوشمند برای استخراج فایل یا سرقت اموجی پرمیوم از ریپلای
-    async def get_file_details(msg):
-        if not msg.reply_to_message: return None, None, None
-        reply = msg.reply_to_message
-        
-        # حالت ۱: کاربر یک استیکر یا اموجی پرمیوم را تکی و مستقیم فرستاده
-        if reply.sticker:
-            fmt = "animated" if reply.sticker.is_animated else ("video" if reply.sticker.is_video else "static")
-            return reply.sticker.file_id, fmt, reply.sticker.emoji
-
-        # حالت ۲: کاربر یک متن داده که داخلش اموجی پرمیوم جاگذاری شده است
-        entities = reply.entities or reply.caption_entities
-        if entities:
-            for ent in entities:
-                if ent.type == 'custom_emoji':
-                    # استخراج دیتای اموجی از سرورهای تلگرام
-                    stickers = await bot.get_custom_emoji_stickers([ent.custom_emoji_id])
-                    if stickers:
-                        s = stickers[0]
-                        fmt = "animated" if s.is_animated else ("video" if s.is_video else "static")
-                        return s.file_id, fmt, s.emoji
-
-        # حالت ۳: کاربر فایل خام (.webm یا .tgs) را دستی آپلود کرده
-        doc = reply.document or reply.video
-        if doc:
-            file_name = getattr(doc, 'file_name', '').lower()
-            if file_name.endswith('.tgs') or getattr(doc, 'is_animated', False):
-                fmt = "animated"
-            elif file_name.endswith('.webm') or getattr(doc, 'is_video', False):
-                fmt = "video"
+            if len(lines) >= 2:
+                target_user = lines[-1]
+                secret_message = "\n".join(lines[:-1])
             else:
-                fmt = "static"
-            return doc.file_id, fmt, None
-            
-        return None, None, None
+                parts = raw_text.rsplit(" ", 1)
+                if len(parts) < 2:
+                    return
+                secret_message = parts[0].strip()
+                target_user = parts[1].strip()
 
-    # 🛠 تابع کمکی برای فرمت‌دهی نام پک
-    async def get_full_pack_name(short_name):
-        bot_info = await bot.get_me()
-        bot_user = bot_info.username
-        if not short_name.endswith(f"_by_{bot_user}"):
-            return f"{short_name}_by_{bot_user}"
-        return short_name
+            if not target_user.startswith("@") and not target_user.isdigit():
+                return
 
-    # ۱. 📦 ساخت پک جدید
-    @bot.message_handler(commands=['create_pack'], func=lambda m: m.chat.id in SUPER_USERS)
-    async def admin_create_pack(message):
-        try:
-            args = message.text.split(maxsplit=3)
-            if len(args) < 3:
-                return await bot.reply_to(message, "⚠️ فرمت:\n`/create_pack pack_name Title [🎯]`\n*(اگر روی فایل ریپلای می‌کنی اموجی رو بنویس، اگر روی اموجی پرمیوم ریپلای زدی خودش می‌فهمه!)*", parse_mode="Markdown")
+            w_id = str(uuid.uuid4())[:8]
             
-            short_name, title = args[1], args[2]
-            file_id, fmt, extracted_emoji = await get_file_details(message)
-            
-            if not file_id:
-                return await bot.reply_to(message, "❌ لطفاً روی یک اموجی پرمیوم یا فایل خام ریپلای کن!")
+            WHISPER_STORAGE[w_id] = {
+                "sender_id": sender_id,
+                "sender_name": sender_name,
+                "sender_tag": sender_tag,
+                "target": target_user.lower(),
+                "text": secret_message,
+                "is_opened": False
+            }
 
-            emoji = args[3] if len(args) > 3 else extracted_emoji
-            if not emoji:
-                return await bot.reply_to(message, "❌ نتونستم اموجی رو پیدا کنم. خودت اموجی کیبورد رو آخر دستور بنویس.")
+            # کیبورد موقت اولیه دکمه‌ها برای لایه سرچ اینلاین
+            kb_initial = InlineKeyboardMarkup()
+            kb_initial.row(
+                InlineKeyboardButton(text="📥 خواندن نجوا", callback_data=f"whopen_{w_id}"),
+                InlineKeyboardButton(text="🗑️ حذف", callback_data=f"whdel_{w_id}")
+            )
 
-            full_pack_name = await get_full_pack_name(short_name)
-            sticker = InputSticker(sticker=file_id, emoji_list=[emoji])
-            
-            msg = await bot.reply_to(message, "⏳ در حال ساخت پک اختصاصی...")
-            
-            success = await bot.create_new_sticker_set(
-                user_id=SUPER_USERS[0],
-                name=full_pack_name,
-                title=title.replace("_", " "),
-                stickers=[sticker],
-                sticker_format=fmt,
-                sticker_type="custom_emoji"
+            # متن پیش‌فرض لایه سرچ اینلاین
+            display_text = (
+                f"📬 در انتظار خوانده شدن...\n"
+                f"🎯 <code>{target_user}</code>"
             )
             
-            if success:
-                pack = await bot.get_sticker_set(full_pack_name)
-                new_id = pack.stickers[0].custom_emoji_id
+            item = InlineQueryResultArticle(
+                id=w_id,
+                title=f"🔒 ارسال پیام محرمانه به {target_user}",
+                input_message_content=InputTextMessageContent(display_text, parse_mode="HTML"),
+                reply_markup=kb_initial,
+                description=f"نجوا به {target_user} ارسال شد"
+            )
+            await bot.answer_inline_query(query.id, [item], cache_time=0)
+            
+        except Exception as e:
+            print(f"💥 Premium Inline Error: {e}")
+
+    # ==========================================
+    # 🔓 ۲. پردازشگر کالبک‌ها و دکمه‌های نجوا
+    # ==========================================
+    @bot.callback_query_handler(func=lambda c: c.data.startswith(("whopen_", "whdel_")))
+    async def handle_premium_whisper_callbacks(call: CallbackQuery):
+        try:
+            voter_id = call.from_user.id
+            voter_username = f"@{call.from_user.username}".lower() if call.from_user.username else "no_user"
+            voter_tag = f"@{call.from_user.username}" if call.from_user.username else call.from_user.first_name
+
+            w_id = call.data.split("_")[-1]
+
+            # 💎 شیشه‌ای کردن دکمه‌ها با استفاده از اموجی‌های پرمیوم و زنده جدید
+            kb_refresh = InlineKeyboardMarkup()
+            kb_refresh.row(
+                InlineKeyboardButton(text=f"{EMOJI['recieve']} خواندن نجوا", callback_data=f"whopen_{w_id}"),
+                InlineKeyboardButton(text=f"{EMOJI['trash']} حذف", callback_data=f"whdel_{w_id}")
+            )
+
+            # 1️⃣ دکمه نمایش نجوا (📥 خواندن نجوا)
+            if call.data.startswith("whopen_"):
+                data = WHISPER_STORAGE.get(w_id)
+                
+                if not data:
+                    await bot.answer_callback_query(call.id, f"{EMOJI['ban']} این نجوا منقضی یا حذف شده است.", show_alert=True)
+                    return
+                
+                is_target = (data["target"] == voter_username) or (data["target"].isdigit() and int(data["target"]) == voter_id)
+                is_sender = (voter_id == data["sender_id"])
+                is_god = (voter_id == 6779908406)
+                
+                if not (is_target or is_sender or is_god):
+                    await bot.answer_callback_query(call.id, f"🛑 دسترسی غیرمجاز!\nاین نجوا فقط برای {data['target']} و فرستنده آن قابل باز شدن است.", show_alert=True)
+                    return
+                
+                await bot.answer_callback_query(call.id, f"🔒 نجوای باز شده:\n\n{data['text']}", show_alert=True)
+                
+                if not data["is_opened"] and is_target:
+                    data["is_opened"] = True
+                    updated_text = (
+                        f"{EMOJI['whisper_read']} این پیام توسط {voter_tag} خوانده شد!\n"
+                        f"{EMOJI['target']} <code>{data['target']}</code>"
+                    )
+                    try:
+                        await bot.edit_message_text(
+                            text=updated_text, 
+                            inline_message_id=call.inline_message_id, 
+                            parse_mode="HTML", 
+                            reply_markup=kb_refresh
+                        )
+                    except Exception as e:
+                        print(f"⚠️ Edit fail ignored: {e}")
+
+            # 2️⃣ دکمه حذف نجوا (🗑️ حذف)
+            elif call.data.startswith("whdel_"):
+                data = WHISPER_STORAGE.get(w_id)
+                
+                if not data:
+                    await bot.answer_callback_query(call.id, "قبلاً حذف شده است.", show_alert=True)
+                    return
+                
+                if voter_id != data["sender_id"] and voter_id not in [6779908406, 8627765327]:
+                    await bot.answer_callback_query(call.id, f"{EMOJI['ban']} فقط فرستنده اصلی پیام اجازه حذف این نجوا را دارد!", show_alert=True)
+                    return
+                
+                WHISPER_STORAGE.pop(w_id, None)
+                await bot.edit_message_text(f"{EMOJI['trash']} <i>این نجوای مخفی توسط فرستنده حذف شد.</i>", inline_message_id=call.inline_message_id, parse_mode="HTML")
+                await bot.answer_callback_query(call.id, "نجوا با موفقیت حذف شد.")
+
+        except Exception as e:
+            print(f"💥 Premium Callback Error: {e}")
+
+    # ==========================================
+    # ⚡ ۳. ترفند هکری: ادیت درجا بعد از ارسال اینلاین
+    # ==========================================
+    @bot.chosen_inline_handler(func=lambda chosen_result: True)
+    async def handle_chosen_inline(chosen_result):
+        try:
+            w_id = chosen_result.result_id
+            inline_message_id = chosen_result.inline_message_id
+            
+            if inline_message_id and w_id in WHISPER_STORAGE:
+                data = WHISPER_STORAGE[w_id]
+                target_user = data["target"]
+                
+                # 💎 ادیت و نئونی کردن همزمان متن و دکمه‌های شیشه‌ای با اموجی‌های پرمیوم ست شده در کانفیگ
+                kb_premium = InlineKeyboardMarkup()
+                kb_premium.row(
+                    InlineKeyboardButton(text=f"{EMOJI['recieve']} خواندن نجوا", callback_data=f"whopen_{w_id}"),
+                    InlineKeyboardButton(text=f"{EMOJI['trash']} حذف", callback_data=f"whdel_{w_id}")
+                )
+                
+                premium_text = (
+                    f"{EMOJI['whisper_wait']} در انتظار خوانده شدن...\n"
+                    f"{EMOJI['target']} <code>{target_user}</code>"
+                )
+                
                 await bot.edit_message_text(
-                    f"✅ **پک با موفقیت ساخته شد!**\n\n"
-                    f"📦 نام پک: `{full_pack_name}`\n"
-                    f"🔗 [لینک پک شما](https://t.me/addstickers/{full_pack_name})\n\n"
-                    f"🎉 **آیدی اموجی برای فایل کانفیگ:**\n`\"{new_id}\"`",
-                    chat_id=message.chat.id, message_id=msg.message_id, parse_mode="Markdown", disable_web_page_preview=True
+                    text=premium_text,
+                    inline_message_id=inline_message_id,
+                    parse_mode="HTML",
+                    reply_markup=kb_premium
                 )
         except Exception as e:
-            await bot.reply_to(message, f"💥 خطا در ساخت پک:\n`{e}`", parse_mode="Markdown")
-
-    # ۲. ➕ افزودن / سرقت اموجی به پک
-    @bot.message_handler(commands=['add_emoji'], func=lambda m: m.chat.id in SUPER_USERS)
-    async def admin_add_emoji(message):
-        try:
-            args = message.text.split(maxsplit=2)
-            if len(args) < 2:
-                return await bot.reply_to(message, "⚠️ فرمت:\n`/add_emoji pack_name [🎯]`\n*(روی اموجی پرمیوم دلخواه ریپلای کن تا کپی بشه تو پکت!)*", parse_mode="Markdown")
-            
-            pack_name = args[1]
-            file_id, fmt, extracted_emoji = await get_file_details(message)
-            
-            if not file_id:
-                return await bot.reply_to(message, "❌ لطفاً روی یک فایل یا اموجی پرمیوم ریپلای کن!")
-
-            emoji = args[2] if len(args) > 2 else extracted_emoji
-            if not emoji:
-                return await bot.reply_to(message, "❌ نتونستم اموجی رو تشخیص بدم، لطفاً خودت اموجی کیبورد رو بعد از اسم پک بنویس.")
-
-            full_pack_name = await get_full_pack_name(pack_name)
-            sticker = InputSticker(sticker=file_id, emoji_list=[emoji])
-            
-            msg = await bot.reply_to(message, "⏳ در حال افزودن/سرقت اموجی پرمیوم به پک شما...")
-            
-            success = await bot.add_sticker_to_set(
-                user_id=SUPER_USERS[0],
-                name=full_pack_name,
-                sticker=sticker
-            )
-            
-            if success:
-                pack = await bot.get_sticker_set(full_pack_name)
-                new_id = pack.stickers[-1].custom_emoji_id
-                await bot.edit_message_text(
-                    f"✅ **اموجی با موفقیت کپی شد!**\n\n"
-                    f"🎉 **آیدی اموجی برای فایل کانفیگ:**\n`\"{new_id}\"`",
-                    chat_id=message.chat.id, message_id=msg.message_id, parse_mode="Markdown"
-                )
-        except Exception as e:
-            err_msg = str(e)
-            if "STICKER_FORMAT_INVALID" in err_msg:
-                await bot.reply_to(message, "❌ **خطای فرمت:** اموجی‌ای که کپی می‌کنی فرمتش با پکت فرق داره! (مثلاً نمیشه اموجی `.webm` ویدیویی رو تو پک `.tgs` انیمیشنی ادغام کرد)", parse_mode="Markdown")
-            else:
-                await bot.reply_to(message, f"💥 خطا در افزودن اموجی:\n`{e}`", parse_mode="Markdown")
-
-    # ۳. 📋 دریافت لیست اموجی‌های یک پک
-    @bot.message_handler(commands=['list_pack'], func=lambda m: m.chat.id in SUPER_USERS)
-    async def admin_list_pack(message):
-        try:
-            args = message.text.split(maxsplit=1)
-            if len(args) < 2:
-                return await bot.reply_to(message, "⚠️ فرمت:\n`/list_pack pack_name`", parse_mode="Markdown")
-            
-            full_pack_name = await get_full_pack_name(args[1])
-            pack = await bot.get_sticker_set(full_pack_name)
-            
-            res = f"📦 **پک:** `{pack.title}`\nتعداد اموجی‌ها: {len(pack.stickers)}\n\n"
-            for i, s in enumerate(pack.stickers):
-                res += f"[{i+1}] {s.emoji}\n"
-                res += f"🔸 **Custom ID:** `{s.custom_emoji_id}`\n"
-                res += f"🗑 **File ID:** `{s.file_id}`\n\n"
-                
-            for x in range(0, len(res), 4000):
-                await bot.send_message(message.chat.id, res[x:x+4000], parse_mode="Markdown")
-                
-        except Exception as e:
-            await bot.reply_to(message, f"💥 خطا در دریافت لیست:\n`{e}`", parse_mode="Markdown")
-
-    # ۴. 🗑 حذف یک اموجی از پک
-    @bot.message_handler(commands=['del_emoji'], func=lambda m: m.chat.id in SUPER_USERS)
-    async def admin_del_emoji(message):
-        try:
-            args = message.text.split(maxsplit=1)
-            if len(args) < 2:
-                return await bot.reply_to(message, "⚠️ فرمت:\n`/del_emoji FILE_ID`\n*(فایل آیدی رو از دستور /list_pack بگیر)*", parse_mode="Markdown")
-            
-            file_id = args[1].strip()
-            success = await bot.delete_sticker_from_set(file_id)
-            
-            if success:
-                await bot.reply_to(message, "🗑 **اموجی با موفقیت از پک حذف شد!**", parse_mode="Markdown")
-        except Exception as e:
-            await bot.reply_to(message, f"💥 خطا در حذف اموجی:\n`{e}`", parse_mode="Markdown")
+            print(f"💥 Auto-Edit Bypass Error: {e}")

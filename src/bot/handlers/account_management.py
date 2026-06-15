@@ -10,6 +10,7 @@ from src.database.db_manager import (
 )
 
 # ۲. متدهای مربوط به ردیس و مدیریت کش را کاملاً از لایه خنثی کانفیگ می‌آوریم
+from src.config import EMOJI
 from src.bot.redis_config import redis_client, cache_invalidate_user, send_bot_log
 
 def register_account_handlers(bot: AsyncTeleBot):
@@ -24,15 +25,15 @@ def register_account_handlers(bot: AsyncTeleBot):
         gender_map = {"male": "🙋‍♂️ پسر", "female": "🙋‍♀️ دختر", None: "ثبت نشده ⚠️"}
         
         response_text = (
-            f"<b>📊 آمار و پروفایل من</b>\n\n"
-            f"👤 | نام: {message.from_user.first_name}\n"
-            f"🪪 | آیدی: <code>{message.chat.id}</code>\n"
-            f"⚥ | جنسیت من: <b>{gender_map[stats['gender']]}</b>\n"
-            f"💰 | موجودی سکه: <b>{stats['coins']}</b>\n"
-            f"⭐ | امتیاز آنتی‌ترول: <b>{stats['rating']:.1f}</b>\n"
-            f"✍️ | ناشناس دریافتی: {stats['received']}\n"
-            f"📤 | ناشناس ارسال شده: {stats['sent']}\n"
-            f"✍️ | بلاک شده‌ها: {stats['blocked']}"
+            f"{EMOJI['100']} <b>آمار و پروفایل من</b>\n\n"
+            f"{EMOJI['profile']} | نام: {message.from_user.first_name}\n"
+            f"{EMOJI['id']} | آیدی: <code>{message.chat.id}</code>\n"
+            f"{EMOJI['green_dot']} | جنسیت من: <b>{gender_map[stats['gender']]}</b>\n"
+            f"{EMOJI['coin']} | موجودی سکه: <b>{stats['coins']}</b>\n"
+            f"{EMOJI['gem']} | امتیاز آنتی‌ترول: <b>{stats['rating']:.1f}</b>\n"
+            f"{EMOJI['recieve']} | ناشناس دریافتی: {stats['received']}\n"
+            f"{EMOJI['send']} | ناشناس ارسال شده: {stats['sent']}\n"
+            f"{EMOJI['block']} | بلاک شده‌ها: {stats['blocked']}"
         )
         from src.bot.handlers.private_anon import get_keyboards
         kb_main, _, _ = get_keyboards()
@@ -48,14 +49,14 @@ def register_account_handlers(bot: AsyncTeleBot):
         stats = await get_user_profile_stats(user_id)
         
         inline_kb = InlineKeyboardMarkup()
-        inline_kb.row(InlineKeyboardButton("🎁 شانس روزانه با مینی‌گیم تاس", callback_data="claim_daily"))
-        inline_kb.row(InlineKeyboardButton("📜 راهنمای کسب سکه رایگان", callback_data="coin_help"))
+        inline_kb.row(InlineKeyboardButton(text=f"{EMOJI['ball']} شانس روزانه با مینی‌گیم تاس", callback_data="claim_daily"))
+        inline_kb.row(InlineKeyboardButton(text=f"{EMOJI['link']} راهنمای کسب سکه رایگان", callback_data="coin_help"))
         
         response_text = (
-            f"<b>💰 مدیریت کیف پول سکه</b>\n\n"
-            f"👤 | کاربر: {message.from_user.first_name}\n"
-            f"🪙 | موجودی فعلی شما: <b>{stats['coins']} سکه</b>\n\n"
-            f"⚡ با سکه‌های خود می‌توانید در بخش 🎲 <b>چت تصادفی</b> به پارتنرهای هم‌سطح متصل شوید!"
+            f"{EMOJI['coin']} <b>مدیریت کیف پول سکه</b>\n\n"
+            f"{EMOJI['profile']} | کاربر: {message.from_user.first_name}\n"
+            f"{EMOJI['gem']} | موجودی فعلی شما: <b>{stats['coins']} سکه</b>\n\n"
+            f"{EMOJI['thunder']} با سکه‌های خود می‌توانید در بخش 🎲 <b>چت تصادفی</b> به پارتنرهای هم‌سطح متصل شوید!"
         )
         await bot.reply_to(message, response_text, parse_mode="HTML", reply_markup=inline_kb)
 
@@ -69,7 +70,6 @@ def register_account_handlers(bot: AsyncTeleBot):
         
         try:
             async with pool.acquire() as conn:
-                # بررسی کول‌داون ۲۴ ساعته از دیتابیس
                 row = await conn.fetchrow("SELECT last_daily_bonus_at FROM users WHERE user_id = $1", user_id)
                 now = datetime.now(timezone.utc)
                 
@@ -89,19 +89,17 @@ def register_account_handlers(bot: AsyncTeleBot):
                         )
                         return
 
-                # اگر مجاز بود، منوی شیشه‌ای بازی تاس را روی پیام قبلی ادیت می‌کنیم
                 kb_dice = InlineKeyboardMarkup()
                 kb_dice.row(
-                    InlineKeyboardButton("🎲 بنداز بریم!", callback_data="roll_the_dice"),
-                    InlineKeyboardButton("❌ انصراف", callback_data="cancel_dice")
+                    InlineKeyboardButton(text=f"{EMOJI['ball']} بنداز بریم!", callback_data="roll_the_dice"),
+                    InlineKeyboardButton(text=f"{EMOJI['crcl_no']} انصراف", callback_data="cancel_dice")
                 )
                 
-                # 🔥 اصلاح فیکس مارک‌داون دابل‌استار و همسان‌سازی با تصویر ارسالی
                 dice_menu_text = (
-                    "🎲 <b>به مینی‌گیم بونوس روزانه خوش اومدی!</b>\n\n"
+                    f"{EMOJI['ball']} <b>به مینی‌گیم بونوس روزانه خوش اومدی!</b>\n\n"
                     "قوانین بازی خیلی سادست:\n"
-                    "روی دکمه زیر کلیک کن تا تاس انداخته بشه. <b>به اندازه عددی که تاس نشون میده (بین ۱ تا ۶ سکه) جایزه می‌گیری!</b>\n\n"
-                    "آماده‌ای؟ شاست رو امتحان کن 👇"
+                    f"روی دکمه زیر کلیک کن تا تاس انداخته بشه. <b>به اندازه عددی که تاس نشون میده (بین ۱ تا ۶ سکه) جایزه می‌گیری!</b>\n\n"
+                    f"{EMOJI['down']} آماده‌ای؟ شانست رو امتحان کن"
                 )
                 await bot.edit_message_text(dice_menu_text, user_id, call.message.message_id, parse_mode="HTML", reply_markup=kb_dice)
                 await bot.answer_callback_query(call.id)
@@ -125,11 +123,9 @@ def register_account_handlers(bot: AsyncTeleBot):
             except Exception: pass
             return
 
-        # اگر دکمه "بنداز بریم!" فشرده شد:
         pool = await get_connection_pool()
         try:
             async with pool.acquire() as conn:
-                # قفل‌گذاری برای جلوگیری از هک کلیک هم‌زمان
                 row = await conn.fetchrow("SELECT last_daily_bonus_at FROM users WHERE user_id = $1 FOR UPDATE", user_id)
                 now = datetime.now(timezone.utc)
                 
@@ -143,57 +139,51 @@ def register_account_handlers(bot: AsyncTeleBot):
                         except Exception: pass
                         return
 
-                # پاک کردن منوی قبلی جهت متحرک‌سازی تاس
                 try: await bot.delete_message(user_id, message_id)
                 except Exception: pass
                 
-                # پرتاب انیمیشن واقعی تاس تلگرام 🎲
                 dice_msg = await bot.send_dice(user_id, emoji="🎲")
-                dice_value = dice_msg.dice.value # عددی بین ۱ تا ۶
+                dice_value = dice_msg.dice.value
                 
-                # تمام اعداد دیتابیس را شارژ کرده و تایمر ۲۴ ساعته را فعال می‌کنند
                 await conn.execute(
                     "UPDATE users SET coins = coins + $1, last_daily_bonus_at = NOW() WHERE user_id = $2", 
                     dice_value, user_id
                 )
                 
-                await cache_invalidate_user(user_id) # خالی کردن کش برای لایو شدن سکه جدید
-                
-                # ۲.۵ ثانیه صبر برای اتمام انیمیشن تاس
+                await cache_invalidate_user(user_id)
                 await asyncio.sleep(2.5)
                 
-                # 📜 تفکیک پیام‌ها بر اساس عدد تاس
                 if dice_value in [1, 2]:
                     result_text = (
-                        f"🎲 تاس روی عدد <b>{dice_value}</b> ایستاد!\n\n"
-                        f"💩 <b>ریدم تو شانست فردا امتحان کن رفیق!</b>\n"
-                        f"💰 کیف پول شما فقط <b>+{dice_value} سکه</b> شارژ شد."
+                        f"{EMOJI['ball']} تاس روی عدد <b>{dice_value}</b> ایستاد!\n\n"
+                        f"{EMOJI['dislike']} <b>ریدم تو شانست فردا امتحان کن رفیق!</b>\n"
+                        f"{EMOJI['coin']} کیف پول شما فقط <b>+{dice_value} سکه</b> شارژ شد."
                     )
                     await bot.send_message(user_id, result_text, parse_mode="HTML")
                     
                 elif dice_value in [3, 4]:
                     result_text = (
-                        f"🎲 تاس روی عدد <b>{dice_value}</b> ایستاد!\n\n"
-                        f"😐 <b>نه بد بود نه خوب، کاملاً معمولی!</b>\n"
-                        f"💰 کیف پول شما <b>+{dice_value} سکه</b> شارژ شد.\n"
-                        f"۲۴ ساعت دیگه بیا تا شانست رو دوباره تست کنی. 🕶️"
+                        f"{EMOJI['ball']} تاس روی عدد <b>{dice_value}</b> ایستاد!\n\n"
+                        f"{EMOJI['sus']} <b>نه بد بود نه خوب، کاملاً معمولی!</b>\n"
+                        f"{EMOJI['coin']} کیف پول شما <b>+{dice_value} سکه</b> شارژ شد.\n"
+                        f"{EMOJI['clock']} ۲۴ ساعت دیگه بیا تا شانست رو دوباره تست کنی."
                     )
                     await bot.send_message(user_id, result_text, parse_mode="HTML")
                     
                 elif dice_value == 5:
                     result_text = (
-                        f"🎲 تاس روی عدد <b>{dice_value}</b> ایستاد!\n\n"
-                        f"🔥 <b>اوه چسبید! شانس بالا رو زدی پسر!</b>\n"
-                        f"💰 کیف پول شما با موفقیت <b>+{dice_value} سکه رایگان</b> شارژ شد.\n"
-                        f"پرانرژی به دنیای ناشناس‌ها ادامه بده! ✨🕶️"
+                        f"{EMOJI['ball']} تاس روی عدد <b>{dice_value}</b> ایستاد!\n\n"
+                        f"{EMOJI['fire']} <b>اوه چسبید! شانس بالا رو زدی پسر!</b>\n"
+                        f"{EMOJI['coin']} کیف پول شما با موفقیت <b>+{dice_value} سکه رایگان</b> شارژ شد.\n"
+                        f"{EMOJI['thunder']} پرانرژی به دنیای ناشناس‌ها ادامه بده!"
                     )
                     await bot.send_message(user_id, result_text, parse_mode="HTML")
                     
                 elif dice_value == 6:
                     result_text = (
-                        f"🎲 <b>بــــــــووووم! تاس روی عدد جادویی ۶ ایستاد!</b> 👑\n\n"
-                        f"🎉 بالاترین پاداش ممکن رو گرفتی! <b>+۶ سکه رایگان</b> به حسابت اضافه شد.\n"
-                        f"کیف پولت به حداکثر پاداش روزانه رسید. ۲۴ ساعت دیگه منتظرتم! 🕶️✨"
+                        f"{EMOJI['thunder']} <b>بــــــــووووم! تاس روی عدد جادویی ۶ ایستاد!</b> {EMOJI['gem']}\n\n"
+                        f"{EMOJI['present']} بالاترین پاداش ممکن رو گرفتی! <b>+۶ سکه رایگان</b> به حسابت اضافه شد.\n"
+                        f"{EMOJI['clock']} کیف پولت به حداکثر پاداش روزانه رسید. ۲۴ ساعت دیگه منتظرتم!"
                     )
                     await bot.send_message(user_id, result_text, parse_mode="HTML")
 
@@ -201,7 +191,7 @@ def register_account_handlers(bot: AsyncTeleBot):
                 
         except Exception as e:
             print(f"💥 Error processing dice roll: {e}")
-            await bot.send_message(user_id, "❌ خطای فنی در سیستم تاس‌اندازی رخ داد.")
+            await bot.send_message(user_id, f"{EMOJI['caution']} خطای فنی در سیستم تاس‌اندازی رخ داد.")
 
     # ==========================================
     # 📜 کالبک راهنمای جامع کسب سکه و رفرال سیستم
@@ -216,17 +206,17 @@ def register_account_handlers(bot: AsyncTeleBot):
         ref_link = f"https://t.me/{bot_info.username}?start={my_short_code}"  
         
         help_text = (
-            f"<b>📜 راهنمای جامع سیستم اقتصاد سکه</b>\n\n"
-            f"🪙 <b>سکه چیست؟</b>\n"
-            f"واحد مالی ربات برای برقراری اتصال در چت تصادفی است.\n\n"
-            f"🚀 <b>راه‌های کسب سکه رایگان:</b>\n\n"
-            f"۱. <b>استارت اولیه:</b> هر کاربر در عادی‌ترین حالت ورود <b>۱۰ سکه رایگان</b> هدیه می‌گیرد.\n\n"
-            f"۲. <b>🎁 پاداش شانس روزانه:</b> با زدن دکمه شیشه‌ای هدیه در بخش سکه‌ها، هر ۲۴ ساعت یک‌بار <b>با ریختن تاس بین ۱ تا ۶ سکه کاملاً رایگان</b> جایزه بگیرید!\n\n"
-            f"۳. <b>⭐ پاداش آنتی‌ترول (امتیازدهی):</b> بعد از اتمام هر چت تصادفی, به کیفیت رفتار پارتنرتان امتیاز (لایک یا دیس‌لایک) بدهید و <b>۱ سکه رایگان</b> به عنوان پاداش مشارکت از ربات هدیه بگیرید!\n\n"
-            f"۴. <b>سیستم رفرال (دعوت دوستان):</b> این لینک اختصاصی شماست:\n"
+            f"{EMOJI['mail']} <b>راهنمای جامع سیستم اقتصاد سکه</b>\n\n"
+            f"{EMOJI['coin']} <b>سکه چیست؟</b>\n"
+            "واحد مالی ربات برای برقراری اتصال در چت تصادفی است.\n\n"
+            f"{EMOJI['thunder']} <b>راه‌های کسب سکه رایگان:</b>\n\n"
+            f"{EMOJI['one']} <b>استارت اولیه:</b> هر کاربر در عادی‌ترین حالت ورود <b>۱۰ سکه رایگان</b> هدیه می‌گیرد.\n\n"
+            f"{EMOJI['two']} <b>🎁 پاداش شانس روزانه:</b> با زدن دکمه شیشه‌ای هدیه در بخش سکه‌ها، هر ۲۴ ساعت یک‌بار <b>با ریختن تاس بین ۱ تا ۶ سکه کاملاً رایگان</b> جایزه بگیرید!\n\n"
+            f"{EMOJI['three']} <b>⭐ پاداش آنتی‌ترول (امتیازدهی):</b> بعد از اتمام هر چت تصادفی, به کیفیت رفتار پارتنرتان امتیاز (لایک یا دیس‌لایک) بدهید و <b>۱ سکه رایگان</b> به عنوان پاداش مشارکت از ربات هدیه بگیرید!\n\n"
+            f"{EMOJI['four']} <b>سیستم رفرال (دعوت دوستان):</b> این لینک اختصاصی شماست:\n"
             f"<code>{ref_link}</code>\n\n"
-            f"💡 <b>یک تیر و دو نشان:</b> لینک ناشناس و لینک دعوت شما کاملاً یکسان هستند! دوستانتان هم می‌توانند به شما پیام ناشناس بفرستند و همزمان اگر قبلاً عضو ربات نبوده باشند، زیرمجموعهٔ شما ثبت خواهند شد.\n\n"
-            f"۵. <b>جریمه معطلی ربات:</b> اگر در صف جستجو وارد شوید و به دلیل شلوغی تا ۱۵ دقیقه پارتنری برای شما پیدا نشد، ۲ سکه رایگان هم به عنوان جریمه از طرف ربات دریافت می‌کنید! (دارای کول‌داون ۳ ساعته)"
+            f"{EMOJI['light']} <b>یک تیر و دو نشان:</b> لینک ناشناس و لینک دعوت شما کاملاً یکسان هستند! دوستانتان هم می‌توانند به شما پیام ناشناس بفرستند و همزمان اگر قبلاً عضو ربات نبوده باشند، زیرمجموعهٔ شما ثبت خواهند شد.\n\n"
+            f"{EMOJI['five']} <b>جریمه معطلی ربات:</b> اگر در صف جستجو وارد شوید و به دلیل شلوغی تا ۱۵ دقیقه پارتنری برای شما پیدا نشد، ۲ سکه رایگان هم به عنوان جریمه از طرف ربات دریافت می‌کنید! (دارای کول‌داون ۳ ساعته)"
         )
         await bot.send_message(user_id, help_text, parse_mode="HTML")
         await bot.answer_callback_query(call.id)
@@ -241,16 +231,16 @@ def register_account_handlers(bot: AsyncTeleBot):
         
         context = await get_complete_user_context(user_id)
         if context["chat_status"] == 'chatting':
-            await bot.reply_to(message, "⚠️ شما در یک چت فعال هستید! ابتدا چت را قطع کنید.")
+            await bot.reply_to(message, f"{EMOJI['caution']} شما در یک چت فعال هستید! ابتدا چت را قطع کنید.")
             return
 
         markup_confirm = InlineKeyboardMarkup().row(
-            InlineKeyboardButton("✅ بله، مطمئنم و پاک کن", callback_data="confirm_delete_my_data"),
-            InlineKeyboardButton("❌ خیر، منصرف شدم", callback_data="cancel_delete_my_data")
+            InlineKeyboardButton(text=f"{EMOJI['crcl_yes']} بله، مطمئنم و پاک کن", callback_data="confirm_delete_my_data"),
+            InlineKeyboardButton(text=f"{EMOJI['crcl_no']} خیر، منصرف شدم", callback_data="cancel_delete_my_data")
         )
         
         warning_text = (
-            "⚠️ <b>هشدار بسیار مهم!</b>\n\n"
+            f"{EMOJI['red_caution']} <b>هشدار بسیار مهم!</b>\n\n"
             "با تایید این دستور، تمام اطلاعات شما شامل:\n"
             "• لینک ناشناس اختصاصی شما\n"
             "• تاریخچه پیام‌های ناشناس ارسالی و دریافتی\n"
@@ -269,7 +259,7 @@ def register_account_handlers(bot: AsyncTeleBot):
         
         if call.data == "cancel_delete_my_data":
             await bot.answer_callback_query(call.id, "عملیات حذف لغو شد. 😌")
-            await bot.edit_message_text("✅ عملیات لغو شد. اطلاعات شما کاملاً امن باقی ماند.", user_id, call.message.message_id)
+            await bot.edit_message_text(f"{EMOJI['crcl_yes']} عملیات لغو شد. اطلاعات شما کاملاً امن باقی ماند.", user_id, call.message.message_id)
             return
 
         await bot.answer_callback_query(call.id, "در حال پاکسازی اطلاعات... ⏳", show_alert=True)
@@ -308,7 +298,7 @@ def register_account_handlers(bot: AsyncTeleBot):
                     await cache_invalidate_user(user_id)
                     
                     await send_bot_log(bot, call.message, "💥 حذف کامل اطلاعات کاربری انجام شد")
-                    await bot.edit_message_text("🧼 <b>پاکسازی با موفقیت انجام شد!</b>\n\nتمام ردپای شما پاک شد، لینک ناشناس سابق شما باطل گردید و حساب شما به حالت اولیه (۱۰ سکه) برگشت. برای شروع مجدد می‌توانید منو را لمس کنید:", user_id, call.message.message_id, parse_mode="HTML")
+                    await bot.edit_message_text(f"{EMOJI['trash']} <b>پاکسازی با موفقیت انجام شد!</b>\n\nتمام ردپای شما پاک شد، لینک ناشناس سابق شما باطل گردید و حساب شما به حالت اولیه (۱۰ سکه) برگشت. برای شروع مجدد می‌توانید منو را لمس کنید:", user_id, call.message.message_id, parse_mode="HTML")
                     
                 except Exception as tx_err:
                     await tx.rollback()
@@ -316,7 +306,7 @@ def register_account_handlers(bot: AsyncTeleBot):
                     
         except Exception as err:
             print(f"💥 Failed to wipe user data: {err}")
-            await bot.edit_message_text("❌ خطای فنی در پاکسازی دیتابیس رخ داد. لطفا بعداً تلاش کنید.", user_id, call.message.message_id)
+            await bot.edit_message_text(f"{EMOJI['crcl_no']} خطای فنی در پاکسازی دیتابیس رخ داد. لطفا بعداً تلاش کنید.", user_id, call.message.message_id)
 
     # ==========================================
     # 📊 هندلر متنی: منوی تفکیک خالی کردن لیست‌های سیاه
@@ -328,16 +318,16 @@ def register_account_handlers(bot: AsyncTeleBot):
         
         context = await get_complete_user_context(user_id)
         if context["chat_status"] == 'chatting':
-            await bot.reply_to(message, "⚠️ شما در یک چت فعال هستید! ابتدا گفتگو را قطع کنید.")
+            await bot.reply_to(message, f"{EMOJI['caution']} شما در یک چت فعال هستید! ابتدا گفتگو را قطع کنید.")
             return
 
         markup_selection = InlineKeyboardMarkup()
-        markup_selection.row(InlineKeyboardButton("🎲 لیست سیاه چت تصادفی", callback_data="clear_bl_random"))
-        markup_selection.row(InlineKeyboardButton("📩 لیست سیاه پیام ناشناس (پیوی)", callback_data="clear_bl_anon"))
+        markup_selection.row(InlineKeyboardButton(text=f"{EMOJI['ball']} لیست سیاه چت تصادفی", callback_data="clear_bl_random"))
+        markup_selection.row(InlineKeyboardButton(text=f"{EMOJI['mail']} لیست سیاه پیام ناشناس (پیوی)", callback_data="clear_bl_anon"))
         
         await bot.reply_to(
             message, 
-            "🗑️ <b>کدام یک از لیست‌های سیاه خود را می‌خواهید کاملاً خالی کنید؟</b>\n\n"
+            f"{EMOJI['trash']} <b>کدام یک از لیست‌های سیاه خود را می‌خواهید کاملاً خالی کنید؟</b>\n\n"
             "یکی از گزینه‌های زیر را انتخاب کنید:", 
             parse_mode="HTML", 
             reply_markup=markup_selection
@@ -361,7 +351,7 @@ def register_account_handlers(bot: AsyncTeleBot):
                     
                     await send_bot_log(bot, call.message, "حذف لیست سیاه چت تصادفی")
                     await bot.edit_message_text(
-                        "✅ <b>لیست سیاه چت تصادفی شما کاملاً خالی شد!</b>\n"
+                        f"{EMOJI['crcl_yes']} <b>لیست سیاه چت تصادفی شما کاملاً خالی شد!</b>\n"
                         "از این به بعد ممکن است در سیستم مچ‌میکینگ دوباره به پارتنرهای سابق متصل شوید.", 
                         user_id, call.message.message_id, parse_mode="HTML"
                     )
@@ -372,7 +362,7 @@ def register_account_handlers(bot: AsyncTeleBot):
                     
                     await send_bot_log(bot, call.message, "حذف لیست سیاه پیام ناشناس")
                     await bot.edit_message_text(
-                        "✅ <b>لیست سیاه پیام ناشناس شما کاملاً خالی شد!</b>\n"
+                        f"{EMOJI['crcl_yes']} <b>لیست سیاه پیام ناشناس شما کاملاً خالی شد!</b>\n"
                         "تمام کسانی که قبلاً آن‌ها را بلاک کرده بودید، از این به بعد می‌توانند مجدداً روی لینک شما پیام ناشناس ارسال کنند.", 
                         user_id, call.message.message_id, parse_mode="HTML"
                     )
@@ -380,4 +370,4 @@ def register_account_handlers(bot: AsyncTeleBot):
             await bot.answer_callback_query(call.id, "پاکسازی با موفقیت انجام شد 🧼")
         except Exception as err:
             print(f"💥 Failed to clear specific blocklist: {err}")
-            await bot.answer_callback_query(call.id, "❌ خطای فنی در پاکسازی لیست سیاه.", show_alert=True)
+            await bot.answer_callback_query(call.id, f"{EMOJI['crcl_no']} خطای فنی در پاکسازی لیست سیاه.", show_alert=True)
