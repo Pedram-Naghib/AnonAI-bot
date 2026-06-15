@@ -141,6 +141,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
             item = InlineQueryResultArticle(
                 id=w_id,
                 title=f"🔒 ارسال پیام محرمانه به {target_user}",
+                # 🔥 اصلاح کلیدی: فعال کردن parse_mode برای لود شدن اموجی‌های پک اختصاصی در لایه اول اینلاین
                 input_message_content=InputTextMessageContent(display_text, parse_mode="HTML"),
                 reply_markup=kb_premium,
                 description=f"نجوا به {target_user} ارسال شد"
@@ -175,20 +176,16 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     await bot.answer_callback_query(call.id, "❌ این نجوا منقضی یا حذف شده است.", show_alert=True)
                     return
                 
-                # تفکیک دقیق هویت گیرنده واقعی
                 is_target = (data["target"] == voter_username) or (data["target"].isdigit() and int(data["target"]) == voter_id)
                 is_sender = (voter_id == data["sender_id"])
                 is_god = (voter_id == 6779908406)
                 
-                # بررسی کلی دسترسی برای خواندن پیام
                 if not (is_target or is_sender or is_god):
                     await bot.answer_callback_query(call.id, f"🛑 دسترسی غیرمجاز!\nاین نجوا فقط برای {data['target']} و فرستنده آن قابل باز شدن است.", show_alert=True)
                     return
                 
-                # نمایش متن نجوا در پاپ‌آپ برای فرستنده، گیرنده و ادمین
                 await bot.answer_callback_query(call.id, f"🔒 نجوای باز شده:\n\n{data['text']}", show_alert=True)
                 
-                # 🔥 تفکیک ادیت متن: فقط در صورتی که گیرنده (یا ادمین) پیام را باز کند و پیام قبلاً باز نشده باشد
                 if not data["is_opened"] and is_target:
                     data["is_opened"] = True
                     updated_text = (
