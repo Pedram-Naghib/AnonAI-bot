@@ -72,7 +72,8 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 target_owner_id = await get_user_id_by_short_code(short_code)
                 if target_owner_id and user_id != target_owner_id:
                     if await is_user_blocked(owner_id=target_owner_id, blocked_id=user_id):
-                        await bot.reply_to(message, f"{EMOJI['ban']['html']} شما توسط این کاربر بلاک شده‌اید.", reply_markup=kb_main)
+                        # 🔧 اضافه شدن پارامتر parse_mode برای لود صحیح اموجی بلاک
+                        await bot.reply_to(message, f"{EMOJI['ban']['html']} شما توسط این کاربر بلاک شده‌اید.", parse_mode="HTML", reply_markup=kb_main)
                         return
                     
                     await set_user_referrer(user_id, target_owner_id, is_pure_ref=is_new_user)
@@ -87,7 +88,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                     
                     await set_user_state(user_id, f"sending_anon_to_{short_code}")
                     await send_bot_log(bot, message, "کامند /start", f"کلیک روی لینک کوتاه کاربر: {target_owner_id}")
-                    await bot.reply_to(message, f"{EMOJI['mail']['html']} در حال ارسال پیام ناشناس... مدیا یا متن خود را بفرستید:", reply_markup=kb_main)
+                    await bot.reply_to(message, f"{EMOJI['mail']['html']} در حال ارسال پیام ناشناس... مدیا یا متن خود را بفرستید:", parse_mode="HTML", reply_markup=kb_main)
                     return
         
         my_short_code = await get_or_create_short_link(user_id)
@@ -96,7 +97,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         if len(command_args) <= 1 or not command_args[1].startswith("ad_"):
             await send_bot_log(bot, message, "کامند /start", f"استارت معمولی و دریافت لینک کوتاه: {my_short_code}")
         
-        # 💎 فیکس دکمه‌های شیشه‌ای استارت با کاراکتر واقعی برای لود متحرک بدون کد خام HTML
+        # 💎 دکمه‌های شیشه‌ای استارت با کاراکتر واقعی برای لود متحرک بدون کد خام HTML
         inline_kb = InlineKeyboardMarkup()
         inline_kb.row(InlineKeyboardButton(text=f"{EMOJI['link']['char']} دریافت بنر استوری و لینک من", callback_data=f"get_my_banner_{my_short_code}"))
         inline_kb.row(InlineKeyboardButton(text=f"{EMOJI['shield']['char']} چرا این ربات ۱۰۰٪ امن و مخفی است؟", callback_data="bot_security_info"))
@@ -169,7 +170,8 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             target_id = await get_user_id_by_short_code(short_code)
             if target_id:
                 await block_user(owner_id=user_id, blocked_id=target_id)
-                await bot.send_message(user_id, f"{EMOJI['banned']['html']} کاربر با موفقیت در لیست سیاه شما قرار گرفت و دیگر نمی‌تواند به شما پیام بدهد.")
+                # 🔧 اضافه شدن پارامتر parse_mode برای رندر صحیح لایو اموجی مسدودکننده
+                await bot.send_message(user_id, f"{EMOJI['banned']['html']} کاربر با موفقیت در لیست سیاه شما قرار گرفت و دیگر نمی‌تواند به شما پیام بدهد.", parse_mode="HTML")
                 await bot.answer_callback_query(call.id, "کاربر مسدود شد.")
             return
 
@@ -227,7 +229,8 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 await cache_invalidate_user(user_id)
                 await cache_invalidate_user(partner_id)
                 kb_main, _, _ = get_keyboards()
-                await bot.send_message(user_id, f"{EMOJI['crcl_no']['html']} ارتباط قطع شد؛ پارتنر ربات رو بلاک کرده است.", reply_markup=kb_main)
+                # 🔧 اضافه شدن پارامتر parse_mode برای لود صحیح اموجی خطا در قطع چت
+                await bot.send_message(user_id, f"{EMOJI['crcl_no']['html']} ارتباط قطع شد؛ پارتنر ربات رو بلاک کرده است.", parse_mode="HTML", reply_markup=kb_main)
             return
 
         # حالت انتظار برای دریافت یوزرنیم مقصد
@@ -236,17 +239,17 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             target_username = message.text.strip().replace("@", "")
             target_id = await get_user_id_by_username(target_username)
             if not target_id:
-                await bot.reply_to(message, f"{EMOJI['crcl_no']['html']} کاربری با این آیدی در ربات پیدا نشد!")
+                await bot.reply_to(message, f"{EMOJI['crcl_no']['html']} کاربری با این آیدی در ربات پیدا نشد!", parse_mode="HTML")
                 await set_user_state(user_id, "normal")
                 await cache_invalidate_user(user_id)
                 return
             if target_id == user_id:
-                await bot.reply_to(message, f"{EMOJI['caution']['html']} نمی‌توانی به خودت پیام ناشناس بفرستی!")
+                await bot.reply_to(message, f"{EMOJI['caution']['html']} نمی‌توانی به خودت پیام ناشناس بفرستی!", parse_mode="HTML")
                 return
             target_short_code = await get_or_create_short_link(target_id)
             await set_user_state(user_id, f"sending_anon_to_{target_short_code}")
             await cache_invalidate_user(user_id)
-            await bot.reply_to(message, f"{EMOJI['link']['html']} ارتباط برقرار شد! متن یا رسانه خود را ارسال کنید:")
+            await bot.reply_to(message, f"{EMOJI['link']['html']} ارتباط برقرار شد! متن یا رسانه خود را ارسال کنید:", parse_mode="HTML")
             return
 
         help_guide_text = f"\n\n{EMOJI['light']['html']} <b>راهنما:</b> برای جواب دادن روی دکمهٔ {EMOJI['right']['html']} <b>پاسخ</b> کلیک کنید یا روی پیام <b>Reply</b> کنید."
@@ -270,7 +273,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 
                 await send_bot_log(bot, message, "ارسال پاسخ ناشناس پیوی")
                 await save_message_mapping(anon_sender_id, sent.message_id, user_id, message.message_id)
-                await bot.reply_to(message, f"{EMOJI['thunder']['html']} فرستاده شد.")
+                await bot.reply_to(message, f"{EMOJI['thunder']['html']} فرستاده شد.", parse_mode="HTML")
             return
 
         # ارسال پیام ناشناس به کد ۸ رقمی مقصد
@@ -278,7 +281,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             short_code = current_state.split("sending_anon_to_")[-1]
             target_id = await get_user_id_by_short_code(short_code)
             if not target_id:
-                await bot.reply_to(message, f"{EMOJI['crcl_no']['html']} این لینک معتبر نیست.")
+                await bot.reply_to(message, f"{EMOJI['crcl_no']['html']} این لینک معتبر نیست.", parse_mode="HTML")
                 await set_user_state(user_id, "normal")
                 await cache_invalidate_user(user_id)
                 return
@@ -297,10 +300,10 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 
                 if sent_msg:
                     await send_bot_log(bot, message, "ارسال پیام ناشناس")
-                    await bot.reply_to(message, f"{EMOJI['crcl_yes']['html']} مخفیانه ارسال شد.")
+                    await bot.reply_to(message, f"{EMOJI['crcl_yes']['html']} مخفیانه ارسال شد.", parse_mode="HTML")
                     await save_message_mapping(target_id, sent_msg.message_id, user_id, message.message_id)
             except Exception:
-                await bot.reply_to(message, f"{EMOJI['crcl_no']['html']} خطا در ارسال پیام. مقصد شما را مسدود کرده است.")
+                await bot.reply_to(message, f"{EMOJI['crcl_no']['html']} خطا در ارسال پیام. مقصد شما را مسدود کرده است.", parse_mode="HTML")
             
             await set_user_state(user_id, "normal")
             await cache_invalidate_user(user_id)
@@ -319,9 +322,9 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                     sent = await bot.copy_message(chat_id=reply_target_id, from_chat_id=user_id, message_id=message.message_id)
                     await bot.send_message(chat_id=reply_target_id, text=f"{EMOJI['up']['html']} پاسخ رسانه‌ای جدید دریافت شد.{help_guide_text}", reply_to_message_id=sent.message_id, reply_markup=markup, parse_mode="HTML")
                 await save_message_mapping(reply_target_id, sent.message_id, user_id, message.message_id)
-                await bot.reply_to(message, f"{EMOJI['thunder']['html']} فرستاده شد.")
+                await bot.reply_to(message, f"{EMOJI['thunder']} فرستاده شد.", parse_mode="HTML")
             except Exception:
-                await bot.reply_to(message, f"{EMOJI['crcl_no']['html']} ارسال پاسخ انجام نشد.")
+                await bot.reply_to(message, f"{EMOJI['crcl_no']['html']} ارسال پاسخ انجام نشد.", parse_mode="HTML")
             
             await set_user_state(user_id, "normal")
             await cache_invalidate_user(user_id)
