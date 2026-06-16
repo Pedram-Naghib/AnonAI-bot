@@ -139,7 +139,7 @@ def register_random_chat_handlers(bot: AsyncTeleBot):
             await cache_invalidate_user(partner_id)
         
         await send_bot_log(bot, message, "دکمه 🛑 قطع چت فعال", f"قطع ارتباط با پارتنر: {partner_id}")
-        await bot.reply_to(message, f"{EMOJI['banned']['html']} شما چت را قطع کردید. برای شروع مجدد دکمه 🎲 رو بزنید.", reply_markup=kb_main)
+        await bot.reply_to(message, f"{EMOJI['banned']['html']} شما چت را قطع کردید. برای شروع مجدد دکمه 🎲 رو بزنید.", reply_markup=kb_main, parse_mode="HTML")
         
         if partner_id:
             p_code = await get_or_create_short_link(partner_id)

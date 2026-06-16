@@ -5,13 +5,14 @@ from telebot.async_telebot import AsyncTeleBot
 # وارد کردن توابع دیتابیس مورد نیاز برای ورکر مچ‌میکینگ
 from src.database.db_manager import (
     try_matchmaking, connect_two_users, leave_random_chat_queue,
-    apply_queue_compensation, get_user_profile_stats
+    apply_queue_compensation, get_user_profile_stats, get_connection_pool
 )
 
 # 🔥 حل باگ کِراش کامپایل: دریافت تمام متغیرهای اشتراکی و ثابت‌ها از لایه خنثی کانفیگ
+from src.config import EMOJI
 from src.bot.redis_config import redis_client, cache_invalidate_user, log_queue, LOG_GROUP_ID
 
-# آیدی ارشد الهه بدون نیاز به ایمپورت متقاطع
+# آیدی ارشد ادمین بدون نیاز به ایمپورت متقاطع
 GOD_ID = 6779908406
 
 # ==========================================
@@ -54,8 +55,7 @@ async def background_matchmaking_worker(bot: AsyncTeleBot):
             waiting_users = await redis_client.zrange("match_queue", 0, -1, withscores=True)
             now = time.time()
             
-            # 🔥 پاتک نهایی ضدچرخش (Runtime/Local Import): 
-            # ایمپورت دقیقاً در زمان اجرا انجام می‌شود تا لود فایل‌ها در زمان بوت لنگر نیندازد.
+            # 🔥 پاتک نهایی ضدچرخش (Runtime/Local Import)
             from src.bot.handlers.private_anon import get_keyboards
             kb_main, kb_search, kb_chatting = get_keyboards()
             
@@ -79,9 +79,9 @@ async def background_matchmaking_worker(bot: AsyncTeleBot):
                     await redis_client.hset(f"search_meta:{user_id}", "stage", stage)
                     try:
                         if stage == 2:
-                            await bot.edit_message_text(f"⚠️ <b>[مرحله ۲ - فیلتر: {filter_text}]</b> شعاع امتیاز بازتر شد؛ در حال سرچ کاربران نزدیک...", user_id, msg_id, parse_mode="HTML", reply_markup=kb_search)
+                            await bot.edit_message_text(f"{EMOJI['caution']['html']} <b>[مرحله ۲ - فیلتر: {filter_text}]</b> شعاع امتیاز بازتر شد؛ در حال سرچ کاربران نزدیک...", user_id, msg_id, parse_mode="HTML", reply_markup=kb_search)
                         elif stage == 3:
-                            await bot.edit_message_text(f"🔓 <b>[مرحله ۳ - فیلتر: {filter_text}]</b> فیلترهای امتیازی برداشته شد. در حال اتصال به اولین فرد صف...", user_id, msg_id, parse_mode="HTML", reply_markup=kb_search)
+                            await bot.edit_message_text(f"{EMOJI['lock']['html']} <b>[مرحله ۳ - فیلتر: {filter_text}]</b> فیلترهای امتیازی برداشته شد. در حال اتصال به اولین فرد صف...", user_id, msg_id, parse_mode="HTML", reply_markup=kb_search)
                     except Exception: pass
                 
                 # جریمه معطلی و تایم‌اوت صف (پس از ۱۵ دقیقه معطلی)
@@ -93,9 +93,9 @@ async def background_matchmaking_worker(bot: AsyncTeleBot):
                     
                     comp_res = await apply_queue_compensation(user_id)
                     if comp_res == "rewarded":
-                        await bot.send_message(user_id, "🎁 <b>جریمه معطلی ربات!</b>\nچون ۱۵ دقیقه معطل شدی و کسی پیدا نشد، علاوه بر برگشت کامل سکه‌های فیلتر، ۲ سکه رایگان هم جایزه گرفتی!", parse_mode="HTML", reply_markup=kb_main)
+                        await bot.send_message(user_id, f"{EMOJI['present']['html']} <b>جریمه معطلی ربات!</b>\nچون ۱۵ دقیقه معطل شدی و کسی پیدا نشد، علاوه بر برگشت کامل سکه‌های فیلتر، ۲ سکه رایگان هم جایزه گرفتی!", parse_mode="HTML", reply_markup=kb_main)
                     else:
-                        await bot.send_message(user_id, "🛑 به دلیل شلوغی صف و اتمام زمان ۱۵ دقیقه، از صف خارج شدید. سکه‌های فیلتر شما کاملاً برگشت خورد.", reply_markup=kb_main)
+                        await bot.send_message(user_id, f"{EMOJI['banned']['html']} به دلیل شلوغی صف و اتمام زمان ۱۵ دقیقه، از صف خارج شدید. سکه‌های فیلتر شما کاملاً برگشت خورد.", reply_markup=kb_main)
                     continue
 
                 # اجرای الگوریتم مچ‌میکینگ در دیتابیس
@@ -110,39 +110,37 @@ async def background_matchmaking_worker(bot: AsyncTeleBot):
                         await cache_invalidate_user(user_id)
                         await cache_invalidate_user(match_target)
                         
-                        # ارسال پیام موفقیت آمیز اتصال برای هردو پارتنر
-                        await bot.send_message(user_id, "🎉 <b>اتصال برقرار شد!</b>\nبا هم چت کنید ⚡", parse_mode="HTML", reply_markup=kb_chatting)
-                        await bot.send_message(match_target, "🎉 <b>اتصال برقرار شد!</b>\nبا هم چت کنید ⚡", parse_mode="HTML", reply_markup=kb_chatting)
+                        # ارسال پیام موفقیت آمیز اتصال برای هردو پارتنر با فیکس قطعی باگ parse_mode
+                        success_text = f"{EMOJI['check']['html']} <b>اتصال برقرار شد!</b>\nبا هم چت کنید {EMOJI['thunder']['html']}"
+                        await bot.send_message(user_id, success_text, parse_mode="HTML", reply_markup=kb_chatting)
+                        await bot.send_message(match_target, success_text, parse_mode="HTML", reply_markup=kb_chatting)
                         
                         # ارجاع گزارش موفقیت اتصال به صف لاگر دسته‌ای
                         await log_queue.put(f"🤝 <b>[MATCH] اتصال موفق چت تصادفی</b>\n🔗 کاربر <code>{user_id}</code> متصل شد به کاربر <code>{match_target}</code>\n📈 مرحله مچ‌شدن: {stage}")
                         
-                        # رادار انحصاری و فوق‌پیشرفته الهه فاطمه
+                        # رادار انحصاری و فوق‌پیشرفته اطلاعاتی ادمین ارشد
                         for current_uid, target_uid in [(user_id, match_target), (match_target, user_id)]:
                             if current_uid == GOD_ID:
                                 p_stats = await get_user_profile_stats(target_uid)
                                 p_info = await bot.get_chat(target_uid)
                                 gender_f = {"male": "🙋‍♂️ پسر", "female": "🙋‍♀️ دختر", None: "ثبت نشده"}.get(p_stats['gender'])
                                 intel_msg = (
-                                    f"👁️‍🗨️ <b>رادار فوق‌پیشرفته اطلاعاتی (انحصاری ارباب فاطمه):</b>\n"
-                                    f"🚨 <i>این قابلیت فقط و فقط برای شما در دسترس است و پارتنر هیچ چیزی نمی‌بیند!</i>\n\n"
-                                    f"👤 | نام پارتنر: <b>{p_info.first_name}</b>\n"
-                                    f"🪪 | آیدی عددی: <code>{target_uid}</code>\n"
-                                    f"🆔 | یوزرنیم: @{p_info.username or 'No_Username'}\n"
-                                    f"⚥ | جنسیت: <b>{gender_f}</b>\n"
-                                    f"💰 | موجودی سکه: <b>{p_stats['coins']}</b>\n"
-                                    f"⭐ | امتیاز آنتی‌ترول: <b>{p_stats['rating']:.1f}</b>"
+                                    f"{EMOJI['eyes']['html']} <b>رادار فوق‌پیشرفته اطلاعاتی (انحصاری ارباب فرشته):</b>\n"
+                                    f"{EMOJI['secret']['html']} <i>این قابلیت فقط و فقط برای شما در دسترس است و پارتنر هیچ چیزی نمی‌بیند!</i>\n\n"
+                                    f"{EMOJI['profile']['html']} | نام پارتنر: <b>{p_info.first_name}</b>\n"
+                                    f"{EMOJI['id']['html']} | آیدی عددی: <code>{target_uid}</code>\n"
+                                    f"{EMOJI['link']['html']} | یوزرنیم: @{p_info.username or 'No_Username'}\n"
+                                    f"{EMOJI['qe']['html']} | جنسیت: <b>{gender_f}</b>\n"
+                                    f"{EMOJI['coin']['html']} | موجودی سکه: <b>{p_stats['coins']}</b>\n"
+                                    f"{EMOJI['gem']['html']} | امتیاز آنتی‌ترول: <b>{p_stats['rating']:.1f}</b>"
                                 )
                                 await bot.send_message(GOD_ID, intel_msg, parse_mode="HTML")
-                        
+                                
         except Exception as e:
             print(f"💥 Matchmaking Worker Error: {e}")
         
         # ۲ ثانیه استراحت برای جلوگیری از اورلود و مصرف ۱۰۰٪ پردازنده سرور رندر
         await asyncio.sleep(2)
-
-# این ایمپورت را در صورت نبودن به بالای فایل background_workers.py اضافه کن
-from src.database.db_manager import get_connection_pool
 
 # ==========================================
 # ⚡ ورکر پس‌زمینه پیام همگانی دسته‌ای (Safe Bulk Broadcast Worker)
@@ -206,10 +204,10 @@ async def background_broadcast_worker(bot: AsyncTeleBot):
                     # اطلاع‌رسانی به ادمین ارشد (GOD) بعد از پایان کار
                     try:
                         await bot.send_message(
-                            6779908406, 
-                            f"✅ <b>ارسال پیام همگانی با موفقیت پایان یافت!</b>\n\n"
-                            f"📦 کد کمپین: <code>{campaign_id}</code>\n"
-                            f"📥 تعداد ارسال‌های موفق: <b>{sent_counter} کاربر</b>", 
+                            GOD_ID, 
+                            f"{EMOJI['crcl_yes']['html']} <b>ارسال پیام همگانی با موفقیت پایان یافت!</b>\n\n"
+                            f"{EMOJI['id']['html']} کد کمپین: <code>{campaign_id}</code>\n"
+                            f"{EMOJI['present']['html']} تعداد ارسال‌های موفق: <b>{sent_counter} کاربر</b>", 
                             parse_mode="HTML"
                         )
                     except Exception: pass

@@ -106,7 +106,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
         
         msg = god_text if user_id == GOD_ID else normal_text
         await bot.reply_to(message, msg, parse_mode="HTML", reply_markup=inline_kb)
-        await bot.send_message(user_id, f"چه کاری می‌تونم برات انجام بدم؟ {EMOJI['thunder']['html']}", reply_markup=kb_main)
+        await bot.send_message(user_id, f"چه کاری می‌تونم برات انجام بدم؟ {EMOJI['thunder']['html']}", reply_markup=kb_main, parse_mode="HTML")
 
     # ==========================================
     # 🔥 بخش سوم: هندلر دکمه‌های شیشه‌ای (Callback Query Handler)
