@@ -19,7 +19,8 @@ def register_admin_handlers(bot: AsyncTeleBot):
     @bot.message_handler(commands=['id'])
     async def handle_get_chat_id(message):
         try:
-            await bot.reply_to(message, f"{EMOJI['id']['html']} آیدی این چت/گروه: `{message.chat.id}`\n", parse_mode="Markdown")
+            # 🔧 اصلاح پارامتر parse_mode به HTML جهت رندر صحیح تگ اموجی
+            await bot.reply_to(message, f"{EMOJI['id']['html']} آیدی این چت/گروه: <code>{message.chat.id}</code>\n", parse_mode="HTML")
         except Exception as e:
             print(f"❌ Error sending ID: {e}")
 
@@ -48,7 +49,7 @@ def register_admin_handlers(bot: AsyncTeleBot):
                 reply_to_msg_id = int(match.group(1))
                 clean_text = match.group(2)
                 await bot.send_message(GROUP_CHAT_ID, text=clean_text, reply_to_message_id=reply_to_msg_id, reply_markup=ReplyKeyboardRemove())
-                await bot.reply_to(message, f"{EMOJI['target']['html']} روی پیام `{reply_to_msg_id}` ریپلای شد!")
+                await bot.reply_to(message, f"{EMOJI['target']['html']} روی پیام <code>{reply_to_msg_id}</code> ریپلای شد!", parse_mode="HTML")
         except Exception as e:
             print(f"❌ Error in link auto-reply: {e}")
 
@@ -90,7 +91,7 @@ def register_admin_handlers(bot: AsyncTeleBot):
                 
                 rows = await conn.fetch(query)
                 if not rows:
-                    await bot.reply_to(message, f"{EMOJI['whisper_read']['html']} هیچ کاربری یافت نشد.\n👥 کل اعضا: {total_users}")
+                    await bot.reply_to(message, f"{EMOJI['whisper_read']['html']} هیچ کاربری یافت نشد.\n👥 کل اعضا: {total_users}", parse_mode="HTML")
                     return
 
                 async def check_and_clean_user(row):
@@ -142,7 +143,7 @@ def register_admin_handlers(bot: AsyncTeleBot):
         except Exception as err:
             print(f"💥 Admin Stats Command Failed: {err}")
             traceback.print_exc()
-            await bot.reply_to(message, f"{EMOJI['ban']['html']} خطای فنی در استخراج اطلاعات از دیتابیس.")
+            await bot.reply_to(message, f"{EMOJI['ban']['html']} خطای فنی در استخراج اطلاعات از دیتابیس.", parse_mode="HTML")
 
     # ==========================================
     # 👑 دستور ویژه مدیریت: ارسال پیام همگانی دسته‌ای به کل ربات
@@ -178,7 +179,7 @@ def register_admin_handlers(bot: AsyncTeleBot):
             
         except Exception as err:
             print(f"💥 Failed to initiate broadcast campaign: {err}")
-            await bot.reply_to(message, f"{EMOJI['ban']['html']} خطای فنی در ثبت کمپین پیام همگانی.")
+            await bot.reply_to(message, f"{EMOJI['ban']['html']} خطای فنی در ثبت کمپین پیام همگانی.", parse_mode="HTML")
 
     # ==========================================
     # 🎰 دستور تِست و دریافت لیست کامل اموجی‌های پرمیوم ست شده
@@ -187,7 +188,7 @@ def register_admin_handlers(bot: AsyncTeleBot):
     async def send_emojis(message):
         try:
             for key, value in EMOJI.items():
-                await bot.send_message(message.chat.id, f"{EMOJI['pin']['html']} <b>Key:</b> `{key}`\n{EMOJI['ball']['html']} <b>Render:</b> {value['html']}", parse_mode="HTML")
+                await bot.send_message(message.chat.id, f"{EMOJI['pin']['html']} <b>Key:</b> <code>{key}</code>\n{EMOJI['ball']['html']} <b>Render:</b> {value['html']}", parse_mode="HTML")
         except Exception as e:
             print(f"💥 Error printing emojis: {e}")
 
@@ -241,22 +242,22 @@ def register_admin_handlers(bot: AsyncTeleBot):
         try:
             args = message.text.split(maxsplit=3)
             if len(args) < 3:
-                return await bot.reply_to(message, f"{EMOJI['caution']['html']} فرمت:\n`/create_pack pack_name Title [🎯]`\n*(اگر روی فایل ریپلای می‌کنی اموجی رو بنویس، اگر روی اموجی پرمیوم ریپلای زدی خودش می‌فهمه!)*", parse_mode="Markdown")
+                return await bot.reply_to(message, f"{EMOJI['caution']['html']} فرمت:\n`/create_pack pack_name Title [🎯]`\n*(اگر روی فایل ریپلای می‌کنی اموجی رو بنویس، اگر روی اموجی پرمیوم ریپلای زدی خودش می‌فهمه!)*", parse_mode="HTML")
             
             short_name, title = args[1], args[2]
             file_id, fmt, extracted_emoji = await get_file_details(message)
             
             if not file_id:
-                return await bot.reply_to(message, f"{EMOJI['ban']['html']} لطفاً روی یک اموجی پرمیوم یا فایل خام ریپلای کن!")
+                return await bot.reply_to(message, f"{EMOJI['ban']['html']} لطفاً روی یک اموجی پرمیوم یا فایل خام ریپلای کن!", parse_mode="HTML")
 
             emoji = args[3] if len(args) > 3 else extracted_emoji
             if not emoji:
-                return await bot.reply_to(message, f"{EMOJI['ban']['html']} نتونستم اموجی رو پیدا کنم. خودت اموجی کیبورد رو آخر دستور بنویس.")
+                return await bot.reply_to(message, f"{EMOJI['ban']['html']} نتونستم اموجی رو پیدا کنم. خودت اموجی کیبورد رو آخر دستور بنویس.", parse_mode="HTML")
 
             full_pack_name = await get_full_pack_name(short_name)
             sticker = InputSticker(sticker=file_id, emoji_list=[emoji])
             
-            msg = await bot.reply_to(message, f"{EMOJI['clock']['html']} در حال ساخت پک اختصاصی...")
+            msg = await bot.reply_to(message, f"{EMOJI['clock']['html']} در حال ساخت پک اختصاصی...", parse_mode="HTML")
             
             success = await bot.create_new_sticker_set(
                 user_id=GOD_ID,
@@ -272,13 +273,13 @@ def register_admin_handlers(bot: AsyncTeleBot):
                 new_id = pack.stickers[0].custom_emoji_id
                 await bot.edit_message_text(
                     f"{EMOJI['crcl_yes']['html']} **پک با موفقیت ساخته شد!**\n\n"
-                    f"{EMOJI['present']['html']} 📦 نام پک: `{full_pack_name}`\n"
-                    f"{EMOJI['link']['html']} [لینک پک شما](https://t.me/addstickers/{full_pack_name})\n\n"
-                    f"{EMOJI['gem']['html']} **آیدی اموجی برای فایل کانفیگ:**\n`\"{new_id}\"`",
-                    chat_id=message.chat.id, message_id=msg.message_id, parse_mode="Markdown", disable_web_page_preview=True
+                    f"{EMOJI['present']['html']} 📦 نام پک: <code>{full_pack_name}</code>\n"
+                    f"{EMOJI['link']['html']} <a href='https://t.me/addstickers/{full_pack_name}'>لینک پک شما</a>\n\n"
+                    f"{EMOJI['gem']['html']} **آیدی اموجی برای فایل کانفیگ:**\n<code>\"{new_id}\"</code>",
+                    chat_id=message.chat.id, message_id=msg.message_id, parse_mode="HTML", disable_web_page_preview=True
                 )
         except Exception as e:
-            await bot.reply_to(message, f"{EMOJI['bang']['html']} خطا در ساخت پک:\n`{e}`", parse_mode="Markdown")
+            await bot.reply_to(message, f"{EMOJI['bang']['html']} خطا در ساخت پک:\n<code>{e}</code>", parse_mode="HTML")
 
     # ۲. ➕ افزودن / سرقت اموجی به پک
     @bot.message_handler(commands=['add_emoji'], func=lambda m: m.chat.id in SUPER_USERS)
@@ -286,22 +287,22 @@ def register_admin_handlers(bot: AsyncTeleBot):
         try:
             args = message.text.split(maxsplit=2)
             if len(args) < 2:
-                return await bot.reply_to(message, f"{EMOJI['caution']['html']} فرمت:\n`/add_emoji pack_name [🎯]`\n*(روی اموجی پرمیوم دلخواه ریپلای کن تا کپی بشه تو پکت!)*", parse_mode="Markdown")
+                return await bot.reply_to(message, f"{EMOJI['caution']['html']} فرمت:\n`/add_emoji pack_name [🎯]`\n*(روی اموجی پرمیوم دلخواه ریپلای کن تا کپی بشه تو پکت!)*", parse_mode="HTML")
             
             pack_name = args[1]
             file_id, fmt, extracted_emoji = await get_file_details(message)
             
             if not file_id:
-                return await bot.reply_to(message, f"{EMOJI['ban']['html']} لطفاً روی یک فایل یا اموجی پرمیوم ریپلای کن!")
+                return await bot.reply_to(message, f"{EMOJI['ban']['html']} لطفاً روی یک فایل یا اموجی پرمیوم ریپلای کن!", parse_mode="HTML")
 
             emoji = args[2] if len(args) > 2 else extracted_emoji
             if not emoji:
-                return await bot.reply_to(message, f"{EMOJI['ban']['html']} نتونستم اموجی رو تشخیص بدم، لطفاً خودت اموجی کیبورد رو بعد از اسم پک بنویس.")
+                return await bot.reply_to(message, f"{EMOJI['ban']['html']} نتونستم اموجی رو تشخیص بدم، لطفاً خودت اموجی کیبورد رو بعد از اسم پک بنویس.", parse_mode="HTML")
 
             full_pack_name = await get_full_pack_name(pack_name)
             sticker = InputSticker(sticker=file_id, emoji_list=[emoji])
             
-            msg = await bot.reply_to(message, f"{EMOJI['clock']['html']} در حال افزودن/سرقت اموجی پرمیوم به پک شما...")
+            msg = await bot.reply_to(message, f"{EMOJI['clock']['html']} در حال افزودن/سرقت اموجی پرمیوم به پک شما...", parse_mode="HTML")
             
             success = await bot.add_sticker_to_set(
                 user_id=GOD_ID,
@@ -314,15 +315,15 @@ def register_admin_handlers(bot: AsyncTeleBot):
                 new_id = pack.stickers[-1].custom_emoji_id
                 await bot.edit_message_text(
                     f"{EMOJI['crcl_yes']['html']} **اموجی با موفقیت کپی شد!**\n\n"
-                    f"{EMOJI['gem']['html']} **آیدی اموجی برای فایل کانفیگ:**\n`\"{new_id}\"`",
-                    chat_id=message.chat.id, message_id=msg.message_id, parse_mode="Markdown"
+                    f"{EMOJI['gem']['html']} **آیدی اموجی برای فایل کانفیگ:**\n<code>\"{new_id}\"</code>",
+                    chat_id=message.chat.id, message_id=msg.message_id, parse_mode="HTML"
                 )
         except Exception as e:
             err_msg = str(e)
             if "STICKER_FORMAT_INVALID" in err_msg:
-                await bot.reply_to(message, f"{EMOJI['red_caution']['html']} **خطای فرمت:** اموجی‌ای که کپی می‌کنی فرمتش با پکت فرق داره! (مثلاً نمیشه اموجی `.webm` ویدیویی رو تو پک `.tgs` انیمیشنی ادغام کرد)", parse_mode="Markdown")
+                await bot.reply_to(message, f"{EMOJI['red_caution']['html']} **خطای فرمت:** اموجی‌ای که کپی می‌کنی فرمتش با پکت فرق داره! (مثلاً نمیشه اموجی `.webm` ویدیویی رو تو پک `.tgs` انیمیشنی ادغام کرد)", parse_mode="HTML")
             else:
-                await bot.reply_to(message, f"{EMOJI['bang']['html']} خطا در افزودن اموجی:\n`{e}`", parse_mode="Markdown")
+                await bot.reply_to(message, f"{EMOJI['bang']['html']} خطا در افزودن اموجی:\n<code>{e}</code>", parse_mode="HTML")
 
     # ۳. 📋 دریافت لیست اموجی‌های یک پک
     @bot.message_handler(commands=['list_pack'], func=lambda m: m.chat.id in SUPER_USERS)
@@ -330,22 +331,22 @@ def register_admin_handlers(bot: AsyncTeleBot):
         try:
             args = message.text.split(maxsplit=1)
             if len(args) < 2:
-                return await bot.reply_to(message, f"{EMOJI['caution']['html']} فرمت:\n`/list_pack pack_name`", parse_mode="Markdown")
+                return await bot.reply_to(message, f"{EMOJI['caution']['html']} فرمت:\n`/list_pack pack_name`", parse_mode="HTML")
             
             full_pack_name = await get_full_pack_name(args[1])
             pack = await bot.get_sticker_set(full_pack_name)
             
-            res = f"{EMOJI['present']['html']} **پک:** `{pack.title}`\nتعداد اموجی‌ها: {len(pack.stickers)}\n\n"
+            res = f"{EMOJI['present']['html']} **پک:** <code>{pack.title}</code>\nتعداد اموجی‌ها: {len(pack.stickers)}\n\n"
             for i, s in enumerate(pack.stickers):
                 res += f"[{i+1}] {s.emoji}\n"
-                res += f"{EMOJI['gem']['html']} **Custom ID:** `{s.custom_emoji_id}`\n"
-                res += f"{EMOJI['trash']['html']} **File ID:** `{s.file_id}`\n\n"
+                res += f"{EMOJI['gem']['html']} **Custom ID:** <code>{s.custom_emoji_id}</code>\n"
+                res += f"{EMOJI['trash']['html']} **File ID:** <code>{s.file_id}</code>\n\n"
                 
             for x in range(0, len(res), 4000):
-                await bot.send_message(message.chat.id, res[x:x+4000], parse_mode="Markdown")
+                await bot.send_message(message.chat.id, res[x:x+4000], parse_mode="HTML")
                 
         except Exception as e:
-            await bot.reply_to(message, f"{EMOJI['bang']['html']} خطا در دریافت لیست:\n`{e}`", parse_mode="Markdown")
+            await bot.reply_to(message, f"{EMOJI['bang']['html']} خطا در دریافت لیست:\n<code>{e}</code>", parse_mode="HTML")
 
     # ۴. 🗑 حذف یک اموجی از پک
     @bot.message_handler(commands=['del_emoji'], func=lambda m: m.chat.id in SUPER_USERS)
@@ -353,12 +354,12 @@ def register_admin_handlers(bot: AsyncTeleBot):
         try:
             args = message.text.split(maxsplit=1)
             if len(args) < 2:
-                return await bot.reply_to(message, f"{EMOJI['caution']['html']} فرمت:\n`/del_emoji FILE_ID`\n*(فایل آیدی رو از دستور /list_pack بگیر)*", parse_mode="Markdown")
+                return await bot.reply_to(message, f"{EMOJI['caution']['html']} فرمت:\n`/del_emoji FILE_ID`\n*(فایل آیدی رو از دستور /list_pack بگیر)*", parse_mode="HTML")
             
             file_id = args[1].strip()
             success = await bot.delete_sticker_from_set(file_id)
             
             if success:
-                await bot.reply_to(message, f"{EMOJI['trash']['html']} **اموجی با موفقیت از پک حذف شد!**", parse_mode="Markdown")
+                await bot.reply_to(message, f"{EMOJI['trash']['html']} **اموجی با موفقیت از پک حذف شد!**", parse_mode="HTML")
         except Exception as e:
-            await bot.reply_to(message, f"{EMOJI['bang']['html']} خطا در حذف اموجی:\n`{e}`", parse_mode="Markdown")
+            await bot.reply_to(message, f"{EMOJI['bang']['html']} خطا در حذف اموجی:\n<code>{e}</code>", parse_mode="HTML")
