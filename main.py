@@ -1,99 +1,108 @@
 import os
 import asyncio
+import signal
+
 import uvicorn
 from fastapi import FastAPI, Request
 from telebot.types import Update
 from telebot.async_telebot import AsyncTeleBot
-from src.config import TELEGRAM_BOT_TOKEN, EMOJI
+
+from src.config import TELEGRAM_BOT_TOKEN, EMOJI, SUPER_USERS, WEBHOOK_HOST
 from src.bot.handlers import register_bot_handlers
 from src.database.db_manager import init_db
+from src.bot.redis_config import ping_redis
+from src.bot.background_workers import (
+    background_log_worker,
+    background_matchmaking_worker,
+    background_broadcast_worker,
+)
 
-# 🔥 ایمپورت کردن ورکرهای پس‌زمینه جدید برای لود هم‌زمان در لوپ اصلی
-from src.bot.background_workers import background_log_worker, background_matchmaking_worker, background_broadcast_worker
+# ── Deployment config ─────────────────────────────────────
+# Set USE_WEBHOOK=false in .env to run locally with polling
+USE_WEBHOOK  = os.getenv("USE_WEBHOOK", "true").lower() == "true"
+WEBHOOK_PORT = int(os.getenv("PORT", "8000"))
+WEBHOOK_URL  = f"https://{WEBHOOK_HOST}/webhook/{TELEGRAM_BOT_TOKEN}"
 
-# 🎛 تنظیمات ران شدن (روی سیستم خودت False بگذار، روی سرور رندر True)
-USE_WEBHOOK = True
-
-WEBHOOK_HOST = "anonai-bot.onrender.com"
-WEBHOOK_PORT = int(os.environ.get("PORT", 8000))
-WEBHOOK_URL = f"https://{WEBHOOK_HOST}/webhook/{TELEGRAM_BOT_TOKEN}"
-
-# لیست آپدیت‌های مجاز برای لاگ‌گیری چت‌ها و ری‌آکشن‌ها
 ALLOWED_UPDATES = ["message", "callback_query", "message_reaction", "inline_query", "chosen_inline_result"]
 
 bot = AsyncTeleBot(TELEGRAM_BOT_TOKEN)
 app = FastAPI()
 
-# ==========================================
-# 🚀 تابع اختصاصی ارسال نوتیفیکیشن لایو شدن ربات
-# ==========================================
-async def send_startup_notification(bot_instance):
-    try:
-        # چند ثانیه صبر می‌کنیم تا وب‌هوک کاملاً روی سرورهای تلگرام مستقر و تایید شود
-        await asyncio.sleep(3)
-        bot_info = await bot_instance.get_me()
-        
-        # 💎 اعمال لایه ['html'] دیکشنری جدید برای رندر انیمیشن‌های لایو پکت در بدنه پیام
-        startup_msg = (
-            f"{EMOJI['thunder']['html']} <b>پلتفرم با موفقیت آپدیت شد و بالا آمد!</b>\n"
-            "───────────────────\n"
-            f"{EMOJI['bot']['html']} <b>ربات:</b> @{bot_info.username}\n"
-            f"{EMOJI['green_dot']['html']} <b>وضعیت:</b> فعال و آمادهٔ شلیک نجوا\n"
-            f"{EMOJI['lock']['html']} <i>لوکال مموری با موفقیت پاکسازی و مجدداً لود شد.</i>"
-        )
-        await bot_instance.send_message(8627765327, startup_msg, parse_mode="HTML")
-        print("✅ پیام استارت‌آپ با موفقیت برای ادمین ارسال شد.")
-    except Exception as e:
-        print(f"💥 خطای ارسال پیام استارت‌آپ: {e}")
 
+# ── Health check ──────────────────────────────────────────
 @app.api_route("/", methods=["GET", "HEAD"])
 async def health_check():
     return {"status": "alive"}
 
+
+# ── Webhook endpoint ──────────────────────────────────────
 @app.post(f"/webhook/{TELEGRAM_BOT_TOKEN}")
 async def telegram_webhook(request: Request):
-    json_string = await request.json()
-    update = Update.de_json(json_string)
+    json_data = await request.json()
+    update    = Update.de_json(json_data)
     await bot.process_new_updates([update])
     return {"status": "ok"}
 
+
+# ── Startup notification ──────────────────────────────────
+async def send_startup_notification():
+    try:
+        await asyncio.sleep(3)  # Wait for webhook to register on Telegram's side
+        bot_info = await bot.get_me()
+        msg = (
+            f"{EMOJI['thunder']['html']} <b>پلتفرم با موفقیت آپدیت و بالا آمد!</b>\n"
+            "───────────────────\n"
+            f"{EMOJI['bot']['html']} <b>ربات:</b> @{bot_info.username}\n"
+            f"{EMOJI['green_dot']['html']} <b>وضعیت:</b> فعال و آماده\n"
+            f"{EMOJI['lock']['html']} <i>لوکال مموری پاکسازی و مجدداً لود شد.</i>"
+        )
+        # Notify all super users, not just one hardcoded ID
+        for admin_id in SUPER_USERS:
+            try:
+                await bot.send_message(admin_id, msg, parse_mode="HTML")
+            except Exception:
+                pass
+        print("✅ Startup notification sent.")
+    except Exception as e:
+        print(f"💥 Startup notification error: {e}")
+
+
+# ── Main startup sequence ─────────────────────────────────
 async def start_bot():
-    # ۱. مقداردهی اولیه دیتابیس ابری سوپابیس
-    print("🗄️ Initializing Databases...")
+    print("🗄️  Initializing database...")
     await init_db()
-    
-    # 🔌 ۲. ثبت هندلرهای اصلی ربات
-    print("🔌 Registering bot handlers...")
+
+    print("⚡ Checking Redis connectivity...")
+    await ping_redis()
+
+    print("🔌 Registering handlers...")
     register_bot_handlers(bot)
-    
-    # 🔥 ۳. روشن کردن ورکرهای اتمیک پس‌زمینه درون Event Loop جاری
-    print("⚡ Activating Background Workers (Log Queue & Matchmaking)...")
+
+    print("⚙️  Starting background workers...")
     asyncio.create_task(background_log_worker(bot))
     asyncio.create_task(background_matchmaking_worker(bot))
-    
-    # 🔥 فعال‌سازی ورکر همگانی دسته‌ای
     asyncio.create_task(background_broadcast_worker(bot))
-    
-    # 🔥 ۴. فعال‌سازی موتور اعلان لایو شدن ربات در پس‌زمینه بدون مسدود کردن سرور
-    asyncio.create_task(send_startup_notification(bot))
-    
-    # ۵. انتخاب مسیر ران کردن (وب‌هوک یا پولینگ)
+
+    asyncio.create_task(send_startup_notification())
+
     if USE_WEBHOOK:
-        print("🔔 Setting up Webhook...")
+        print(f"🔔 Setting webhook → {WEBHOOK_URL}")
         await bot.remove_webhook()
-        # ست کردن وب‌هوک همراه با فیلتر آپدیت‌ها
         await bot.set_webhook(url=WEBHOOK_URL, allowed_updates=ALLOWED_UPDATES)
-        
+
         config = uvicorn.Config(app=app, host="0.0.0.0", port=WEBHOOK_PORT, loop="asyncio")
         server = uvicorn.Server(config)
+
+        # Graceful shutdown on SIGTERM (Render sends this before killing the container)
+        loop = asyncio.get_running_loop()
+        loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(server.shutdown()))
+
         await server.serve()
     else:
-        print("🔄 Starting Long Polling...")
+        print("🔄 Starting long polling (local mode)...")
         await bot.remove_webhook()
-        print("🤖 CyberAnons is online via Polling...")
-        # اجرای بدون وقفه پولینگ لوکال
         await bot.infinity_polling(logger_level=20, allowed_updates=ALLOWED_UPDATES)
 
+
 if __name__ == "__main__":
-    # اجرای استاندارد ناهمگام کل ساختار سرور
     asyncio.run(start_bot())
