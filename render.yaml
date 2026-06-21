@@ -12,6 +12,3 @@ services:
       # قفل کردن نسخه پایتون برای جلوگیری از کامپایل‌های اضافه و کند
       - key: PYTHON_VERSION
         value: 3.11.9
-      # 🤫 خاموش کردن پیام رو اعصابِ آپدیت pip تو لاگ سرور
-      - key: PIP_DISABLE_PIP_VERSION_CHECK
-        value: "1"
