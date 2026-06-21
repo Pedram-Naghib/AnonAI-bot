@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: AnonAI-bot
+    runtime: python
+    # آپدیت سریع pip و نصب پکیج‌ها با استفاده از کشِ سرور
+    buildCommand: pip install -U pip && pip install -r requirements.txt
+    startCommand: python main.py
+    buildpacks:
+      - url: https://github.com/jonathanong/heroku-buildpack-ffmpeg-latest.git
+      - url: https://render/python
+    envVars:
+      # قفل کردن نسخه پایتون برای جلوگیری از کامپایل‌های اضافه و کند
+      - key: PYTHON_VERSION
+        value: 3.11.9
