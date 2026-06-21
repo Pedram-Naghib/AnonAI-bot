@@ -1,5 +1,6 @@
 import os
 import json
+import html
 import asyncio
 
 from telebot.async_telebot import AsyncTeleBot
@@ -35,7 +36,7 @@ async def send_bot_log(bot: AsyncTeleBot, message, action_name: str, extra_detai
 
         log_text = (
             f"📥 <b>[LOG] فعالیت جدید در ربات</b>\n"
-            f"👤 <b>کاربر:</b> {user.first_name}\n"
+            f"👤 <b>کاربر:</b> {html.escape(user.first_name or '')}\n"
             f"🪪 <b>آیدی عددی:</b> <code>{message.chat.id}</code>\n"
             f"🆔 <b>یوزرنیم:</b> @{user.username or 'No_Username'}\n"
             f"🛠 <b>اکشن:</b> <code>{action_name}</code>\n"

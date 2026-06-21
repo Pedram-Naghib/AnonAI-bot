@@ -1,4 +1,5 @@
 import uuid
+import html
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import (
     InlineQuery, InlineQueryResultArticle, InputTextMessageContent,
@@ -125,7 +126,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     id=w_id,
                     title=f"🔒 ارسال پیام محرمانه به {target_user}",
                     input_message_content=InputTextMessageContent(
-                        f"📬 در انتظار خوانده شدن...\n🎯 <code>{target_user}</code>",
+                        f"📬 در انتظار خوانده شدن...\n🎯 <code>{html.escape(target_user)}</code>",
                         parse_mode="HTML"
                     ),
                     reply_markup=kb_initial,
@@ -181,8 +182,8 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     data["is_opened"] = True
                     try:
                         await bot.edit_message_text(
-                            f"{EMOJI['whisper_read']['html']} این پیام توسط {voter_tag} خوانده شد!\n"
-                            f"{EMOJI['target']['html']} <code>{data['target']}</code>",
+                            f"{EMOJI['whisper_read']['html']} این پیام توسط {html.escape(voter_tag)} خوانده شد!\n"
+                            f"{EMOJI['target']['html']} <code>{html.escape(data['target'])}</code>",
                             inline_message_id=call.inline_message_id,
                             parse_mode="HTML", reply_markup=kb_refresh
                         )
@@ -237,7 +238,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
 
             await bot.edit_message_text(
                 f"{EMOJI['whisper_wait']['html']} در انتظار خوانده شدن...\n"
-                f"{EMOJI['target']['html']} <code>{target_user}</code>",
+                f"{EMOJI['target']['html']} <code>{html.escape(target_user)}</code>",
                 inline_message_id=inline_message_id,
                 parse_mode="HTML", reply_markup=kb
             )

@@ -342,6 +342,23 @@ async def leave_random_chat_queue(user_id: int):
             """, user_id, refund)
 
 
+async def get_active_searchers() -> list:
+    """All users currently waiting in the matchmaking queue, oldest first.
+
+    Postgres is the single source of truth for the queue (chat_status +
+    queue_joined_at). Redis is only an optional accelerator on top of this,
+    so a Redis flush/outage can never strand a paying user in the queue.
+    """
+    pool = await get_connection_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetch("""
+            SELECT user_id, queue_joined_at, target_gender
+            FROM users
+            WHERE chat_status = 'searching'
+            ORDER BY queue_joined_at ASC NULLS LAST
+        """)
+
+
 async def try_matchmaking(user_id: int, stage: int):
     pool = await get_connection_pool()
     async with pool.acquire() as conn:

@@ -19,7 +19,7 @@ from src.bot.background_workers import (
 
 # ── Deployment config ─────────────────────────────────────
 # Set USE_WEBHOOK=false in .env to run locally with polling
-USE_WEBHOOK  = os.getenv("USE_WEBHOOK", "true").lower() == "true"
+USE_WEBHOOK  = "true"
 WEBHOOK_PORT = int(os.getenv("PORT", "8000"))
 WEBHOOK_URL  = f"https://{WEBHOOK_HOST}/webhook/{TELEGRAM_BOT_TOKEN}"
 

@@ -1,3 +1,4 @@
+import html
 import asyncio
 from datetime import datetime, timedelta, timezone
 
@@ -55,7 +56,7 @@ def register_account_handlers(bot: AsyncTeleBot):
         await bot.reply_to(
             message,
             f"{EMOJI['100']['html']} <b>آمار و پروفایل من</b>\n\n"
-            f"{EMOJI['profile']['html']} | نام: {message.from_user.first_name}\n"
+            f"{EMOJI['profile']['html']} | نام: {html.escape(message.from_user.first_name or '')}\n"
             f"{EMOJI['id']['html']} | آیدی: <code>{message.chat.id}</code>\n"
             f"{EMOJI['green_dot']['html']} | جنسیت: <b>{gender_map[stats['gender']]}</b>\n"
             f"{EMOJI['coin']['html']} | موجودی سکه: <b>{stats['coins']}</b>\n"
@@ -87,7 +88,7 @@ def register_account_handlers(bot: AsyncTeleBot):
         await bot.reply_to(
             message,
             f"{EMOJI['coin']['html']} <b>مدیریت کیف پول سکه</b>\n\n"
-            f"{EMOJI['profile']['html']} | کاربر: {message.from_user.first_name}\n"
+            f"{EMOJI['profile']['html']} | کاربر: {html.escape(message.from_user.first_name or '')}\n"
             f"{EMOJI['gem']['html']} | موجودی فعلی: <b>{stats['coins']} سکه</b>\n\n"
             f"{EMOJI['thunder']['html']} با سکه‌های خود می‌توانید در بخش 🎲 <b>چت تصادفی</b> به پارتنرهای هم‌سطح متصل شوید!",
             parse_mode="HTML", reply_markup=inline_kb

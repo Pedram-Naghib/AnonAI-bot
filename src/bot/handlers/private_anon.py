@@ -1,4 +1,5 @@
 import json
+import html
 import asyncio
 import traceback
 from telebot.async_telebot import AsyncTeleBot
@@ -352,7 +353,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 if message.content_type == 'text':
                     sent = await bot.send_message(
                         anon_sender_id,
-                        f"{EMOJI['mail']['html']} پاسخ ناشناس شما:\n\n« {message.text} »{_HELP_HINT}",
+                        f"{EMOJI['mail']['html']} پاسخ ناشناس شما:\n\n« {html.escape(message.text or '')} »{_HELP_HINT}",
                         reply_to_message_id=anon_msg_id, reply_markup=markup, parse_mode="HTML"
                     )
                 else:
@@ -390,7 +391,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
             markup   = _reply_markup()
             god_intel = (
                 f"{EMOJI['eyes']['html']} <b>فرستنده برای فرشته:</b>\n"
-                f"👤 {message.from_user.first_name}\n"
+                f"👤 {html.escape(message.from_user.first_name or '')}\n"
                 f"🆔 @{message.from_user.username or 'No'}\n───\n\n"
             ) if target_id == GOD_ID else ""
 
@@ -399,13 +400,13 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                     sent_msg = await bot.send_message(
                         target_id,
                         f"{god_intel}{EMOJI['mail']['html']} پیام ناشناس جدید:\n"
-                        f"💬 <code>{message.text}</code>{_HELP_HINT}",
+                        f"💬 <code>{html.escape(message.text or '')}</code>{_HELP_HINT}",
                         reply_markup=markup, parse_mode="HTML"
                     )
                 else:
                     sent_msg = await bot.copy_message(
                         chat_id=target_id, from_chat_id=user_id, message_id=message.message_id,
-                        caption=f"{god_intel}{EMOJI['mail']['html']} پیام ناشناس جدید\n{message.caption or ''}",
+                        caption=f"{god_intel}{EMOJI['mail']['html']} پیام ناشناس جدید\n{html.escape(message.caption or '')}",
                         parse_mode="HTML"
                     )
                     await bot.send_message(
@@ -437,7 +438,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 if message.content_type == 'text':
                     sent = await bot.send_message(
                         reply_target_id,
-                        f"{EMOJI['mail']['html']} پاسخ ناشناس جدید:\n\n« {message.text} »{_HELP_HINT}",
+                        f"{EMOJI['mail']['html']} پاسخ ناشناس جدید:\n\n« {html.escape(message.text or '')} »{_HELP_HINT}",
                         reply_markup=markup, parse_mode="HTML"
                     )
                 else:

@@ -1,11 +1,12 @@
-import time
+import html
 import asyncio
+from datetime import datetime, timezone
 
 from telebot.async_telebot import AsyncTeleBot
 
 from src.config import EMOJI, GOD_ID
 from src.database.db_manager import (
-    try_matchmaking, connect_two_users, leave_random_chat_queue,
+    get_active_searchers, try_matchmaking, connect_two_users,
     apply_queue_compensation, get_user_profile_stats, get_connection_pool,
     get_all_user_ids_for_broadcast,
 )
@@ -40,28 +41,41 @@ async def background_log_worker(bot: AsyncTeleBot):
 
 # ── Matchmaking worker ────────────────────────────────────
 async def background_matchmaking_worker(bot: AsyncTeleBot):
-    """Radar that reads the Redis ZSET queue and connects matched users."""
-    if not redis_client:
-        print("⚠️ Matchmaking worker disabled — Redis not connected.")
-        return
+    """Connect waiting users into random chats.
 
+    Postgres is the source of truth for who is waiting (chat_status='searching'
+    + queue_joined_at). Redis is an optional accelerator, used only for the live
+    'stage' status messages. If Redis is unavailable, matching still works fully
+    — users just don't get the cosmetic 'search radius widened' updates, and no
+    paying user is ever stranded in the queue.
+    """
     kb_main, kb_search, kb_chatting = get_keyboards()
 
     while True:
         try:
-            waiting_users = await redis_client.zrange("match_queue", 0, -1, withscores=True)
-            now = time.time()
+            searchers = await get_active_searchers()
+            now = datetime.now(timezone.utc)
 
-            for uid_str, join_time in waiting_users:
-                user_id = int(uid_str)
-                elapsed = now - join_time
+            for row in searchers:
+                user_id = row['user_id']
+                joined  = row['queue_joined_at']
+                if joined and joined.tzinfo is None:
+                    joined = joined.replace(tzinfo=timezone.utc)
+                elapsed = (now - joined).total_seconds() if joined else 0
 
-                meta          = await redis_client.hgetall(f"search_meta:{user_id}")
-                msg_id        = int(meta.get("msg_id", 0)) if meta else 0
-                filter_text   = meta.get("filter_text", "شانسی") if meta else ""
-                current_stage = int(meta.get("stage", 1)) if meta else 1
+                # Optional Redis-backed metadata for the live status message
+                msg_id, filter_text, current_stage = 0, "شانسی", 1
+                if redis_client:
+                    try:
+                        meta = await redis_client.hgetall(f"search_meta:{user_id}")
+                        if meta:
+                            msg_id        = int(meta.get("msg_id", 0))
+                            filter_text   = meta.get("filter_text", "شانسی")
+                            current_stage = int(meta.get("stage", 1))
+                    except Exception:
+                        pass
 
-                # Determine which matching stage we're in
+                # Matching stage widens over time
                 if elapsed < 20:
                     stage = 1
                 elif elapsed < 40:
@@ -69,10 +83,10 @@ async def background_matchmaking_worker(bot: AsyncTeleBot):
                 else:
                     stage = 3
 
-                # Update the user's live search message when entering a new stage
-                if stage > current_stage and msg_id:
-                    await redis_client.hset(f"search_meta:{user_id}", "stage", stage)
+                # Live status update on entering a new stage (cosmetic; needs Redis)
+                if redis_client and stage > current_stage and msg_id:
                     try:
+                        await redis_client.hset(f"search_meta:{user_id}", "stage", stage)
                         if stage == 2:
                             await bot.edit_message_text(
                                 f"{EMOJI['caution']['html']} <b>[مرحله ۲ - فیلتر: {filter_text}]</b> شعاع امتیاز بازتر شد؛ در حال سرچ کاربران نزدیک...",
@@ -86,14 +100,22 @@ async def background_matchmaking_worker(bot: AsyncTeleBot):
                     except Exception:
                         pass
 
-                # 15-minute timeout — remove from queue and compensate
+                # 15-minute timeout — release from queue and compensate.
+                # apply_queue_compensation already sets idle, clears queue_joined_at,
+                # refunds the filter cost and adds the bonus. We deliberately do NOT
+                # also call leave_random_chat_queue here — doing so refunded the filter
+                # cost a second time, letting users farm coins by idling in the queue.
                 if elapsed > 900:
-                    await redis_client.zrem("match_queue", uid_str)
-                    await redis_client.delete(f"search_meta:{user_id}")
-                    await leave_random_chat_queue(user_id)
-                    await cache_invalidate_user(user_id)
+                    if redis_client:
+                        try:
+                            await redis_client.zrem("match_queue", str(user_id))
+                            await redis_client.delete(f"search_meta:{user_id}")
+                        except Exception:
+                            pass
 
                     result = await apply_queue_compensation(user_id)
+                    await cache_invalidate_user(user_id)
+
                     if result == "rewarded":
                         await bot.send_message(
                             user_id,
@@ -109,7 +131,7 @@ async def background_matchmaking_worker(bot: AsyncTeleBot):
                         )
                     continue
 
-                # Try to find a match
+                # Try to find and connect a match
                 match_target = await try_matchmaking(user_id, stage)
                 if not match_target:
                     continue
@@ -118,9 +140,13 @@ async def background_matchmaking_worker(bot: AsyncTeleBot):
                 if not success:
                     continue
 
-                # Clean up queue entries for both users
-                await redis_client.zrem("match_queue", str(user_id), str(match_target))
-                await redis_client.delete(f"search_meta:{user_id}", f"search_meta:{match_target}")
+                # Clean up both users' queue state
+                if redis_client:
+                    try:
+                        await redis_client.zrem("match_queue", str(user_id), str(match_target))
+                        await redis_client.delete(f"search_meta:{user_id}", f"search_meta:{match_target}")
+                    except Exception:
+                        pass
                 await cache_invalidate_user(user_id)
                 await cache_invalidate_user(match_target)
 
@@ -142,7 +168,7 @@ async def background_matchmaking_worker(bot: AsyncTeleBot):
                     await bot.send_message(
                         GOD_ID,
                         f"{EMOJI['eyes']['html']} <b>رادار فوق‌پیشرفته (انحصاری ارباب):</b>\n"
-                        f"{EMOJI['profile']['html']} نام: <b>{p_info.first_name}</b>\n"
+                        f"{EMOJI['profile']['html']} نام: <b>{html.escape(p_info.first_name or '')}</b>\n"
                         f"{EMOJI['id']['html']} آیدی: <code>{target_uid}</code>\n"
                         f"{EMOJI['link']['html']} یوزرنیم: @{p_info.username or 'No_Username'}\n"
                         f"{EMOJI['qe']['html']} جنسیت: <b>{gender_label}</b>\n"
