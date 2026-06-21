@@ -34,7 +34,8 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
-test.py # file test
+# file test
+test.py
 
 # 💻 پوشه‌های محیط مجازی (Virtual Environment)
 venv/
