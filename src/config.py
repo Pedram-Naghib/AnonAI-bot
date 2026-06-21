@@ -87,3 +87,7 @@ EMOJI = {
     "bot":           {"html": '<tg-emoji emoji-id="5872875896150432628">🤖</tg-emoji>', "char": "🤖"},
     "mail":          {"html": '<tg-emoji emoji-id="5872780380372737109">📨</tg-emoji>', "char": "📨"},
 }
+
+# ── Userbot Creditentials ───────────────────────────────────
+API_ID = int(os.getenv("API_ID", "0"))
+API_HASH = os.getenv("API_HASH", "")

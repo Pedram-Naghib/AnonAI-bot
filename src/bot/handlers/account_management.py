@@ -131,52 +131,69 @@ def register_account_handlers(bot: AsyncTeleBot):
             print(f"💥 Daily bonus check error: {e}")
             await bot.answer_callback_query(call.id, "❌ خطایی رخ داد.", show_alert=True)
 
-    # ── Daily bonus: roll dice & credit ──────────────────
-    @bot.callback_query_handler(func=lambda c: c.data in ["roll_the_dice", "cancel_dice"])
-    async def handle_dice_game_execution(call):
-        user_id    = call.message.chat.id
-        message_id = call.message.message_id
+# ── Daily bonus: show dice menu ───────────────────────
+    @bot.callback_query_handler(func=lambda c: c.data == "claim_daily")
+    async def handle_claim_daily_callback(call):
+        user_id = call.message.chat.id
+        pool    = await get_connection_pool()
 
-        if call.data == "cancel_dice":
-            await bot.answer_callback_query(call.id, "بازی لغو شد.")
-            try:
-                await bot.delete_message(user_id, message_id)
-            except Exception:
-                pass
+        try:
+            async with pool.acquire() as conn:
+                eligible, time_left = await _check_daily_cooldown(conn, user_id)
+
+            if not eligible:
+                await bot.answer_callback_query(
+                    call.id,
+                    f"❌ شما امروز هدیه خود را گرفته‌اید!\n⏳ زمان باقی‌مانده: {time_left} ساعت",
+                    show_alert=True
+                )
+                return
+
+            # به جای دکمه شیشه‌ای، از کاربر می‌خواهیم خودش تاس بفرستد
+            await bot.edit_message_text(
+                f"{EMOJI['ball']['html']} <b>به مینی‌گیم بونوس روزانه خوش اومدی!</b>\n\n"
+                "قوانین بازی عوض شده! حالا خودت باید تاس رو بندازی.\n"
+                f"روی اموجی زیر کلیک کن تا کپی بشه و همون رو برام بفرست تا شانست رو بسنجم:\n\n"
+                f"<code>🎲</code>",
+                user_id, call.message.message_id,
+                parse_mode="HTML"
+            )
+            await bot.answer_callback_query(call.id)
+
+        except Exception as e:
+            print(f"💥 Daily bonus check error: {e}")
+            await bot.answer_callback_query(call.id, "❌ خطایی رخ داد.", show_alert=True)
+
+    # ── Daily bonus: roll dice & credit (User sent dice) ──
+    @bot.message_handler(content_types=['dice'], func=lambda m: m.chat.type == "private")
+    async def handle_user_dice_roll(message):
+        user_id = message.chat.id
+        
+        # مطمئن می‌شویم که کاربر حتماً تاس (🎲) فرستاده باشد، نه دارت یا بسکتبال
+        if message.dice.emoji != "🎲":
             return
 
         pool = await get_connection_pool()
         try:
             async with pool.acquire() as conn:
-                # Double-check with FOR UPDATE to prevent race conditions
                 async with conn.transaction():
                     eligible, time_left = await _check_daily_cooldown(conn, user_id)
                     if not eligible:
-                        await bot.answer_callback_query(
-                            call.id, "⚠️ شما قبلاً شانس امروز رو بازی کردید.", show_alert=True
-                        )
-                        try:
-                            await bot.delete_message(user_id, message_id)
-                        except Exception:
-                            pass
+                        await bot.reply_to(message, f"⚠️ شما قبلاً شانس امروز رو بازی کردید.\n⏳ زمان باقی‌مانده: {time_left} ساعت")
                         return
 
-                    try:
-                        await bot.delete_message(user_id, message_id)
-                    except Exception:
-                        pass
-
-                    dice_msg   = await bot.send_dice(user_id, emoji="🎲")
-                    dice_value = dice_msg.dice.value
-
-                    # Mark bonus + credit coins atomically
+                    dice_value = message.dice.value
+                    
+                    # واریز سکه به حساب کاربر
                     await conn.execute(
                         "UPDATE users SET coins = coins + $1, last_daily_bonus_at = NOW() WHERE user_id = $2",
                         dice_value, user_id
                     )
 
             await cache_invalidate_user(user_id)
-            await asyncio.sleep(2.5)  # Let the dice animation finish
+            
+            # ۳ ثانیه صبر می‌کنیم تا انیمیشن تاس کاربر روی صفحه تمام شود
+            await asyncio.sleep(3)
 
             if dice_value <= 2:
                 result = (
@@ -205,15 +222,11 @@ def register_account_handlers(bot: AsyncTeleBot):
                     f"{EMOJI['clock']['html']} ۲۴ ساعت دیگه منتظرتم!"
                 )
 
-            await bot.send_message(user_id, result, parse_mode="HTML")
-            await bot.answer_callback_query(call.id)
+            await bot.reply_to(message, result, parse_mode="HTML")
 
         except Exception as e:
             print(f"💥 Dice roll error: {e}")
-            await bot.send_message(
-                user_id,
-                f"{EMOJI['caution']['html']} خطای فنی در سیستم تاس‌اندازی رخ داد."
-            )
+            await bot.reply_to(message, f"{EMOJI['caution']['html']} خطای فنی در سیستم تاس‌اندازی رخ داد.", parse_mode="HTML")
 
     # ── Coin help ─────────────────────────────────────────
     @bot.callback_query_handler(func=lambda c: c.data == "coin_help")

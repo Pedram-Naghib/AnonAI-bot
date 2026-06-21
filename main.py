@@ -68,12 +68,10 @@ async def send_startup_notification():
             f"{EMOJI['green_dot']['html']} <b>وضعیت:</b> فعال و آماده\n"
             f"{EMOJI['lock']['html']} <i>لوکال مموری پاکسازی و مجدداً لود شد.</i>"
         )
-        # Notify all super users, not just one hardcoded ID
-        for admin_id in SUPER_USERS:
-            try:
-                await bot.send_message(admin_id, msg, parse_mode="HTML")
-            except Exception:
-                pass
+        try:
+            await bot.send_message(SUPER_USERS[0], msg, parse_mode="HTML")
+        except Exception:
+            pass
         print("✅ Startup notification sent.")
     except Exception as e:
         print(f"💥 Startup notification error: {e}")

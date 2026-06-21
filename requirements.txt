@@ -8,3 +8,6 @@ anyio>=4.3.0
 python-dotenv>=1.0.1
 asyncpg==0.31.0
 redis==8.0.0
+Pyrogram==2.0.106
+py-tgcalls==2.3.3
+yt-dlp==2026.6.9
