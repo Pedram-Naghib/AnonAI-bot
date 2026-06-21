@@ -57,20 +57,19 @@ if API_ID and API_HASH:
         
         def extract_info():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                return ydl.extract_info(search_query, download=True)
+                info = ydl.extract_info(search_query, download=True)
+                # بررسی اینکه آیا نتیجه جستجو (لیست) است یا لینک مستقیم
+                v_info = info['entries'][0] if 'entries' in info else info
+                # گرفتن مسیر فایل دانلودی در همان اسکوپ
+                f_path = ydl.prepare_filename(v_info)
+                return v_info, f_path
 
         try:
             # اجرای دانلود یوتیوب در یک Thread جداگانه تا متد آسنکرون ربات کراش نزند
             loop = asyncio.get_running_loop()
-            info = await loop.run_in_executor(None, extract_info)
-            
-            if 'entries' in info:
-                video_info = info['entries'][0]
-            else:
-                video_info = info
+            video_info, file_path = await loop.run_in_executor(None, extract_info)
                 
             video_title = video_info.get('title', 'YouTube Audio')
-            file_path = ydl.prepare_filename(video_info)
             
             await msg.edit_text(f"{EMOJI['update']['html']} در حال استریم لایو آهنگ <b>{video_title}</b> در ویس‌چت...", parse_mode="HTML")
             

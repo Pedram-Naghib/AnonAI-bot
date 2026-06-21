@@ -19,9 +19,12 @@ from src.bot.background_workers import (
     background_cleanup_worker,
 )
 
+# 🔥 وارد کردن تابع اجرای یوزربات موزیک از مسیر جدید و ماژولار
+from src.user_bot.music_bot import start_music_worker
+
 # ── Deployment config ─────────────────────────────────────
 # Set USE_WEBHOOK=false in .env to run locally with polling
-USE_WEBHOOK  = "true"
+USE_WEBHOOK  = True
 WEBHOOK_PORT = int(os.getenv("PORT", "8000"))
 WEBHOOK_URL  = f"https://{WEBHOOK_HOST}/webhook/{TELEGRAM_BOT_TOKEN}"
 
@@ -93,6 +96,10 @@ async def start_bot():
     asyncio.create_task(background_matchmaking_worker(bot))
     asyncio.create_task(background_broadcast_worker(bot))
     asyncio.create_task(background_cleanup_worker(bot))
+
+    # 🎵 راه‌اندازی هم‌زمان یوزربات در کنار سرور اصلی
+    print("🎧 Starting Music UserBot...")
+    await start_music_worker()
 
     asyncio.create_task(send_startup_notification())
 
