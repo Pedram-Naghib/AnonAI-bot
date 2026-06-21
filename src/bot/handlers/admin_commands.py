@@ -1,4 +1,5 @@
 import re
+import html
 import asyncio
 import traceback
 
@@ -93,24 +94,6 @@ def register_admin_handlers(bot: AsyncTeleBot):
                 )
                 return
 
-            # Check each user is still reachable (hasn't blocked the bot)
-            async def _is_alive(row) -> tuple:
-                try:
-                    await asyncio.wait_for(
-                        bot.send_chat_action(row['user_id'], 'typing'),
-                        timeout=1.5
-                    )
-                    return row, True
-                except Exception:
-                    async with pool.acquire() as db_conn:
-                        await db_conn.execute(
-                            "UPDATE users SET anon_state = 'blocked_bot', chat_status = 'idle', active_partner_id = NULL WHERE user_id = $1",
-                            row['user_id']
-                        )
-                    return row, False
-
-            checked = await asyncio.gather(*[_is_alive(row) for row in rows])
-
             live_count = total_users - total_dead_users
             lines = [
                 f"{EMOJI['gem']['html']} <b>گزارش ارشد وضعیت دیتابیس</b>\n",
@@ -120,20 +103,15 @@ def register_admin_handlers(bot: AsyncTeleBot):
                 f"{EMOJI['magnifiyer']['html']} <i>۲۰ کاربر برتر بر اساس بیشترین تعامل:</i>\n",
             ]
 
-            valid = 0
-            for row, is_active in checked:
-                if not is_active:
-                    continue
-                valid += 1
+            for i, row in enumerate(rows[:20], start=1):
                 username = f"@{row['username']}" if row['username'] else "بدون یوزرنیم"
+                name     = html.escape(row['first_name'] or 'Unknown')
                 lines.append(
-                    f"{valid}. {EMOJI['profile']['html']} <b>{row['first_name'] or 'Unknown'}</b> "
+                    f"{i}. {EMOJI['profile']['html']} <b>{name}</b> "
                     f"(<code>{row['user_id']}</code>) | {username}\n"
                     f"   {EMOJI['recieve']['html']} دریافتی: <b>{row['received']}</b> | "
                     f"{EMOJI['send']['html']} ارسالی: <b>{row['sent']}</b>\n   ➖"
                 )
-                if valid >= 20:
-                    break
 
             await bot.reply_to(message, "\n".join(lines), parse_mode="HTML")
 

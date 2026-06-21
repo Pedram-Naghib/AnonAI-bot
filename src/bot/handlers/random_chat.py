@@ -102,11 +102,15 @@ def register_random_chat_handlers(bot: AsyncTeleBot):
             await bot.answer_callback_query(call.id, "❌ سکه کافی نداری!", show_alert=True)
             return
 
+        # Charge + enqueue atomically; the DB guard is the real authority on coins.
+        joined = await join_random_chat_queue(user_id, target_gender)
+        if not joined:
+            await bot.answer_callback_query(call.id, "❌ سکه کافی نداری!", show_alert=True)
+            return
+        await cache_invalidate_user(user_id)
+
         await bot.answer_callback_query(call.id, "وارد صف شدی 🚀")
         await bot.delete_message(user_id, call.message.message_id)
-
-        await join_random_chat_queue(user_id, target_gender)
-        await cache_invalidate_user(user_id)
 
         filter_text = "شانسی" if target_gender == "any" else ("پسر" if target_gender == "male" else "دختر")
         await send_bot_log(bot, call.message, "ورود به صف", f"فیلتر: {filter_text}")

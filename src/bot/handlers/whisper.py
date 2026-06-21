@@ -10,8 +10,19 @@ from src.config import EMOJI
 from src.database.db_manager import get_or_create_short_link
 
 # In-memory store — whispers are intentionally ephemeral and are lost on restart.
-# If persistence is needed in future, move this to Redis with a TTL.
+# Bounded so a long-running process can't leak memory: once full, the oldest
+# whisper is evicted (dicts keep insertion order on Python 3.7+).
+# If durable persistence is ever needed, move this to Redis with a TTL.
 WHISPER_STORAGE: dict = {}
+WHISPER_MAX = 5000
+
+
+def _store_whisper(w_id: str, data: dict):
+    if len(WHISPER_STORAGE) >= WHISPER_MAX:
+        oldest = next(iter(WHISPER_STORAGE), None)
+        if oldest is not None:
+            WHISPER_STORAGE.pop(oldest, None)
+    WHISPER_STORAGE[w_id] = data
 
 
 def register_whisper_handlers(bot: AsyncTeleBot):
@@ -105,14 +116,14 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                 return
 
             w_id = str(uuid.uuid4())[:8]
-            WHISPER_STORAGE[w_id] = {
+            _store_whisper(w_id, {
                 "sender_id":   sender_id,
                 "sender_name": sender_name,
                 "sender_tag":  sender_tag,
                 "target":      target_user.lower(),
                 "text":        secret_text,
                 "is_opened":   False,
-            }
+            })
 
             kb_initial = InlineKeyboardMarkup()
             kb_initial.row(

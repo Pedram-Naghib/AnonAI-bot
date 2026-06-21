@@ -15,7 +15,13 @@ def register_reaction_handlers(bot: AsyncTeleBot):
         if not message_reaction.new_reaction:
             return
 
-        target_emoji = message_reaction.new_reaction[0].emoji
+        # Only normal (unicode) emoji reactions can be mirrored. Premium/custom
+        # emoji reactions are a different type with no .emoji attribute — skip them
+        # instead of crashing on attribute access.
+        reaction = message_reaction.new_reaction[0]
+        if getattr(reaction, "type", None) != "emoji" or not getattr(reaction, "emoji", None):
+            return
+        target_emoji = reaction.emoji
 
         if chat_id in SUPER_USERS:
             # Admin reacted to a received anon message — mirror to the original sender

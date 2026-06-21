@@ -193,7 +193,20 @@ async def background_broadcast_worker(bot: AsyncTeleBot):
         try:
             await bot.send_message(uid, text, parse_mode="HTML")
             return True
-        except Exception:
+        except Exception as e:
+            # Only retire users on *permanent* failures (blocked/deactivated/gone),
+            # never on transient network errors, so we don't wrongly drop live users.
+            err = str(e).lower()
+            if any(k in err for k in ("blocked", "deactivated", "chat not found", "user is deactivated")):
+                try:
+                    async with pool.acquire() as conn:
+                        await conn.execute(
+                            "UPDATE users SET anon_state = 'blocked_bot', chat_status = 'idle', "
+                            "active_partner_id = NULL WHERE user_id = $1",
+                            uid
+                        )
+                except Exception:
+                    pass
             return False  # User blocked the bot or invalid ID
 
     while True:

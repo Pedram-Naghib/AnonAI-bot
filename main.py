@@ -10,8 +10,8 @@ from telebot.async_telebot import AsyncTeleBot
 
 from src.config import TELEGRAM_BOT_TOKEN, EMOJI, SUPER_USERS, WEBHOOK_HOST
 from src.bot.handlers import register_bot_handlers
-from src.database.db_manager import init_db
-from src.bot.redis_config import ping_redis
+from src.database.db_manager import init_db, close_connection_pool
+from src.bot.redis_config import ping_redis, redis_client
 from src.bot.background_workers import (
     background_log_worker,
     background_matchmaking_worker,
@@ -110,11 +110,31 @@ async def start_bot():
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(server.shutdown()))
 
-        await server.serve()
+        try:
+            await server.serve()
+        finally:
+            await _shutdown_cleanup()
     else:
         print("🔄 Starting long polling (local mode)...")
         await bot.remove_webhook()
-        await bot.infinity_polling(logger_level=20, allowed_updates=ALLOWED_UPDATES)
+        try:
+            await bot.infinity_polling(logger_level=20, allowed_updates=ALLOWED_UPDATES)
+        finally:
+            await _shutdown_cleanup()
+
+
+# ── Shutdown cleanup ──────────────────────────────────────
+async def _shutdown_cleanup():
+    print("🧹 Closing connections...")
+    try:
+        await close_connection_pool()
+    except Exception as e:
+        print(f"💥 Pool close error: {e}")
+    try:
+        if redis_client:
+            await redis_client.aclose()
+    except Exception as e:
+        print(f"💥 Redis close error: {e}")
 
 
 if __name__ == "__main__":

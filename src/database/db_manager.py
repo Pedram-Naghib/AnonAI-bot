@@ -29,6 +29,14 @@ async def get_connection_pool():
     return DB_POOL
 
 
+async def close_connection_pool():
+    """Close the asyncpg pool cleanly on shutdown."""
+    global DB_POOL
+    if DB_POOL is not None:
+        await DB_POOL.close()
+        DB_POOL = None
+
+
 # ── Schema init ───────────────────────────────────────────
 async def init_db():
     pool = await get_connection_pool()
@@ -126,6 +134,21 @@ async def init_db():
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_msgmap_sender    ON message_map (anon_sender_id, anon_msg_id);")
         # Supports the daily prune of old routing rows
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_msgmap_created   ON message_map (created_at);")
+
+        # Enforce one short_code per user. A race in get_or_create_short_link could
+        # historically create duplicates; collapse any to the oldest (so a link
+        # someone already shared keeps working), then add a unique index. Wrapped so
+        # a migration hiccup can never block startup.
+        try:
+            await conn.execute("""
+                DELETE FROM user_links a
+                USING user_links b
+                WHERE a.user_id = b.user_id
+                  AND a.created_at > b.created_at
+            """)
+            await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_user_links_user ON user_links (user_id);")
+        except Exception as e:
+            print(f"⚠️ user_links uniqueness migration skipped: {e}")
 
         # Tiny key/value table for one-time migration flags
         await conn.execute("""
@@ -384,16 +407,21 @@ async def get_user_chat_status_ext(user_id: int):
         return (row['chat_status'], row['active_partner_id'], row['coins'], row['gender']) if row else ('idle', None, 10, None)
 
 
-async def join_random_chat_queue(user_id: int, target_gender: str):
+async def join_random_chat_queue(user_id: int, target_gender: str) -> bool:
+    """Put the user into the queue, charging the filter cost. Returns False (and
+    changes nothing) if they can't afford it — a DB-level guard so coins can never
+    go negative even under a double-tap race."""
     pool = await get_connection_pool()
     async with pool.acquire() as conn:
         cost = BASE_CHAT_COST + (GENDER_FILTER_COST if target_gender in ('male', 'female') else 0)
-        await conn.execute("""
+        result = await conn.execute("""
             UPDATE users
             SET chat_status = 'searching', queue_joined_at = NOW(),
                 target_gender = $2::TEXT, coins = coins - $3
-            WHERE user_id = $1
+            WHERE user_id = $1 AND coins >= $3
         """, user_id, target_gender, cost)
+        # asyncpg returns "UPDATE <n>" — 1 means the charge succeeded.
+        return result.endswith("1")
 
 
 async def leave_random_chat_queue(user_id: int):
@@ -582,36 +610,6 @@ async def add_to_chat_history_match(user_id: int, partner_id: int, status_type: 
                 INSERT INTO random_chat_blocks (user_id, blocked_partner_id)
                 VALUES ($1, $2) ON CONFLICT DO NOTHING
             """, user_id, partner_id)
-
-
-async def claim_daily_bonus(user_id: int) -> str:
-    """
-    Returns 'rewarded', or 'cooldown_HH:MM' if still within 24h window.
-    Called by account_management — do not duplicate this logic there.
-    """
-    pool = await get_connection_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT last_daily_bonus_at FROM users WHERE user_id = $1", user_id
-        )
-        now = datetime.now(timezone.utc)
-
-        if row and row['last_daily_bonus_at']:
-            last_bonus = row['last_daily_bonus_at']
-            if last_bonus.tzinfo is None:
-                last_bonus = last_bonus.replace(tzinfo=timezone.utc)
-            if now - last_bonus < timedelta(days=1):
-                time_left = timedelta(days=1) - (now - last_bonus)
-                hours, remainder = divmod(time_left.seconds, 3600)
-                minutes, _ = divmod(remainder, 60)
-                return f"cooldown_{hours:02d}:{minutes:02d}"
-
-        # Actual coin credit happens after the dice roll in account_management
-        # This function only checks eligibility and marks the timestamp
-        await conn.execute(
-            "UPDATE users SET last_daily_bonus_at = NOW() WHERE user_id = $1", user_id
-        )
-        return "rewarded"
 
 
 async def set_user_referrer(user_id: int, referrer_id: int, is_pure_ref: bool = False):
