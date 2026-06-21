@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 
 from telebot.async_telebot import AsyncTeleBot
 
-from src.config import EMOJI, GOD_ID
+# 🔥 SUPER_USERS به لیست ایمپورت اضافه شد
+from src.config import EMOJI, GOD_ID, SUPER_USERS
 from src.database.db_manager import (
     get_active_searchers, try_matchmaking, connect_two_users,
     apply_queue_compensation, get_user_profile_stats, get_connection_pool,
@@ -101,10 +102,6 @@ async def background_matchmaking_worker(bot: AsyncTeleBot):
                         pass
 
                 # 15-minute timeout — release from queue and compensate.
-                # apply_queue_compensation already sets idle, clears queue_joined_at,
-                # refunds the filter cost and adds the bonus. We deliberately do NOT
-                # also call leave_random_chat_queue here — doing so refunded the filter
-                # cost a second time, letting users farm coins by idling in the queue.
                 if elapsed > 900:
                     if redis_client:
                         try:
@@ -154,9 +151,11 @@ async def background_matchmaking_worker(bot: AsyncTeleBot):
                 await bot.send_message(user_id,     success_text, parse_mode="HTML", reply_markup=kb_chatting)
                 await bot.send_message(match_target, success_text, parse_mode="HTML", reply_markup=kb_chatting)
 
-                await log_queue.put(
-                    f"🤝 <b>[MATCH]</b> کاربر <code>{user_id}</code> متصل شد به <code>{match_target}</code> — مرحله {stage}"
-                )
+                # 🔥 جلوگیری از ثبت لاگ برای اکانت‌های سوپریوزر (ادمین‌ها)
+                if user_id not in SUPER_USERS and match_target not in SUPER_USERS:
+                    await log_queue.put(
+                        f"🤝 <b>[MATCH]</b> کاربر <code>{user_id}</code> متصل شد به <code>{match_target}</code> — مرحله {stage}"
+                    )
 
                 # GOD radar: reveal partner info to the admin
                 for current_uid, target_uid in [(user_id, match_target), (match_target, user_id)]:

@@ -19,9 +19,6 @@ from src.bot.background_workers import (
     background_cleanup_worker,
 )
 
-# 🔥 وارد کردن تابع اجرای یوزربات موزیک از مسیر جدید و ماژولار
-from src.user_bot.music_bot import start_music_worker
-
 # ── Deployment config ─────────────────────────────────────
 # Set USE_WEBHOOK=false in .env to run locally with polling
 USE_WEBHOOK  = True
@@ -99,6 +96,9 @@ async def start_bot():
 
     # 🎵 راه‌اندازی هم‌زمان یوزربات در کنار سرور اصلی
     print("🎧 Starting Music UserBot...")
+    
+    # 🔥 ایمپورت تنبل: دقیقاً اینجا ایمپورتش می‌کنیم چون الان Event Loop روشنه!
+    from src.user_bot.music_bot import start_music_worker 
     await start_music_worker()
 
     asyncio.create_task(send_startup_notification())
