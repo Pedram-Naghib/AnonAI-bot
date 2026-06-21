@@ -2,7 +2,7 @@ import os
 import asyncio
 from pyrogram import Client, filters
 from pytgcalls import PyTgCalls
-from pytgcalls.types import AudioPiped
+from pytgcalls.types import MediaStream
 
 # دریافت ثابت‌ها از لایه خنثی کانفیگ
 from src.config import API_ID, API_HASH, SUPER_USERS, EMOJI
@@ -30,7 +30,7 @@ if API_ID and API_HASH:
                 file_path = await message.reply_to_message.download()
                 await msg.edit_text(f"{EMOJI['update']['html']} در حال اتصال به ویس‌چت گروه...", parse_mode="HTML")
                 
-                await call_py.play(group_chat_id, AudioPiped(file_path))
+                await call_py.play(group_chat_id, MediaStream(file_path))
                 await msg.edit_text(f"{EMOJI['thunder']['html']} <b>فایل صوتی با موفقیت در ویس‌چت پخش شد!</b>", parse_mode="HTML")
             except Exception as e:
                 await msg.edit_text(f"{EMOJI['ban']['html']} خطا در پخش فایل: <code>{e}</code>", parse_mode="HTML")
@@ -74,7 +74,7 @@ if API_ID and API_HASH:
             await msg.edit_text(f"{EMOJI['update']['html']} در حال استریم لایو آهنگ <b>{video_title}</b> در ویس‌چت...", parse_mode="HTML")
             
             # پخش موزیک دانلود شده از یوتیوب در ویس چت
-            await call_py.play(group_chat_id, AudioPiped(file_path))
+            await call_py.play(group_chat_id, MediaStream(file_path))
             await msg.edit_text(f"{EMOJI['check']['html']} <b>در حال پخش از یوتیوب:</b>\n🎵 <code>{video_title}</code>", parse_mode="HTML")
             
         except Exception as e:
