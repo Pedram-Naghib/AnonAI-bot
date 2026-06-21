@@ -8,7 +8,7 @@ from src.config import EMOJI, GOD_ID
 from src.database.db_manager import (
     get_active_searchers, try_matchmaking, connect_two_users,
     apply_queue_compensation, get_user_profile_stats, get_connection_pool,
-    get_all_user_ids_for_broadcast,
+    get_all_user_ids_for_broadcast, prune_old_message_maps,
 )
 from src.bot.redis_config import redis_client, cache_invalidate_user, log_queue
 from src.bot.handlers.private_anon import get_keyboards  # safe — no circular dependency
@@ -254,3 +254,23 @@ async def background_broadcast_worker(bot: AsyncTeleBot):
         except Exception as e:
             print(f"💥 Broadcast Worker Error: {e}")
             await asyncio.sleep(10)
+
+# ── Maintenance worker ────────────────────────────────────
+async def background_cleanup_worker(bot: AsyncTeleBot):
+    """Once a day, prune old message_map routing rows so the table can't grow
+    forever. Lifetime received/sent totals live in users.total_* and are untouched.
+    Runs one prune shortly after startup, then every 24h."""
+    RETENTION_DAYS = 30
+
+    # Small delay so it doesn't fight the rest of the startup sequence
+    await asyncio.sleep(60)
+
+    while True:
+        try:
+            deleted = await prune_old_message_maps(RETENTION_DAYS)
+            if deleted:
+                print(f"🧹 Pruned {deleted} message_map rows older than {RETENTION_DAYS} days.")
+        except Exception as e:
+            print(f"💥 Cleanup Worker Error: {e}")
+
+        await asyncio.sleep(86400)  # 24 hours

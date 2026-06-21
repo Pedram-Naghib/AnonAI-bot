@@ -1,9 +1,10 @@
 import os
 import asyncio
 import signal
+import secrets
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from telebot.types import Update
 from telebot.async_telebot import AsyncTeleBot
 
@@ -15,13 +16,19 @@ from src.bot.background_workers import (
     background_log_worker,
     background_matchmaking_worker,
     background_broadcast_worker,
+    background_cleanup_worker,
 )
 
 # ── Deployment config ─────────────────────────────────────
 # Set USE_WEBHOOK=false in .env to run locally with polling
-USE_WEBHOOK  = True
+USE_WEBHOOK  = "true"
 WEBHOOK_PORT = int(os.getenv("PORT", "8000"))
 WEBHOOK_URL  = f"https://{WEBHOOK_HOST}/webhook/{TELEGRAM_BOT_TOKEN}"
+
+# Shared secret so only Telegram can call our webhook. If you don't set one in the
+# environment, a fresh random secret is generated on each startup (the webhook is
+# re-registered at startup anyway, so Telegram always has the matching value).
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip() or secrets.token_urlsafe(32)
 
 ALLOWED_UPDATES = ["message", "callback_query", "message_reaction", "inline_query", "chosen_inline_result"]
 
@@ -38,6 +45,11 @@ async def health_check():
 # ── Webhook endpoint ──────────────────────────────────────
 @app.post(f"/webhook/{TELEGRAM_BOT_TOKEN}")
 async def telegram_webhook(request: Request):
+    # Telegram echoes back the secret we registered. Reject anything that doesn't
+    # carry it — that's how we know the request is really from Telegram.
+    if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
+        return Response(status_code=403)
+
     json_data = await request.json()
     update    = Update.de_json(json_data)
     await bot.process_new_updates([update])
@@ -82,13 +94,14 @@ async def start_bot():
     asyncio.create_task(background_log_worker(bot))
     asyncio.create_task(background_matchmaking_worker(bot))
     asyncio.create_task(background_broadcast_worker(bot))
+    asyncio.create_task(background_cleanup_worker(bot))
 
     asyncio.create_task(send_startup_notification())
 
     if USE_WEBHOOK:
         print(f"🔔 Setting webhook → {WEBHOOK_URL}")
         await bot.remove_webhook()
-        await bot.set_webhook(url=WEBHOOK_URL, allowed_updates=ALLOWED_UPDATES)
+        await bot.set_webhook(url=WEBHOOK_URL, allowed_updates=ALLOWED_UPDATES, secret_token=WEBHOOK_SECRET)
 
         config = uvicorn.Config(app=app, host="0.0.0.0", port=WEBHOOK_PORT, loop="asyncio")
         server = uvicorn.Server(config)

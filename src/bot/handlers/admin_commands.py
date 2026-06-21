@@ -77,17 +77,11 @@ def register_admin_handlers(bot: AsyncTeleBot):
                         u.user_id,
                         u.first_name,
                         u.username,
-                        COALESCE(r.received_count, 0) AS received,
-                        COALESCE(s.sent_count,     0) AS sent
+                        u.total_received AS received,
+                        u.total_sent     AS sent
                     FROM users u
-                    LEFT JOIN (
-                        SELECT user_chat_id,   COUNT(*) AS received_count FROM message_map GROUP BY user_chat_id
-                    ) r ON u.user_id = r.user_chat_id
-                    LEFT JOIN (
-                        SELECT anon_sender_id, COUNT(*) AS sent_count     FROM message_map GROUP BY anon_sender_id
-                    ) s ON u.user_id = s.anon_sender_id
                     WHERE u.anon_state != 'blocked_bot'
-                    ORDER BY (COALESCE(r.received_count, 0) + COALESCE(s.sent_count, 0)) DESC
+                    ORDER BY (u.total_received + u.total_sent) DESC
                     LIMIT 30
                 """)
 

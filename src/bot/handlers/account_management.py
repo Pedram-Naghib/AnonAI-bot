@@ -312,7 +312,9 @@ def register_account_handlers(bot: AsyncTeleBot):
                             chat_status       = 'idle',
                             active_partner_id = NULL,
                             queue_joined_at   = NULL,
-                            target_gender     = 'any'
+                            target_gender     = 'any',
+                            total_received    = 0,
+                            total_sent        = 0
                         WHERE user_id = $1
                     """, user_id)
 

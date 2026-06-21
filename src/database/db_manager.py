@@ -53,6 +53,8 @@ async def init_db():
                 is_ref_rewarded      BOOLEAN      DEFAULT FALSE,
                 gender               TEXT         DEFAULT NULL,
                 target_gender        TEXT         DEFAULT 'any',
+                total_received       BIGINT       DEFAULT 0,
+                total_sent           BIGINT       DEFAULT 0,
                 joined_at            TIMESTAMPTZ  DEFAULT NOW()
             )
         """)
@@ -66,6 +68,8 @@ async def init_db():
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS gender               TEXT    DEFAULT NULL;",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS target_gender        TEXT    DEFAULT 'any';",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_daily_bonus_at  TIMESTAMPTZ DEFAULT NULL;",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS total_received       BIGINT  DEFAULT 0;",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS total_sent           BIGINT  DEFAULT 0;",
         ]:
             await conn.execute(q)
 
@@ -90,9 +94,12 @@ async def init_db():
                 user_msg_id   BIGINT,
                 anon_sender_id BIGINT,
                 anon_msg_id   BIGINT,
+                created_at    TIMESTAMPTZ DEFAULT NOW(),
                 PRIMARY KEY (user_chat_id, user_msg_id)
             )
         """)
+        # Existing message_map tables won't have created_at — add it.
+        await conn.execute("ALTER TABLE message_map ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();")
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS block_list (
                 owner_id   BIGINT,
@@ -117,6 +124,36 @@ async def init_db():
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_user_links_code  ON user_links (short_code);")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_msgmap_lookup    ON message_map (user_chat_id, user_msg_id);")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_msgmap_sender    ON message_map (anon_sender_id, anon_msg_id);")
+        # Supports the daily prune of old routing rows
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_msgmap_created   ON message_map (created_at);")
+
+        # Tiny key/value table for one-time migration flags
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS bot_meta (
+                key   TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+
+        # One-time backfill: seed the new lifetime counters from existing message_map
+        # data so nobody's profile numbers reset to zero. Guarded by a flag so it can
+        # NEVER run twice (running it again after old rows are pruned would undercount).
+        already_done = await conn.fetchval(
+            "SELECT 1 FROM bot_meta WHERE key = 'msgmap_counters_backfilled'"
+        )
+        if not already_done:
+            await conn.execute("""
+                UPDATE users u SET
+                    total_received = COALESCE(
+                        (SELECT COUNT(*) FROM message_map WHERE user_chat_id   = u.user_id), 0),
+                    total_sent = COALESCE(
+                        (SELECT COUNT(*) FROM message_map WHERE anon_sender_id = u.user_id), 0)
+            """)
+            await conn.execute(
+                "INSERT INTO bot_meta (key, value) VALUES ('msgmap_counters_backfilled', 'true') "
+                "ON CONFLICT (key) DO NOTHING"
+            )
+            print("🔢 Backfilled lifetime message counters from message_map.")
 
     print("🚀 Database initialized successfully.")
 
@@ -234,11 +271,41 @@ async def get_user_id_by_short_code(short_code: str):
 async def save_message_mapping(user_chat_id: int, user_msg_id: int, anon_sender_id: int, anon_msg_id: int):
     pool = await get_connection_pool()
     async with pool.acquire() as conn:
-        await conn.execute("""
-            INSERT INTO message_map (user_chat_id, user_msg_id, anon_sender_id, anon_msg_id)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT DO NOTHING
-        """, user_chat_id, user_msg_id, anon_sender_id, anon_msg_id)
+        async with conn.transaction():
+            inserted = await conn.fetchval("""
+                INSERT INTO message_map (user_chat_id, user_msg_id, anon_sender_id, anon_msg_id)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT DO NOTHING
+                RETURNING 1
+            """, user_chat_id, user_msg_id, anon_sender_id, anon_msg_id)
+
+            # Only bump lifetime counters when a new row was actually stored, so the
+            # totals stay in lock-step with what the old COUNT(*) used to report.
+            if inserted:
+                await conn.execute(
+                    "UPDATE users SET total_received = total_received + 1 WHERE user_id = $1",
+                    user_chat_id
+                )
+                await conn.execute(
+                    "UPDATE users SET total_sent = total_sent + 1 WHERE user_id = $1",
+                    anon_sender_id
+                )
+
+
+async def prune_old_message_maps(days: int = 30) -> int:
+    """Delete routing rows older than `days`. Replies/reactions only ever target
+    recent messages, so this frees space without breaking anything. Lifetime
+    received/sent totals live in users.total_* and are unaffected."""
+    pool = await get_connection_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            f"DELETE FROM message_map WHERE created_at < NOW() - INTERVAL '{int(days)} days'"
+        )
+        # asyncpg returns a string like "DELETE 42"
+        try:
+            return int(result.split()[-1])
+        except Exception:
+            return 0
 
 
 async def get_anon_sender_by_msg(user_chat_id: int, user_msg_id: int):
@@ -283,16 +350,17 @@ async def is_user_blocked(owner_id: int, blocked_id: int) -> bool:
 async def get_user_profile_stats(user_id: int) -> dict:
     pool = await get_connection_pool()
     async with pool.acquire() as conn:
-        user_info        = await conn.fetchrow("SELECT coins, rating, gender FROM users WHERE user_id = $1", user_id)
-        received_count   = await conn.fetchval("SELECT COUNT(*) FROM message_map WHERE user_chat_id   = $1", user_id)
-        sent_count       = await conn.fetchval("SELECT COUNT(*) FROM message_map WHERE anon_sender_id = $1", user_id)
+        user_info        = await conn.fetchrow(
+            "SELECT coins, rating, gender, total_received, total_sent FROM users WHERE user_id = $1",
+            user_id
+        )
         blocked_count    = await conn.fetchval("SELECT COUNT(*) FROM block_list  WHERE owner_id       = $1", user_id)
         return {
-            "coins":    user_info['coins']  if user_info else 10,
-            "rating":   user_info['rating'] if user_info else 5.0,
-            "gender":   user_info['gender'] if user_info else None,
-            "received": received_count,
-            "sent":     sent_count,
+            "coins":    user_info['coins']          if user_info else 10,
+            "rating":   user_info['rating']         if user_info else 5.0,
+            "gender":   user_info['gender']         if user_info else None,
+            "received": user_info['total_received'] if user_info else 0,
+            "sent":     user_info['total_sent']     if user_info else 0,
             "blocked":  blocked_count,
         }
 
