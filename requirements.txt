@@ -11,3 +11,4 @@ redis==8.0.0
 Telethon==1.44.0
 py-tgcalls==2.3.3
 yt-dlp==2026.6.9
+python-socks[asyncio]>=2.5.0

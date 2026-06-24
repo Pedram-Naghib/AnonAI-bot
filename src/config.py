@@ -14,6 +14,10 @@ SUPER_USERS   = [int(x) for x in os.getenv("SUPER_USERS", "8627765327,6779908406
 GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID", "-1001434396268"))
 LOG_GROUP_ID  = int(os.getenv("LOG_GROUP_ID",  "-5295499371"))
 
+# ── Userbot Creditentials ───────────────────────────────────
+API_ID = int(os.getenv("API_ID", "0"))
+API_HASH = os.getenv("API_HASH", "")
+
 # ── Deployment ───────────────────────────────────────────
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "anonai-bot.onrender.com")
 
@@ -87,7 +91,3 @@ EMOJI = {
     "bot":           {"html": '<tg-emoji emoji-id="5872875896150432628">🤖</tg-emoji>', "char": "🤖"},
     "mail":          {"html": '<tg-emoji emoji-id="5872780380372737109">📨</tg-emoji>', "char": "📨"},
 }
-
-# ── Userbot Creditentials ───────────────────────────────────
-API_ID = int(os.getenv("API_ID", "0"))
-API_HASH = os.getenv("API_HASH", "")
