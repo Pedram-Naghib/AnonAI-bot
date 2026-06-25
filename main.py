@@ -26,8 +26,7 @@ WEBHOOK_PORT = int(os.getenv("PORT", "8000"))
 WEBHOOK_URL  = f"https://{WEBHOOK_HOST}/webhook/{TELEGRAM_BOT_TOKEN}"
 
 # Shared secret so only Telegram can call our webhook. If you don't set one in the
-# environment, a fresh random secret is generated on each startup (the webhook is
-# re-registered at startup anyway, so Telegram always has the matching value).
+# environment, a fresh random secret is generated on each startup.
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip() or secrets.token_urlsafe(32)
 
 ALLOWED_UPDATES = ["message", "callback_query", "message_reaction", "inline_query", "chosen_inline_result"]
@@ -35,18 +34,14 @@ ALLOWED_UPDATES = ["message", "callback_query", "message_reaction", "inline_quer
 bot = AsyncTeleBot(TELEGRAM_BOT_TOKEN)
 app = FastAPI()
 
-
 # ── Health check ──────────────────────────────────────────
 @app.api_route("/", methods=["GET", "HEAD"])
 async def health_check():
     return {"status": "alive"}
 
-
 # ── Webhook endpoint ──────────────────────────────────────
 @app.post(f"/webhook/{TELEGRAM_BOT_TOKEN}")
 async def telegram_webhook(request: Request):
-    # Telegram echoes back the secret we registered. Reject anything that doesn't
-    # carry it — that's how we know the request is really from Telegram.
     if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
         return Response(status_code=403)
 
@@ -54,7 +49,6 @@ async def telegram_webhook(request: Request):
     update    = Update.de_json(json_data)
     await bot.process_new_updates([update])
     return {"status": "ok"}
-
 
 # ── Startup notification ──────────────────────────────────
 async def send_startup_notification():
@@ -76,7 +70,6 @@ async def send_startup_notification():
     except Exception as e:
         print(f"💥 Startup notification error: {e}")
 
-
 # ── Main startup sequence ─────────────────────────────────
 async def start_bot():
     print("🗄️  Initializing database...")
@@ -97,9 +90,9 @@ async def start_bot():
     # 🎵 راه‌اندازی هم‌زمان یوزربات در کنار سرور اصلی
     print("🎧 Starting Music UserBot...")
     
-    # 🔥 ایمپورت تنبل: دقیقاً اینجا ایمپورتش می‌کنیم چون الان Event Loop روشنه!
+    # 🔥 ایمپورت و اجرا در پس‌زمینه (حل مشکل گیر کردن کد)
     from src.user_bot.music_bot import start_music_worker 
-    await start_music_worker()
+    asyncio.create_task(start_music_worker())
 
     asyncio.create_task(send_startup_notification())
 
@@ -127,7 +120,6 @@ async def start_bot():
         finally:
             await _shutdown_cleanup()
 
-
 # ── Shutdown cleanup ──────────────────────────────────────
 async def _shutdown_cleanup():
     print("🧹 Closing connections...")
@@ -140,7 +132,6 @@ async def _shutdown_cleanup():
             await redis_client.aclose()
     except Exception as e:
         print(f"💥 Redis close error: {e}")
-
 
 if __name__ == "__main__":
     asyncio.run(start_bot())
