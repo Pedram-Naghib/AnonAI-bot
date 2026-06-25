@@ -44,7 +44,7 @@ async def ping_handler(event):
 
 # ── هندلر پخش آهنگ (فارسی و انگلیسی) ──────────────────────
 # با تایپ کردن .play یا کلمه "پخش" فعال می‌شود
-@client.on(events.NewMessage(pattern=r'^(?i)(\.play|پخش)$'))
+@client.on(events.NewMessage(pattern=r'(?i)^(\.play|پخش)$'))
 async def play_handler(event):
     if not (event.out or event.sender_id in SUPER_USERS or event.chat_id == GROUP_CHAT_ID):
         return
@@ -79,7 +79,7 @@ async def play_handler(event):
 
 # ── هندلر توقف آهنگ (فارسی و انگلیسی) ─────────────────────
 # با تایپ کردن .stop یا کلمه "توقف" فعال می‌شود
-@client.on(events.NewMessage(pattern=r'^(?i)(\.stop|توقف)$'))
+@client.on(events.NewMessage(pattern=r'(?i)^(\.stop|توقف)$'))
 async def stop_handler(event):
     if not (event.out or event.sender_id in SUPER_USERS or event.chat_id == GROUP_CHAT_ID):
         return
