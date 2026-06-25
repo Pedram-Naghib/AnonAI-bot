@@ -1,27 +1,28 @@
 """
-یوزربات موزیک — Telethon + PyTgCalls 2.3.3
+یوزربات موزیک یکپارچه (Single-Process) — Telethon + PyTgCalls
+
+در این معماری جدید، Redis کاملاً حذف شده است. یوزربات و ربات رسمی هر دو در یک
+Event Loop اجرا می‌شوند. این فایل دیگر به صورت مستقل اجرا نمی‌شود، بلکه تابع 
+استارتاپ آن توسط فایل main.py فراخوانی می‌گردد.
 """
 
 import os
-import json
 import asyncio
-
-import redis.asyncio as aioredis
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-
-# 🌟 سینتکس مدرن و درستِ خودت
 from pytgcalls import PyTgCalls
 from pytgcalls.types import MediaStream, StreamEnded
+from telebot.async_telebot import AsyncTeleBot
 
+# 🌟 وارد کردن توابع حافظه موقت (بدون نیاز به await)
 from src.bot.music_protocol import (
-    CMD_CHANNEL, EVT_CHANNEL, now_key, queue_key, pack, unpack, IDLE_TIMEOUT,
+    get_now, set_now, clear_now, get_queue_len, 
+    push_to_queue, pop_from_queue, clear_queue, IDLE_TIMEOUT
 )
 
 # ── پیکربندی ──────────────────────────────────────────────
 API_ID   = int(os.getenv("API_ID", "0"))
 API_HASH = os.getenv("API_HASH", "")
-REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379")
 DOWNLOAD_DIR = "downloads"
 
 _session_string = os.getenv("USERBOT_SESSION", "").strip()
@@ -35,51 +36,62 @@ else:
     print(f"🔑 Using file session: {SESSION_NAME}.session")
 
 # ── کلاینت‌ها ─────────────────────────────────────────────
-# 🌟 راز حل شدن ارورِ Timeout: پینگ هر ۳۰ ثانیه به ردیس
-r        = aioredis.from_url(REDIS_URL, decode_responses=True, health_check_interval=30)
 client  = TelegramClient(session, API_ID, API_HASH)
 calls    = PyTgCalls(client)
 
 _autoleave_tasks: dict = {}
+_last_panel: dict = {}
+
+# 🌟 متغیری برای نگه‌داشتن کلاینت ربات رسمی (Telebot) جهت ویرایش دکمه‌ها
+_bot_instance = None 
 
 # ════════════════════════════════════════════════════════════
-#  هِلپرهای وضعیت (روی Redis)
+#  ارسالِ رویداد به ربات رسمی (مستقیم)
 # ════════════════════════════════════════════════════════════
-async def _get_now(chat_id: int) -> dict:
-    raw = await r.get(now_key(chat_id))
-    return unpack(raw) if raw else {}
-
-async def _set_now(chat_id: int, data: dict):
-    await r.set(now_key(chat_id), pack(data))
-
-async def _clear_now(chat_id: int):
-    await r.delete(now_key(chat_id))
-
-async def _queue_len(chat_id: int) -> int:
-    return await r.llen(queue_key(chat_id))
-
 async def _emit_panel(chat_id: int):
-    now = await _get_now(chat_id)
-    if not now:
-        await r.publish(EVT_CHANNEL, pack({
-            "event": "panel", "chat_id": chat_id,
-            "panel_msg_id": _last_panel.get(chat_id),
-            "state": "idle", "title": "", "queue_len": 0,
-        }))
+    """ویرایش مستقیم پنل دکمه‌ها در گروه بدون نیاز به واسطه."""
+    if not _bot_instance:
         return
-    await r.publish(EVT_CHANNEL, pack({
-        "event":        "panel",
-        "chat_id":      chat_id,
-        "panel_msg_id": now.get("panel_msg_id"),
-        "state":        now.get("state", "idle"),
-        "title":        now.get("title", ""),
-        "queue_len":    await _queue_len(chat_id),
-    }))
+        
+    # ایمپورت محلی برای جلوگیری از مشکل Circular Import (لوپ بین دو فایل)
+    from src.bot.handlers.userbot_cmds import build_panel 
+    
+    now = get_now(chat_id)
+    if not now:
+        text, kb = build_panel("idle", "", 0)
+        panel_msg_id = _last_panel.get(chat_id)
+        if panel_msg_id:
+            try:
+                await _bot_instance.edit_message_text(
+                    text, chat_id, panel_msg_id, parse_mode="HTML", reply_markup=kb
+                )
+            except Exception:
+                pass
+        return
+
+    text, kb = build_panel(
+        now.get("state", "idle"),
+        now.get("title", ""),
+        get_queue_len(chat_id)
+    )
+    try:
+        await _bot_instance.edit_message_text(
+            text, chat_id, now.get("panel_msg_id"),
+            parse_mode="HTML", reply_markup=kb
+        )
+    except Exception:
+        pass
+
 
 async def _emit_toast(chat_id: int, text: str):
-    await r.publish(EVT_CHANNEL, pack({"event": "toast", "chat_id": chat_id, "text": text}))
+    """ارسال مستقیم یک پیام کوتاه در گروه."""
+    if not _bot_instance:
+        return
+    try:
+        await _bot_instance.send_message(chat_id, text, parse_mode="HTML")
+    except Exception:
+        pass
 
-_last_panel: dict = {}
 
 # ════════════════════════════════════════════════════════════
 #  دانلودِ صوت
@@ -90,12 +102,14 @@ async def _download_audio(chat_id: int, msg_id: int) -> str:
     path = await client.download_media(msg, file=os.path.join(DOWNLOAD_DIR, f"{chat_id}_{msg_id}"))
     return path
 
+
 def _cleanup_file(path: str):
     try:
         if path and os.path.exists(path):
             os.remove(path)
     except Exception:
         pass
+
 
 def _sweep_stale_downloads():
     if not os.path.isdir(DOWNLOAD_DIR):
@@ -106,37 +120,39 @@ def _sweep_stale_downloads():
         except Exception:
             pass
 
+
 # ════════════════════════════════════════════════════════════
 #  منطقِ پخش / صف
 # ════════════════════════════════════════════════════════════
 async def _start_stream(chat_id: int, track: dict):
     path = await _download_audio(track["audio_chat_id"], track["audio_msg_id"])
     try:
-        # 🌟 کد صحیح خودت
         await calls.play(chat_id, MediaStream(path))
     except Exception:
         _cleanup_file(path)
         raise
     return path
 
-async def _cmd_play(data: dict):
-    chat_id = data["chat_id"]
-    track = {
-        "audio_chat_id": data["audio_chat_id"],
-        "audio_msg_id":  data["audio_msg_id"],
-        "title":         data["title"],
-        "requester_id":  data["requester_id"],
-    }
-    _last_panel[chat_id] = data.get("panel_msg_id")
-    now = await _get_now(chat_id)
 
+async def cmd_play(chat_id: int, audio_chat_id: int, audio_msg_id: int, title: str, requester_id: int, initiator_id: int, panel_msg_id: int):
+    """صدا زده شده به صورت مستقیم توسط هندلر دستور پخش ربات رسمی."""
+    track = {
+        "audio_chat_id": audio_chat_id,
+        "audio_msg_id":  audio_msg_id,
+        "title":         title,
+        "requester_id":  requester_id,
+    }
+    _last_panel[chat_id] = panel_msg_id
+    now = get_now(chat_id)
+
+    # اگر چیزی در حال پخش/مکث است → به صف اضافه کن
     if now and now.get("state") in ("playing", "paused"):
-        await r.rpush(queue_key(chat_id), pack(track))
-        pos = await _queue_len(chat_id)
+        pos = push_to_queue(chat_id, track)
         await _emit_toast(chat_id, f"🎵 «{track['title']}» به صف اضافه شد (موقعیت {pos}).")
         await _emit_panel(chat_id)
         return
 
+    # وگرنه همین حالا پخش کن
     try:
         path = await _start_stream(chat_id, track)
     except Exception as e:
@@ -144,31 +160,31 @@ async def _cmd_play(data: dict):
         print(f"💥 play error in {chat_id}: {e}")
         return
 
-    await _set_now(chat_id, {
+    set_now(chat_id, {
         **track,
         "state":        "playing",
-        "panel_msg_id": data.get("panel_msg_id"),
-        "initiator_id": data.get("initiator_id"),
+        "panel_msg_id": panel_msg_id,
+        "initiator_id": initiator_id,
         "path":         path,
     })
     _cancel_autoleave(chat_id)
     await _emit_panel(chat_id)
 
+
 async def _play_next(chat_id: int):
-    prev = await _get_now(chat_id)
+    prev = get_now(chat_id)
     if prev:
         _cleanup_file(prev.get("path"))
 
-    raw = await r.lpop(queue_key(chat_id))
-    if raw:
-        track = unpack(raw)
+    track = pop_from_queue(chat_id)
+    if track:  # اگر صفی وجود داشت
         try:
             path = await _start_stream(chat_id, track)
         except Exception as e:
             print(f"💥 next-play error in {chat_id}: {e}")
             await _play_next(chat_id)
             return
-        await _set_now(chat_id, {
+        set_now(chat_id, {
             **track,
             "state":        "playing",
             "panel_msg_id": prev.get("panel_msg_id") if prev else _last_panel.get(chat_id),
@@ -177,56 +193,62 @@ async def _play_next(chat_id: int):
         })
         _cancel_autoleave(chat_id)
         await _emit_panel(chat_id)
-    else:
-        await _clear_now(chat_id)
+    else:  # اگر صف خالی بود
+        clear_now(chat_id)
         await _emit_panel(chat_id)
         _schedule_autoleave(chat_id)
 
-async def _cmd_pause(chat_id: int):
+
+async def cmd_pause(chat_id: int):
     try:
         await calls.pause(chat_id)
     except Exception:
         pass
-    now = await _get_now(chat_id)
+    now = get_now(chat_id)
     if now:
         now["state"] = "paused"
-        await _set_now(chat_id, now)
+        set_now(chat_id, now)
     await _emit_panel(chat_id)
 
-async def _cmd_resume(chat_id: int):
+
+async def cmd_resume(chat_id: int):
     try:
         await calls.resume(chat_id)
     except Exception:
         pass
-    now = await _get_now(chat_id)
+    now = get_now(chat_id)
     if now:
         now["state"] = "playing"
-        await _set_now(chat_id, now)
+        set_now(chat_id, now)
     await _emit_panel(chat_id)
 
-async def _cmd_skip(chat_id: int):
-    if await _queue_len(chat_id) > 0:
+
+async def cmd_skip(chat_id: int):
+    if get_queue_len(chat_id) > 0:
         await _play_next(chat_id)
     else:
         await _leave(chat_id, "⏭ آهنگ بعدی‌ای در صف نبود؛ از ویس‌چت خارج شدم.")
 
-async def _cmd_stop(chat_id: int):
-    await r.delete(queue_key(chat_id))
+
+async def cmd_stop(chat_id: int):
+    clear_queue(chat_id)
     await _leave(chat_id, "⛔ پخش پایان یافت و از ویس‌چت خارج شدم.")
 
+
 async def _leave(chat_id: int, toast: str = ""):
-    now = await _get_now(chat_id)
+    now = get_now(chat_id)
     if now:
         _cleanup_file(now.get("path"))
     try:
         await calls.leave_call(chat_id)
     except Exception:
         pass
-    await _clear_now(chat_id)
+    clear_now(chat_id)
     _cancel_autoleave(chat_id)
     await _emit_panel(chat_id)
     if toast:
         await _emit_toast(chat_id, toast)
+
 
 # ════════════════════════════════════════════════════════════
 #  خروج خودکار
@@ -237,17 +259,19 @@ def _schedule_autoleave(chat_id: int):
     async def _waiter():
         try:
             await asyncio.sleep(IDLE_TIMEOUT)
-            if not await _get_now(chat_id):
+            if not get_now(chat_id):
                 await _leave(chat_id, "🌙 به‌خاطر بیکاری، از ویس‌چت خارج شدم.")
         except asyncio.CancelledError:
             pass
 
     _autoleave_tasks[chat_id] = asyncio.create_task(_waiter())
 
+
 def _cancel_autoleave(chat_id: int):
     task = _autoleave_tasks.pop(chat_id, None)
     if task and not task.done():
         task.cancel()
+
 
 # ════════════════════════════════════════════════════════════
 #  پایانِ طبیعیِ استریم
@@ -257,49 +281,18 @@ async def _on_update(_, update):
     if isinstance(update, StreamEnded):
         await _play_next(update.chat_id)
 
-# ════════════════════════════════════════════════════════════
-#  شنونده ردیس (تضمین پایداری)
-# ════════════════════════════════════════════════════════════
-async def _command_listener():
-    # 🌟 حلقه بی‌نهایت برای زنده نگه داشتن لیسنر
-    while True:
-        try:
-            pubsub = r.pubsub()
-            await pubsub.subscribe(CMD_CHANNEL)
-            print("👂 Userbot listening for music commands...")
-
-            async for raw in pubsub.listen():
-                if raw.get("type") != "message":
-                    continue
-                data = unpack(raw["data"])
-                action  = data.get("action")
-                chat_id = data.get("chat_id")
-                if chat_id is None:
-                    continue
-
-                if action == "play":
-                    asyncio.create_task(_cmd_play(data))
-                elif action == "pause":
-                    asyncio.create_task(_cmd_pause(chat_id))
-                elif action == "resume":
-                    asyncio.create_task(_cmd_resume(chat_id))
-                elif action == "skip":
-                    asyncio.create_task(_cmd_skip(chat_id))
-                elif action == "stop":
-                    asyncio.create_task(_cmd_stop(chat_id))
-        except Exception as e:
-            print(f"💥 Userbot listener connection dropped: {e}. Reconnecting in 5s...")
-            await asyncio.sleep(5)
 
 # ════════════════════════════════════════════════════════════
-#  راه‌اندازی
+#  راه‌اندازی (صدا زده می‌شود از main.py)
 # ════════════════════════════════════════════════════════════
-async def main():
+async def start_music_client(bot_instance: AsyncTeleBot):
+    """
+    روشن کردن کلاینت تلتون و ویس‌چت و ثبت ریفرنس ربات رسمی
+    """
+    global _bot_instance
+    _bot_instance = bot_instance
+    
     _sweep_stale_downloads()
     await client.start()
     await calls.start()
-    print("✅ Userbot + PyTgCalls started.")
-    await _command_listener()
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    print("✅ Userbot + PyTgCalls started (Single-Process In-Memory Mode).")

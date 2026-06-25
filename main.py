@@ -10,7 +10,6 @@ from telebot.async_telebot import AsyncTeleBot
 
 from src.config import TELEGRAM_BOT_TOKEN, EMOJI, SUPER_USERS, WEBHOOK_HOST
 from src.bot.handlers import register_bot_handlers
-from src.bot.handlers.userbot_cmds import start_music_event_listener
 from src.database.db_manager import init_db, close_connection_pool
 from src.bot.redis_config import ping_redis, redis_client
 from src.bot.background_workers import (
@@ -19,6 +18,9 @@ from src.bot.background_workers import (
     background_broadcast_worker,
     background_cleanup_worker,
 )
+
+# 🌟 اضافه شدن موتور یکپارچه‌ی موزیک به جای لیسنر قبلی
+from src.bot.user_bot.music_bot import start_music_client
 
 # ── Deployment config ─────────────────────────────────────
 # Set USE_WEBHOOK=false in .env to run locally with polling
@@ -96,7 +98,9 @@ async def start_bot():
     asyncio.create_task(background_matchmaking_worker(bot))
     asyncio.create_task(background_broadcast_worker(bot))
     asyncio.create_task(background_cleanup_worker(bot))
-    asyncio.create_task(start_music_event_listener(bot))  # 🎵 ادیتِ پنل موزیک
+    
+    # 🌟 استارت موتور موزیک در دلِ ربات اصلی
+    asyncio.create_task(start_music_client(bot))  
 
     asyncio.create_task(send_startup_notification())
 

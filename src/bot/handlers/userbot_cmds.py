@@ -1,15 +1,11 @@
 """
-سمتِ «ربات رسمی» برای سیستم پخش موزیک در ویس‌چت.
+سمتِ «ربات رسمی» برای سیستم پخش موزیک در ویس‌چت (نسخهٔ بدون Redis).
 
 نقش این ماژول:
   • گرفتن دستور «پخش» (ریپلای روی یک فایل صوتی) از سوپریوزرها
   • ساختن پنل فارسی با دکمه‌های شیشه‌ای هوشمند (پخش/توقف پویا)
   • چک کردن مجوز کلیک روی دکمه‌ها (فقط آغازگر یا سوپریوزرها)
-  • فرستادن دستورها به یوزربات از طریق Redis
-  • گوش دادن به رویدادهای یوزربات و ادیتِ پنل/دکمه‌ها
-
-نکته: چون یوزربات (Telethon) نمی‌تواند دکمهٔ شیشه‌ای بسازد، تمام رندرِ پیام و
-دکمه‌ها بر عهدهٔ همین ربات رسمی است؛ یوزربات فقط «وضعیت» را اعلام می‌کند.
+  • فرستادن مستقیم دستورها به توابع یوزربات (بدون واسطهٔ Redis)
 """
 
 import html
@@ -19,10 +15,8 @@ from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from src.config import SUPER_USERS
-from src.bot.redis_config import redis_client
-from src.bot.music_protocol import (
-    CMD_CHANNEL, EVT_CHANNEL, now_key, pack, unpack,
-)
+from src.bot.music_protocol import get_now
+from src.bot.user_bot.music_bot import cmd_play, cmd_pause, cmd_resume, cmd_skip, cmd_stop
 
 
 # ── ساختِ متن و دکمه‌های پنل بر اساس وضعیت ─────────────────
@@ -64,11 +58,9 @@ def build_panel(state: str, title: str, queue_len: int):
 async def _is_authorized(chat_id: int, user_id: int) -> bool:
     if user_id in SUPER_USERS:
         return True
-    if not redis_client:
-        return False
     try:
-        raw = await redis_client.get(now_key(chat_id))
-        data = unpack(raw) if raw else {}
+        # 🌟 خواندن مستقیم وضعیت فعلی از RAM به جای Redis
+        data = get_now(chat_id)
         return data.get("initiator_id") == user_id
     except Exception:
         return False
@@ -95,10 +87,6 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             await bot.reply_to(message, "⛔ فقط مدیران اجازهٔ پخش موزیک دارند.")
             return
 
-        if not redis_client:
-            await bot.reply_to(message, "⚠️ موتور موزیک در دسترس نیست (Redis قطع است).")
-            return
-
         # استخراجِ فایل صوتیِ ریپلای‌شده (فقط با آیدیِ پیام؛ بدون ذخیرهٔ فایل)
         replied = message.reply_to_message
         if replied.audio:
@@ -118,17 +106,16 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             parse_mode="HTML",
         )
 
-        # ارسال دستور پخش به یوزربات
-        await redis_client.publish(CMD_CHANNEL, pack({
-            "action":        "play",
-            "chat_id":       chat_id,
-            "audio_chat_id": chat_id,            # فایل در همین گروه است
-            "audio_msg_id":  replied.message_id, # فقط آیدیِ پیام را می‌فرستیم
-            "title":         title,
-            "requester_id":  user_id,
-            "initiator_id":  user_id,
-            "panel_msg_id":  panel.message_id,
-        }))
+        # 🌟 فراخوانی مستقیم تابع پخش یوزربات به صورت تسک پس‌زمینه (بدون درگیر کردن ردیس)
+        asyncio.create_task(cmd_play(
+            chat_id=chat_id,
+            audio_chat_id=chat_id,
+            audio_msg_id=replied.message_id,
+            title=title,
+            requester_id=user_id,
+            initiator_id=user_id,
+            panel_msg_id=panel.message_id
+        ))
 
     # ── کال‌بکِ دکمه‌های پنل ───────────────────────────────
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("mus_"))
@@ -144,65 +131,28 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             )
             return
 
-        if not redis_client:
-            await bot.answer_callback_query(call.id, "⚠️ موتور موزیک در دسترس نیست.", show_alert=True)
-            return
-
         labels = {"pause": "توقف شد", "resume": "ادامه یافت", "skip": "آهنگ بعدی", "stop": "پخش پایان یافت"}
-        await redis_client.publish(CMD_CHANNEL, pack({"action": action, "chat_id": chat_id}))
+        
+        # 🌟 هدایت مستقیم اکشن‌ها به توابع موتور موزیک
+        if action == "pause":
+            asyncio.create_task(cmd_pause(chat_id))
+        elif action == "resume":
+            asyncio.create_task(cmd_resume(chat_id))
+        elif action == "skip":
+            asyncio.create_task(cmd_skip(chat_id))
+        elif action == "stop":
+            asyncio.create_task(cmd_stop(chat_id))
+
         await bot.answer_callback_query(call.id, f"✅ {labels.get(action, 'انجام شد')}")
 
     print("🎵 Userbot music bridge handlers registered.")
 
 
-
 async def start_music_event_listener(bot: AsyncTeleBot):
     """
-    در یک تسکِ پس‌زمینه روی کانال رویدادها می‌نشیند و هر تغییر وضعیت را
-    روی پنلِ مربوطه اعمال می‌کند. با سیستم اتصال مجدد خودکار برای فرار از تایم‌اوت.
+    [DEPRECATED] این تابع در معماری جدید درون‌حافظه‌ای دیگر کاربردی ندارد
+    چون یوزربات مستقیماً پنل‌ها را ویرایش می‌کند. صرفاً جهت جلوگیری از ImportError در main.py باقی مانده است.
     """
-    if not redis_client:
-        print("⚠️ Music event listener disabled — Redis not connected.")
-        return
-
-    # 🌟 اضافه شدن حلقه بی‌نهایت برای زنده نگه داشتن تسک در صورت تایم‌اوت شبکه
+    print("🌙 Music event listener (In-Memory Mode) initialized natively.")
     while True:
-        try:
-            pubsub = redis_client.pubsub()
-            await pubsub.subscribe(EVT_CHANNEL)
-            print("👂 Music event listener active and connected.")
-
-            async for raw in pubsub.listen():
-                if raw.get("type") != "message":
-                    continue
-                try:
-                    evt = unpack(raw["data"])
-                    kind = evt.get("event")
-
-                    if kind == "panel":
-                        text, kb = build_panel(
-                            evt.get("state", "idle"),
-                            evt.get("title", ""),
-                            int(evt.get("queue_len", 0)),
-                        )
-                        try:
-                            await bot.edit_message_text(
-                                text, evt["chat_id"], evt["panel_msg_id"],
-                                parse_mode="HTML", reply_markup=kb,
-                            )
-                        except Exception:
-                            pass  # «message is not modified» را نادیده می‌گیریم
-
-                    elif kind == "toast":
-                        try:
-                            await bot.send_message(evt["chat_id"], evt.get("text", ""), parse_mode="HTML")
-                        except Exception:
-                            pass
-
-                except Exception as e:
-                    print(f"💥 Error processing music event: {e}")
-
-        except Exception as e:
-            # اگر کانکشن ردیس قطع شد، ارور پرینت می‌شود و 5 ثانیه بعد دوباره وصل می‌شود
-            print(f"💥 Music event listener connection dropped: {e}. Reconnecting in 5s...")
-            await asyncio.sleep(5)
+        await asyncio.sleep(3600)
