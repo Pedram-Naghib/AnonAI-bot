@@ -7,6 +7,10 @@ from pytgcalls.types import MediaStream
 super_users_raw = os.environ.get('SUPER_USERS', '8627765327,6779908406')
 SUPER_USERS = [int(user_id.strip()) for user_id in super_users_raw.split(',') if user_id.strip()]
 
+# خواندن آیدی گروه اختصاصی (اگر تو env نبود، None در نظر می‌گیره)
+group_chat_id_raw = os.environ.get('GROUP_CHAT_ID')
+GROUP_CHAT_ID = int(group_chat_id_raw.strip()) if group_chat_id_raw else None
+
 # تشخیص محیط رندر
 IS_ON_RENDER = os.environ.get('RENDER') == 'true'
 
@@ -18,7 +22,7 @@ else:
     PROXY = (socks.SOCKS5, '127.0.0.1', 10808)
     print("💻 در حال اجرا روی اوبونتو داخلی (پروکسی فعال)")
 
-# تبدیل متغیرهای محیطی به فرمت درست (حل ارور str expected)
+# تبدیل متغیرهای محیطی به فرمت درست
 api_id = int(os.environ.get("API_ID", 2410696))
 api_hash = os.environ.get("API_HASH", "7d59d477fa535d957f3650c7b1578bdd")
 
@@ -27,13 +31,15 @@ app = PyTgCalls(client)
 
 @client.on(events.NewMessage(pattern=r'\.ping'))
 async def ping_handler(event):
-    if not (event.out or event.sender_id in SUPER_USERS):
+    # قفل امنیتی آپدیت شد: خودت + سوپریوزرها + اعضای اون گروه خاص
+    if not (event.out or event.sender_id in SUPER_USERS or event.chat_id == GROUP_CHAT_ID):
         return
     await event.reply('✅ ربات بیداره و داره مثل ساعت کار می‌کنه! 😎')
 
 @client.on(events.NewMessage(pattern=r'\.play'))
 async def play_handler(event):
-    if not (event.out or event.sender_id in SUPER_USERS):
+    # قفل امنیتی برای پلی کردن
+    if not (event.out or event.sender_id in SUPER_USERS or event.chat_id == GROUP_CHAT_ID):
         return
         
     chat_id = event.chat_id
@@ -50,13 +56,12 @@ async def play_handler(event):
     except Exception as e:
         await event.reply(f'❌ ارور در پخش (مطمئن شو ویس‌چت گروه روشنه!):\n`{e}`')
 
-# ✅ این همون تابعیه که main.py بهش احتیاج داره
 async def start_music_worker():
     print("🚀 در حال استارت موتور Telethon...")
     await client.start()
     print("🎧 در حال استارت موتور PyTgCalls...")
     await app.start()
-    print(f"✅ سیستم کاملاً آماده است! سوپریوزرها: {SUPER_USERS}")
+    print(f"✅ سیستم کاملاً آماده است! سوپریوزرها: {SUPER_USERS} | گروه مجاز: {GROUP_CHAT_ID}")
     
     # روشن نگه داشتن یوزربات
     await client.run_until_disconnected()
