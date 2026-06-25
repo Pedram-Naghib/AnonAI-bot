@@ -13,7 +13,7 @@ from telethon.sessions import StringSession
 
 # 🌟 ایمپورت متدهای بومی نسخه 2.3.3
 from pytgcalls import PyTgCalls
-from pytgcalls.types import AudioPiped
+from pytgcalls.types.input_stream import AudioPiped
 
 from telebot.async_telebot import AsyncTeleBot
 
