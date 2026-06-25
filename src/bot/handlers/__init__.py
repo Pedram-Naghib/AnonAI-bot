@@ -7,6 +7,7 @@ from src.bot.handlers.account_management import register_account_handlers
 from src.bot.handlers.whisper import register_whisper_handlers  # 🔥 اضافه شدن هندلر نجوا
 from src.bot.handlers.private_anon import register_private_anon_handlers
 from src.bot.handlers.reactions import register_reaction_handlers
+from src.bot.handlers.userbot_cmds import register_userbot_handlers  # 🎵 پل موزیک ویس‌چت
 
 def register_bot_handlers(bot: AsyncTeleBot):
     """ثبت‌نام زنجیره‌ای با رعایت اولویت سفت و سخت کامندهای پیوی"""
@@ -30,5 +31,8 @@ def register_bot_handlers(bot: AsyncTeleBot):
     
     # اولویت پنجم: اموجی‌ها و ریکشن‌های زنده کاربران
     register_reaction_handlers(bot)
+
+    # 🎵 پلِ موزیک: دستور «پخش» در گروه و دکمه‌های شیشه‌ای ویس‌چت
+    register_userbot_handlers(bot)
     
     print("💎 Modern Modular Handlers Activated with Strict Priorities (Whisper Engine Added).")

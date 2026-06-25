@@ -10,6 +10,7 @@ from telebot.async_telebot import AsyncTeleBot
 
 from src.config import TELEGRAM_BOT_TOKEN, EMOJI, SUPER_USERS, WEBHOOK_HOST
 from src.bot.handlers import register_bot_handlers
+from src.bot.handlers.userbot_cmds import start_music_event_listener
 from src.database.db_manager import init_db, close_connection_pool
 from src.bot.redis_config import ping_redis, redis_client
 from src.bot.background_workers import (
@@ -26,7 +27,8 @@ WEBHOOK_PORT = int(os.getenv("PORT", "8000"))
 WEBHOOK_URL  = f"https://{WEBHOOK_HOST}/webhook/{TELEGRAM_BOT_TOKEN}"
 
 # Shared secret so only Telegram can call our webhook. If you don't set one in the
-# environment, a fresh random secret is generated on each startup.
+# environment, a fresh random secret is generated on each startup (the webhook is
+# re-registered at startup anyway, so Telegram always has the matching value).
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip() or secrets.token_urlsafe(32)
 
 ALLOWED_UPDATES = ["message", "callback_query", "message_reaction", "inline_query", "chosen_inline_result"]
@@ -34,14 +36,18 @@ ALLOWED_UPDATES = ["message", "callback_query", "message_reaction", "inline_quer
 bot = AsyncTeleBot(TELEGRAM_BOT_TOKEN)
 app = FastAPI()
 
+
 # ── Health check ──────────────────────────────────────────
 @app.api_route("/", methods=["GET", "HEAD"])
 async def health_check():
     return {"status": "alive"}
 
+
 # ── Webhook endpoint ──────────────────────────────────────
 @app.post(f"/webhook/{TELEGRAM_BOT_TOKEN}")
 async def telegram_webhook(request: Request):
+    # Telegram echoes back the secret we registered. Reject anything that doesn't
+    # carry it — that's how we know the request is really from Telegram.
     if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
         return Response(status_code=403)
 
@@ -49,6 +55,7 @@ async def telegram_webhook(request: Request):
     update    = Update.de_json(json_data)
     await bot.process_new_updates([update])
     return {"status": "ok"}
+
 
 # ── Startup notification ──────────────────────────────────
 async def send_startup_notification():
@@ -62,13 +69,16 @@ async def send_startup_notification():
             f"{EMOJI['green_dot']['html']} <b>وضعیت:</b> فعال و آماده\n"
             f"{EMOJI['lock']['html']} <i>لوکال مموری پاکسازی و مجدداً لود شد.</i>"
         )
-        try:
-            await bot.send_message(SUPER_USERS[0], msg, parse_mode="HTML")
-        except Exception:
-            pass
+        # Notify all super users, not just one hardcoded ID
+        for admin_id in SUPER_USERS:
+            try:
+                await bot.send_message(admin_id, msg, parse_mode="HTML")
+            except Exception:
+                pass
         print("✅ Startup notification sent.")
     except Exception as e:
         print(f"💥 Startup notification error: {e}")
+
 
 # ── Main startup sequence ─────────────────────────────────
 async def start_bot():
@@ -86,13 +96,7 @@ async def start_bot():
     asyncio.create_task(background_matchmaking_worker(bot))
     asyncio.create_task(background_broadcast_worker(bot))
     asyncio.create_task(background_cleanup_worker(bot))
-
-    # 🎵 راه‌اندازی هم‌زمان یوزربات در کنار سرور اصلی
-    print("🎧 Starting Music UserBot...")
-    
-    # 🔥 ایمپورت و اجرا در پس‌زمینه (حل مشکل گیر کردن کد)
-    from src.user_bot.music_bot import start_music_worker 
-    asyncio.create_task(start_music_worker())
+    asyncio.create_task(start_music_event_listener(bot))  # 🎵 ادیتِ پنل موزیک
 
     asyncio.create_task(send_startup_notification())
 
@@ -120,6 +124,7 @@ async def start_bot():
         finally:
             await _shutdown_cleanup()
 
+
 # ── Shutdown cleanup ──────────────────────────────────────
 async def _shutdown_cleanup():
     print("🧹 Closing connections...")
@@ -132,6 +137,7 @@ async def _shutdown_cleanup():
             await redis_client.aclose()
     except Exception as e:
         print(f"💥 Redis close error: {e}")
+
 
 if __name__ == "__main__":
     asyncio.run(start_bot())
