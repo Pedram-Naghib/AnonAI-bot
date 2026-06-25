@@ -1,8 +1,5 @@
 """
-یوزربات موزیک (نسخهٔ کاملاً سازگار با py-tgcalls==2.3.3) — Telethon + PyTgCalls v2.
-
-این برنامه با حسابِ کاربری وارد ویس‌چت گروه می‌شود و موزیک پخش می‌کند.
-دستورها را از Redis می‌گیرد و وضعیت را به Redis برمی‌گرداند.
+یوزربات موزیک — Telethon + PyTgCalls 2.3.3
 """
 
 import os
@@ -13,9 +10,9 @@ import redis.asyncio as aioredis
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
-# 🌟 تغییر ایمپورت‌ها به متدهای بومی نسخه 2.3.3
+# 🌟 سینتکس مدرن و درستِ خودت
 from pytgcalls import PyTgCalls
-from pytgcalls.types.input_stream import AudioPiped
+from pytgcalls.types import MediaStream, StreamEnded
 
 from src.bot.music_protocol import (
     CMD_CHANNEL, EVT_CHANNEL, now_key, queue_key, pack, unpack, IDLE_TIMEOUT,
@@ -38,14 +35,12 @@ else:
     print(f"🔑 Using file session: {SESSION_NAME}.session")
 
 # ── کلاینت‌ها ─────────────────────────────────────────────
-# زنده نگه داشتن کانکشن ردیس در دکهاست و سرور رندر
+# 🌟 راز حل شدن ارورِ Timeout: پینگ هر ۳۰ ثانیه به ردیس
 r        = aioredis.from_url(REDIS_URL, decode_responses=True, health_check_interval=30)
 client  = TelegramClient(session, API_ID, API_HASH)
 calls    = PyTgCalls(client)
 
-# تسک‌های خروج خودکار به ازای هر چت (chat_id → asyncio.Task)
 _autoleave_tasks: dict = {}
-
 
 # ════════════════════════════════════════════════════════════
 #  هِلپرهای وضعیت (روی Redis)
@@ -54,24 +49,16 @@ async def _get_now(chat_id: int) -> dict:
     raw = await r.get(now_key(chat_id))
     return unpack(raw) if raw else {}
 
-
 async def _set_now(chat_id: int, data: dict):
     await r.set(now_key(chat_id), pack(data))
-
 
 async def _clear_now(chat_id: int):
     await r.delete(now_key(chat_id))
 
-
 async def _queue_len(chat_id: int) -> int:
     return await r.llen(queue_key(chat_id))
 
-
-# ════════════════════════════════════════════════════════════
-#  ارسالِ رویداد به ربات رسمی
-# ════════════════════════════════════════════════════════════
 async def _emit_panel(chat_id: int):
-    """وضعیتِ فعلی را برای رندرِ پنل به ربات رسمی می‌فرستد."""
     now = await _get_now(chat_id)
     if not now:
         await r.publish(EVT_CHANNEL, pack({
@@ -89,23 +76,19 @@ async def _emit_panel(chat_id: int):
         "queue_len":    await _queue_len(chat_id),
     }))
 
-
 async def _emit_toast(chat_id: int, text: str):
     await r.publish(EVT_CHANNEL, pack({"event": "toast", "chat_id": chat_id, "text": text}))
 
-
 _last_panel: dict = {}
 
-
 # ════════════════════════════════════════════════════════════
-#  دانلودِ صوت با آیدیِ پیام (مدیریت حافظه)
+#  دانلودِ صوت
 # ════════════════════════════════════════════════════════════
 async def _download_audio(chat_id: int, msg_id: int) -> str:
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     msg = await client.get_messages(chat_id, ids=msg_id)
     path = await client.download_media(msg, file=os.path.join(DOWNLOAD_DIR, f"{chat_id}_{msg_id}"))
     return path
-
 
 def _cleanup_file(path: str):
     try:
@@ -114,34 +97,27 @@ def _cleanup_file(path: str):
     except Exception:
         pass
 
-
 def _sweep_stale_downloads():
     if not os.path.isdir(DOWNLOAD_DIR):
         return
-    count = 0
     for fname in os.listdir(DOWNLOAD_DIR):
         try:
             os.remove(os.path.join(DOWNLOAD_DIR, fname))
-            count += 1
         except Exception:
             pass
-    if count:
-        print(f"🧹 Swept {count} stale file(s) from {DOWNLOAD_DIR}/ on startup.")
-
 
 # ════════════════════════════════════════════════════════════
-#  منطقِ پخش / صف (اصلاح شده برای ورژن 2.3.3)
+#  منطقِ پخش / صف
 # ════════════════════════════════════════════════════════════
 async def _start_stream(chat_id: int, track: dict):
     path = await _download_audio(track["audio_chat_id"], track["audio_msg_id"])
     try:
-        # 🌟 استفاده از سینتکس معتبر نسخه قدیمی برای جوین شدن به ویس چت
-        await calls.join_group_call(chat_id, AudioPiped(path))
+        # 🌟 کد صحیح خودت
+        await calls.play(chat_id, MediaStream(path))
     except Exception:
         _cleanup_file(path)
         raise
     return path
-
 
 async def _cmd_play(data: dict):
     chat_id = data["chat_id"]
@@ -178,7 +154,6 @@ async def _cmd_play(data: dict):
     _cancel_autoleave(chat_id)
     await _emit_panel(chat_id)
 
-
 async def _play_next(chat_id: int):
     prev = await _get_now(chat_id)
     if prev:
@@ -207,11 +182,9 @@ async def _play_next(chat_id: int):
         await _emit_panel(chat_id)
         _schedule_autoleave(chat_id)
 
-
 async def _cmd_pause(chat_id: int):
     try:
-        # 🌟 متد مکث استریم در نسخه ۲
-        await calls.pause_stream(chat_id)
+        await calls.pause(chat_id)
     except Exception:
         pass
     now = await _get_now(chat_id)
@@ -220,11 +193,9 @@ async def _cmd_pause(chat_id: int):
         await _set_now(chat_id, now)
     await _emit_panel(chat_id)
 
-
 async def _cmd_resume(chat_id: int):
     try:
-        # 🌟 متد ادامه‌دهنده استریم در نسخه ۲
-        await calls.resume_stream(chat_id)
+        await calls.resume(chat_id)
     except Exception:
         pass
     now = await _get_now(chat_id)
@@ -233,26 +204,22 @@ async def _cmd_resume(chat_id: int):
         await _set_now(chat_id, now)
     await _emit_panel(chat_id)
 
-
 async def _cmd_skip(chat_id: int):
     if await _queue_len(chat_id) > 0:
         await _play_next(chat_id)
     else:
         await _leave(chat_id, "⏭ آهنگ بعدی‌ای در صف نبود؛ از ویس‌چت خارج شدم.")
 
-
 async def _cmd_stop(chat_id: int):
     await r.delete(queue_key(chat_id))
     await _leave(chat_id, "⛔ پخش پایان یافت و از ویس‌چت خارج شدم.")
-
 
 async def _leave(chat_id: int, toast: str = ""):
     now = await _get_now(chat_id)
     if now:
         _cleanup_file(now.get("path"))
     try:
-        # 🌟 متد لفت دادن از کال در نسخه ۲
-        await calls.leave_group_call(chat_id)
+        await calls.leave_call(chat_id)
     except Exception:
         pass
     await _clear_now(chat_id)
@@ -261,9 +228,8 @@ async def _leave(chat_id: int, toast: str = ""):
     if toast:
         await _emit_toast(chat_id, toast)
 
-
 # ════════════════════════════════════════════════════════════
-#  خروج خودکار پس از ۳ دقیقه بیکاری
+#  خروج خودکار
 # ════════════════════════════════════════════════════════════
 def _schedule_autoleave(chat_id: int):
     _cancel_autoleave(chat_id)
@@ -278,26 +244,24 @@ def _schedule_autoleave(chat_id: int):
 
     _autoleave_tasks[chat_id] = asyncio.create_task(_waiter())
 
-
 def _cancel_autoleave(chat_id: int):
     task = _autoleave_tasks.pop(chat_id, None)
     if task and not task.done():
         task.cancel()
 
+# ════════════════════════════════════════════════════════════
+#  پایانِ طبیعیِ استریم
+# ════════════════════════════════════════════════════════════
+@calls.on_update()
+async def _on_update(_, update):
+    if isinstance(update, StreamEnded):
+        await _play_next(update.chat_id)
 
 # ════════════════════════════════════════════════════════════
-#  پایانِ طبیعیِ استریم → پخشِ بعدی (نسخه ۲)
-# ════════════════════════════════════════════════════════════
-@calls.on_stream_end()
-async def _on_stream_end(chat_id: int, _):
-    # 🌟 هندلر بومی نسخه 2.3.3 هنگام به پایان رسیدن خودکار آهنگ
-    await _play_next(chat_id)
-
-
-# ════════════════════════════════════════════════════════════
-#  شنوندهٔ دستورهای Redis (با سیستم اتصال مجدد خودکار)
+#  شنونده ردیس (تضمین پایداری)
 # ════════════════════════════════════════════════════════════
 async def _command_listener():
+    # 🌟 حلقه بی‌نهایت برای زنده نگه داشتن لیسنر
     while True:
         try:
             pubsub = r.pubsub()
@@ -327,7 +291,6 @@ async def _command_listener():
             print(f"💥 Userbot listener connection dropped: {e}. Reconnecting in 5s...")
             await asyncio.sleep(5)
 
-
 # ════════════════════════════════════════════════════════════
 #  راه‌اندازی
 # ════════════════════════════════════════════════════════════
@@ -337,7 +300,6 @@ async def main():
     await calls.start()
     print("✅ Userbot + PyTgCalls started.")
     await _command_listener()
-
 
 if __name__ == "__main__":
     asyncio.run(main())
