@@ -36,6 +36,7 @@ share/python-wheels/
 MANIFEST
 # file test
 test.py
+login.py
 
 # 💻 پوشه‌های محیط مجازی (Virtual Environment)
 venv/

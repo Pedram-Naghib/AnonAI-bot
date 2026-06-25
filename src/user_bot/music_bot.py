@@ -1,106 +1,75 @@
 import os
-import asyncio
+import socks
 from telethon import TelegramClient, events
 from pytgcalls import PyTgCalls
-from pytgcalls.types import MediaStream
+from pytgcalls.types import AudioPiped
 
-# دریافت ثابت‌ها از لایه خنثی کانفیگ
-from src.config import API_ID, API_HASH, SUPER_USERS, EMOJI
+# خواندن لیست سوپریوزرها از محیط (اگر پیدا نکرد، همون لیست دستی رو پیش‌فرض می‌ذاره)
+super_users_raw = os.environ.get('SUPER_USERS', '8627765327,6779908406')
+# تبدیل رشته متنی به یک لیست از اعداد (Integer)
+SUPER_USERS = [int(user_id.strip()) for user_id in super_users_raw.split(',') if user_id.strip()]
 
-# کلاینت‌های اصلی یوزربات
-music_app = None
-call_py = None
+# بررسی می‌کنیم آیا اسکریپت روی سرور رندر در حال اجراست یا سیستم شخصی
+IS_ON_RENDER = os.environ.get('RENDER') == 'true'
 
-if API_ID and API_HASH:
-    # ساخت کلاینت تله‌تون (فایل سشن با نام music_userbot.session ذخیره می‌شود)
-    music_app = TelegramClient("music_userbot", API_ID, API_HASH)
-    call_py = PyTgCalls(music_app)
+if IS_ON_RENDER:
+    PROXY = None
+    print("🌍 در حال اجرا روی سرور رندر (بدون نیاز به پروکسی)")
+else:
+    PROXY = (socks.SOCKS5, '127.0.0.1', 10808)
+    print("💻 در حال اجرا روی اوبونتو داخلی (پروکسی فعال)")
 
-    # ==========================================
-    # 🎵 هندلر اصلی پخش موزیک (فایل تلگرام + یوتیوب)
-    # ==========================================
-    @music_app.on(events.NewMessage(pattern=r'^/play(?:\s+(.+))?$', from_users=SUPER_USERS))
-    async def play_music_handler(event):
-        group_chat_id = event.chat_id
+api_id = 2410696
+api_hash = '7d59d477fa535d957f3650c7b1578bdd'
+
+# کلاینت یوزربات با تنظیماتِ هوشمندِ پروکسی
+client = TelegramClient("music_userbot", api_id, api_hash, proxy=PROXY)
+
+# راه‌اندازی موتور پخش صدا (pytgcalls) روی کلاینت تله‌تون
+app = PyTgCalls(client)
+
+# هندلر برای تست زنده بودن یوزربات
+@client.on(events.NewMessage(pattern=r'\.ping'))
+async def ping_handler(event):
+    # قفل امنیتی: بررسی دسترسی سوپریوزر
+    if not (event.out or event.sender_id in SUPER_USERS):
+        return
         
-        # استخراج متن جلوی کامند (اگر وجود داشته باشد)
-        arg = event.pattern_match.group(1)
-        
-        # ── حالت اول: پخش فایل محلی/تلگرامی (از طریق ریپلای) ──
-        if event.is_reply:
-            reply_msg = await event.get_reply_message()
-            if reply_msg.audio or reply_msg.voice:
-                msg = await event.reply(f"{EMOJI['clock']['html']} در حال دانلود فایل صوتی از تلگرام...", parse_mode="HTML")
-                try:
-                    file_path = await reply_msg.download_media()
-                    await msg.edit(f"{EMOJI['update']['html']} در حال اتصال به ویس‌چت گروه...", parse_mode="HTML")
-                    
-                    await call_py.play(group_chat_id, MediaStream(file_path))
-                    await msg.edit(f"{EMOJI['thunder']['html']} <b>فایل صوتی با موفقیت در ویس‌چت پخش شد!</b>", parse_mode="HTML")
-                except Exception as e:
-                    await msg.edit(f"{EMOJI['ban']['html']} خطا در پخش فایل: <code>{e}</code>", parse_mode="HTML")
-                return
+    await event.reply('✅ ربات بیداره و داره مثل ساعت کار می‌کنه! 😎')
 
-        # ── حالت دوم: پخش از یوتیوب (لینک یا سرچ متنی) ──
-        if not arg:
-            await event.reply(f"{EMOJI['caution']['html']} لطفاً یا روی یک آهنگ ریپلای کنید، یا لینک/اسم آهنگ از یوتیوب را بفرستید.\nمثال:\n<code>/play https://youtube.com/...</code>", parse_mode="HTML")
-            return
-            
-        search_query = arg.strip()
-        msg = await event.reply(f"{EMOJI['magnifiyer']['html']} در حال جستجو و آماده‌سازی از یوتیوب...", parse_mode="HTML")
+# هندلر برای پخش موزیک
+@client.on(events.NewMessage(pattern=r'\.play'))
+async def play_handler(event):
+    # قفل امنیتی: بررسی دسترسی سوپریوزر
+    if not (event.out or event.sender_id in SUPER_USERS):
+        return
         
-        # پاتک محلی زنده برای استفاده از yt_dlp بدون قفل کردن پردازنده
-        import yt_dlp
-        
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'noplaylist': True,
-            'quiet': True,
-            'default_search': 'ytsearch', # اگر لینک نبود، خودش در یوتیوب سرچ میکند
-            'outtmpl': 'downloads/%(id)s.%(ext)s',
-        }
-        
-        def extract_info():
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(search_query, download=True)
-                # بررسی اینکه آیا نتیجه جستجو (لیست) است یا لینک مستقیم
-                v_info = info['entries'][0] if 'entries' in info else info
-                # گرفتن مسیر فایل دانلودی در همان اسکوپ
-                f_path = ydl.prepare_filename(v_info)
-                return v_info, f_path
+    chat_id = event.chat_id
+    
+    # یک لینک موزیک یا مسیر فایل محلی برای تست
+    test_audio_url = 'http://stream.radioreklama.bg/radio1128'
+    
+    await event.reply('🎵 در حال اتصال به ویس‌چت و پردازش موزیک...')
+    
+    try:
+        # اجرای موزیک در ویس‌چتِ همون گروهی که دستور رو دادی
+        await app.play(
+            chat_id,
+            AudioPiped(test_audio_url)
+        )
+        await event.reply('▶️ پخش با موفقیت شروع شد!')
+    except Exception as e:
+        await event.reply(f'❌ ارور در پخش (مطمئن شو ویس‌چت گروه روشنه!):\n`{e}`')
 
-        try:
-            # اجرای دانلود یوتیوب در یک Thread جداگانه تا متد آسنکرون ربات کراش نزند
-            loop = asyncio.get_running_loop()
-            video_info, file_path = await loop.run_in_executor(None, extract_info)
-                
-            video_title = video_info.get('title', 'YouTube Audio')
-            
-            await msg.edit(f"{EMOJI['update']['html']} در حال استریم لایو آهنگ <b>{video_title}</b> در ویس‌چت...", parse_mode="HTML")
-            
-            # پخش موزیک دانلود شده از یوتیوب در ویس چت
-            await call_py.play(group_chat_id, MediaStream(file_path))
-            await msg.edit(f"{EMOJI['check']['html']} <b>در حال پخش از یوتیوب:</b>\n🎵 <code>{video_title}</code>", parse_mode="HTML")
-            
-        except Exception as e:
-            await msg.edit(f"{EMOJI['ban']['html']} خطایی در استخراج یا پخش از یوتیوب رخ داد:\n<code>{e}</code>", parse_mode="HTML")
+async def main():
+    print("🚀 در حال استارت موتور Telethon...")
+    await client.start()
+    print("🎧 در حال استارت موتور PyTgCalls...")
+    await app.start()
+    print(f"✅ سیستم کاملاً آماده است! سوپریوزرها: {SUPER_USERS}")
+    
+    # روشن نگه داشتن ربات
+    await client.run_until_disconnected()
 
-    # ==========================================
-    # ⏹️ هندلر قطع پخش و خروج از ویس‌چت
-    # ==========================================
-    @music_app.on(events.NewMessage(pattern=r'^/stop$', from_users=SUPER_USERS))
-    async def stop_music_handler(event):
-        try:
-            await call_py.leave_group_call(event.chat_id)
-            await event.reply(f"{EMOJI['trash']['html']} پخش موزیک متوقف شد و از ویس‌چت خارج شدم.", parse_mode="HTML")
-        except Exception as e:
-            await event.reply(f"{EMOJI['caution']['html']} خطایی در خروج از تماس رخ داد: {e}", parse_mode="HTML")
-
-# تابع نهایی لودر هم‌زمان که در main.py صدا زده می‌شود
-async def start_music_worker():
-    if music_app and call_py:
-        print("🎵 Initializing Music UserBot side-by-side (Telethon Engine)...")
-        await music_app.start()
-        await call_py.start()
-    else:
-        print("⚠️ [Music Bot] API_ID or API_HASH missing in config. Worker skipped.")
+if __name__ == '__main__':
+    client.loop.run_until_complete(main())
