@@ -18,8 +18,8 @@ else:
     PROXY = (socks.SOCKS5, '127.0.0.1', 10808)
     print("💻 در حال اجرا روی اوبونتو داخلی (پروکسی فعال)")
 
-api_id = os.environ.get(2410696)
-api_hash = os.environ.get("7d59d477fa535d957f3650c7b1578bdd")
+api_id = os.environ.get("API_ID")
+api_hash = os.environ.get("API_HASH")
 
 client = TelegramClient("music_userbot", api_id, api_hash, proxy=PROXY)
 app = PyTgCalls(client)
