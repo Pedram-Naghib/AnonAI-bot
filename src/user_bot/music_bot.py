@@ -4,8 +4,8 @@ from pytgcalls import PyTgCalls
 from pytgcalls.types import MediaStream
 
 # 🔥 فعال‌سازی FFmpeg برای رفع مشکل صدا در سرور رندر
-from static_ffmpeg import add_paths
-add_paths()
+import static_ffmpeg
+static_ffmpeg.add_paths()
 
 # خواندن لیست سوپریوزرها از محیط
 super_users_raw = os.environ.get('SUPER_USERS', '8627765327,6779908406')
