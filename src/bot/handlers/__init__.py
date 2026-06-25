@@ -14,6 +14,9 @@ def register_bot_handlers(bot: AsyncTeleBot):
     
     # اولویت اول: دستورات ادمین و کارهای مدیریتی (بالاترین اولویت برای گاد مد)
     register_admin_handlers(bot)
+
+    # 🎵 پلِ موزیک: دستور «پخش» در گروه و دکمه‌های شیشه‌ای ویس‌چت
+    register_userbot_handlers(bot)
     
     # اولویت دوم: موتور چت تصادفی، ثبت جنسیت، فیلترها و قطع چت زنده
     register_random_chat_handlers(bot)
@@ -31,8 +34,5 @@ def register_bot_handlers(bot: AsyncTeleBot):
     
     # اولویت پنجم: اموجی‌ها و ریکشن‌های زنده کاربران
     register_reaction_handlers(bot)
-
-    # 🎵 پلِ موزیک: دستور «پخش» در گروه و دکمه‌های شیشه‌ای ویس‌چت
-    register_userbot_handlers(bot)
     
     print("💎 Modern Modular Handlers Activated with Strict Priorities (Whisper Engine Added).")
