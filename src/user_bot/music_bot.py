@@ -1,9 +1,8 @@
 """
-یوزربات موزیک (پروسهٔ جداگانه) — Telethon + PyTgCalls.
+یوزربات موزیک (نسخهٔ کاملاً سازگار با py-tgcalls==2.3.3) — Telethon + PyTgCalls v2.
 
-این برنامه با حسابِ کاربری (نه بات) وارد ویس‌چت گروه می‌شود و موزیک پخش می‌کند.
-دستورها را از Redis می‌گیرد و وضعیت را به Redis برمی‌گرداند تا «ربات رسمی»
-پنل و دکمه‌ها را به‌روزرسانی کند.
+این برنامه با حسابِ کاربری وارد ویس‌چت گروه می‌شود و موزیک پخش می‌کند.
+دستورها را از Redis می‌گیرد و وضعیت را به Redis برمی‌گرداند.
 """
 
 import os
@@ -14,8 +13,9 @@ import redis.asyncio as aioredis
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
+# 🌟 تغییر ایمپورت‌ها به متدهای بومی نسخه 2.3.3
 from pytgcalls import PyTgCalls
-from pytgcalls.types import MediaStream, StreamEnded
+from pytgcalls.types.input_stream import AudioPiped
 
 from src.bot.music_protocol import (
     CMD_CHANNEL, EVT_CHANNEL, now_key, queue_key, pack, unpack, IDLE_TIMEOUT,
@@ -38,7 +38,7 @@ else:
     print(f"🔑 Using file session: {SESSION_NAME}.session")
 
 # ── کلاینت‌ها ─────────────────────────────────────────────
-# 🌟 اضافه شدن health_check_interval برای زنده نگه داشتن کانکشن ردیس در Render
+# زنده نگه داشتن کانکشن ردیس در دکهاست و سرور رندر
 r        = aioredis.from_url(REDIS_URL, decode_responses=True, health_check_interval=30)
 client  = TelegramClient(session, API_ID, API_HASH)
 calls    = PyTgCalls(client)
@@ -130,13 +130,13 @@ def _sweep_stale_downloads():
 
 
 # ════════════════════════════════════════════════════════════
-#  منطقِ پخش / صف
+#  منطقِ پخش / صف (اصلاح شده برای ورژن 2.3.3)
 # ════════════════════════════════════════════════════════════
 async def _start_stream(chat_id: int, track: dict):
     path = await _download_audio(track["audio_chat_id"], track["audio_msg_id"])
     try:
-        # 🌟 اصلاح ساختار متناسب با تغییرات نسخه‌های جدید pytgcalls برای پایداری و فرار از ارور
-        await calls.play(chat_id, MediaStream(path))
+        # 🌟 استفاده از سینتکس معتبر نسخه قدیمی برای جوین شدن به ویس چت
+        await calls.join_group_call(chat_id, AudioPiped(path))
     except Exception:
         _cleanup_file(path)
         raise
@@ -210,7 +210,8 @@ async def _play_next(chat_id: int):
 
 async def _cmd_pause(chat_id: int):
     try:
-        await calls.pause(chat_id)
+        # 🌟 متد مکث استریم در نسخه ۲
+        await calls.pause_stream(chat_id)
     except Exception:
         pass
     now = await _get_now(chat_id)
@@ -222,7 +223,8 @@ async def _cmd_pause(chat_id: int):
 
 async def _cmd_resume(chat_id: int):
     try:
-        await calls.resume(chat_id)
+        # 🌟 متد ادامه‌دهنده استریم در نسخه ۲
+        await calls.resume_stream(chat_id)
     except Exception:
         pass
     now = await _get_now(chat_id)
@@ -249,7 +251,8 @@ async def _leave(chat_id: int, toast: str = ""):
     if now:
         _cleanup_file(now.get("path"))
     try:
-        await calls.leave_call(chat_id)
+        # 🌟 متد لفت دادن از کال در نسخه ۲
+        await calls.leave_group_call(chat_id)
     except Exception:
         pass
     await _clear_now(chat_id)
@@ -283,19 +286,18 @@ def _cancel_autoleave(chat_id: int):
 
 
 # ════════════════════════════════════════════════════════════
-#  پایانِ طبیعیِ استریم → پخشِ بعدی
+#  پایانِ طبیعیِ استریم → پخشِ بعدی (نسخه ۲)
 # ════════════════════════════════════════════════════════════
-@calls.on_update()
-async def _on_update(_, update):
-    if isinstance(update, StreamEnded):
-        await _play_next(update.chat_id)
+@calls.on_stream_end()
+async def _on_stream_end(chat_id: int, _):
+    # 🌟 هندلر بومی نسخه 2.3.3 هنگام به پایان رسیدن خودکار آهنگ
+    await _play_next(chat_id)
 
 
 # ════════════════════════════════════════════════════════════
 #  شنوندهٔ دستورهای Redis (با سیستم اتصال مجدد خودکار)
 # ════════════════════════════════════════════════════════════
 async def _command_listener():
-    # 🌟 کل پروسه در حلقه بی‌نهایت قرار گرفت تا در صورت قطع کانکشن کرش نکند
     while True:
         try:
             pubsub = r.pubsub()
