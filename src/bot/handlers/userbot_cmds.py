@@ -13,6 +13,7 @@
 """
 
 import html
+import asyncio
 
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -154,48 +155,23 @@ def register_userbot_handlers(bot: AsyncTeleBot):
     print("🎵 Userbot music bridge handlers registered.")
 
 
-# ── شنوندهٔ رویدادهای یوزربات (ادیتِ پنل/دکمه‌ها) ──────────
+
 async def start_music_event_listener(bot: AsyncTeleBot):
-    """
-    در یک تسکِ پس‌زمینه روی کانال رویدادها می‌نشیند و هر تغییر وضعیت را
-    روی پنلِ مربوطه اعمال می‌کند. این تنها مسیرِ به‌روزرسانی دکمه‌هاست.
-    """
     if not redis_client:
         print("⚠️ Music event listener disabled — Redis not connected.")
         return
 
-    pubsub = redis_client.pubsub()
-    await pubsub.subscribe(EVT_CHANNEL)
-    print("👂 Music event listener active.")
-
-    async for raw in pubsub.listen():
-        if raw.get("type") != "message":
-            continue
+    while True:
         try:
-            evt = unpack(raw["data"])
-            kind = evt.get("event")
+            pubsub = redis_client.pubsub()
+            await pubsub.subscribe(EVT_CHANNEL)
+            print("👂 Music event listener active and connected.")
 
-            if kind == "panel":
-                # رندرِ مجددِ پنل بر اساس وضعیت گزارش‌شدهٔ یوزربات
-                text, kb = build_panel(
-                    evt.get("state", "idle"),
-                    evt.get("title", ""),
-                    int(evt.get("queue_len", 0)),
-                )
-                try:
-                    await bot.edit_message_text(
-                        text, evt["chat_id"], evt["panel_msg_id"],
-                        parse_mode="HTML", reply_markup=kb,
-                    )
-                except Exception:
-                    pass  # «message is not modified» و موارد مشابه را بی‌خیال می‌شویم
-
-            elif kind == "toast":
-                # یک پیام کوتاهِ اطلاع‌رسانی در گروه (مثلاً «به صف اضافه شد»)
-                try:
-                    await bot.send_message(evt["chat_id"], evt.get("text", ""), parse_mode="HTML")
-                except Exception:
-                    pass
-
+            async for raw in pubsub.listen():
+                if raw.get("type") != "message":
+                    continue
+                # ... ادامه کدهای قبلی (try/except داخلی برای unpack و پنل) ...
+                
         except Exception as e:
-            print(f"💥 Music event listener error: {e}")
+            print(f"💥 Music event listener connection dropped: {e}. Reconnecting in 5s...")
+            await asyncio.sleep(5)

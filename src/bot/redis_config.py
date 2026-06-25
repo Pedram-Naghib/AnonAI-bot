@@ -11,7 +11,13 @@ try:
     import redis.asyncio as aioredis
 
     _redis_url = os.getenv("REDIS_URL", "redis://127.0.0.1:6379")
-    redis_client = aioredis.from_url(_redis_url, decode_responses=True)
+    
+    # 🌟 اضافه شدن health_check_interval برای زنده نگه داشتن کانکشن در سرور
+    redis_client = aioredis.from_url(
+        _redis_url, 
+        decode_responses=True, 
+        health_check_interval=30
+    )
 
     # Log provider type only, never the full URL (may contain password)
     _provider = "local" if "127.0.0.1" in _redis_url or "localhost" in _redis_url else "remote"
