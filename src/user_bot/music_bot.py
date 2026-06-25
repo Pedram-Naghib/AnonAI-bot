@@ -1,5 +1,4 @@
 import os
-import socks
 from telethon import TelegramClient, events
 from pytgcalls import PyTgCalls
 from pytgcalls.types import AudioPiped
@@ -16,6 +15,7 @@ if IS_ON_RENDER:
     PROXY = None
     print("🌍 در حال اجرا روی سرور رندر (بدون نیاز به پروکسی)")
 else:
+    import socks
     PROXY = (socks.SOCKS5, '127.0.0.1', 10808)
     print("💻 در حال اجرا روی اوبونتو داخلی (پروکسی فعال)")
 
