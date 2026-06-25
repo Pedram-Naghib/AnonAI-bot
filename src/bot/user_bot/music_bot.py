@@ -1,20 +1,23 @@
 """
-یوزربات موزیک یکپارچه (Single-Process) — Telethon + PyTgCalls
+یوزربات موزیک یکپارچه (In-Memory Mode) — مخصوص py-tgcalls==2.3.3 و فایل سشن.
 
-در این معماری جدید، Redis کاملاً حذف شده است. یوزربات و ربات رسمی هر دو در یک
-Event Loop اجرا می‌شوند. این فایل دیگر به صورت مستقل اجرا نمی‌شود، بلکه تابع 
-استارتاپ آن توسط فایل main.py فراخوانی می‌گردد.
+تغییرات:
+  ۱. حذف کامل وابستگی به USERBOT_SESSION استرینگ و اجبار به استفاده از فایل userbot.session
+  ۲. بازگرداندن متدهای پخش به AudioPiped و join_group_call مخصوص نسخه 2.3.3
 """
 
 import os
 import asyncio
 from telethon import TelegramClient
 from telethon.sessions import StringSession
+
+# 🌟 ایمپورت متدهای بومی نسخه 2.3.3
 from pytgcalls import PyTgCalls
-from pytgcalls.types import MediaStream, StreamEnded
+from pytgcalls.types import AudioPiped
+
 from telebot.async_telebot import AsyncTeleBot
 
-# 🌟 وارد کردن توابع حافظه موقت (بدون نیاز به await)
+# وارد کردن توابع حافظه موقت (بدون نیاز به await)
 from src.bot.music_protocol import (
     get_now, set_now, clear_now, get_queue_len, 
     push_to_queue, pop_from_queue, clear_queue, IDLE_TIMEOUT
@@ -25,35 +28,24 @@ API_ID   = int(os.getenv("API_ID", "0"))
 API_HASH = os.getenv("API_HASH", "")
 DOWNLOAD_DIR = "downloads"
 
-_session_string = os.getenv("USERBOT_SESSION", "").strip()
-SESSION_NAME     = os.getenv("SESSION_NAME", "userbot")
-
-if _session_string:
-    session = StringSession(_session_string)
-    print("🔑 Using StringSession from USERBOT_SESSION env var.")
-else:
-    session = SESSION_NAME
-    print(f"🔑 Using file session: {SESSION_NAME}.session")
+# 🌟 اجبارِ برنامه به استفاده از فایلِ سشنِ فیزیکی کنار پروژه به جای استرینگ
+SESSION_NAME = "userbot" 
+print(f"🔑 Strict Mode: Using file session directly from {SESSION_NAME}.session")
 
 # ── کلاینت‌ها ─────────────────────────────────────────────
-client  = TelegramClient(session, API_ID, API_HASH)
+client  = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 calls    = PyTgCalls(client)
 
 _autoleave_tasks: dict = {}
 _last_panel: dict = {}
-
-# 🌟 متغیری برای نگه‌داشتن کلاینت ربات رسمی (Telebot) جهت ویرایش دکمه‌ها
 _bot_instance = None 
 
 # ════════════════════════════════════════════════════════════
 #  ارسالِ رویداد به ربات رسمی (مستقیم)
 # ════════════════════════════════════════════════════════════
 async def _emit_panel(chat_id: int):
-    """ویرایش مستقیم پنل دکمه‌ها در گروه بدون نیاز به واسطه."""
     if not _bot_instance:
         return
-        
-    # ایمپورت محلی برای جلوگیری از مشکل Circular Import (لوپ بین دو فایل)
     from src.bot.handlers.userbot_cmds import build_panel 
     
     now = get_now(chat_id)
@@ -84,7 +76,6 @@ async def _emit_panel(chat_id: int):
 
 
 async def _emit_toast(chat_id: int, text: str):
-    """ارسال مستقیم یک پیام کوتاه در گروه."""
     if not _bot_instance:
         return
     try:
@@ -99,6 +90,8 @@ async def _emit_toast(chat_id: int, text: str):
 async def _download_audio(chat_id: int, msg_id: int) -> str:
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     msg = await client.get_messages(chat_id, ids=msg_id)
+    if not msg:
+        return ""
     path = await client.download_media(msg, file=os.path.join(DOWNLOAD_DIR, f"{chat_id}_{msg_id}"))
     return path
 
@@ -122,12 +115,16 @@ def _sweep_stale_downloads():
 
 
 # ════════════════════════════════════════════════════════════
-#  منطقِ پخش / صف
+#  منطقِ پخش / صف (v2.3.3)
 # ════════════════════════════════════════════════════════════
 async def _start_stream(chat_id: int, track: dict):
     path = await _download_audio(track["audio_chat_id"], track["audio_msg_id"])
+    if not path:
+        raise ValueError("فایل صوتی دانلود نشد. مطمئن شوید یوزربات در گروه عضو است.")
+        
     try:
-        await calls.play(chat_id, MediaStream(path))
+        # 🌟 استفاده از متد معتبر نسخه 2.3.3
+        await calls.join_group_call(chat_id, AudioPiped(path))
     except Exception:
         _cleanup_file(path)
         raise
@@ -135,7 +132,6 @@ async def _start_stream(chat_id: int, track: dict):
 
 
 async def cmd_play(chat_id: int, audio_chat_id: int, audio_msg_id: int, title: str, requester_id: int, initiator_id: int, panel_msg_id: int):
-    """صدا زده شده به صورت مستقیم توسط هندلر دستور پخش ربات رسمی."""
     track = {
         "audio_chat_id": audio_chat_id,
         "audio_msg_id":  audio_msg_id,
@@ -145,14 +141,12 @@ async def cmd_play(chat_id: int, audio_chat_id: int, audio_msg_id: int, title: s
     _last_panel[chat_id] = panel_msg_id
     now = get_now(chat_id)
 
-    # اگر چیزی در حال پخش/مکث است → به صف اضافه کن
     if now and now.get("state") in ("playing", "paused"):
         pos = push_to_queue(chat_id, track)
         await _emit_toast(chat_id, f"🎵 «{track['title']}» به صف اضافه شد (موقعیت {pos}).")
         await _emit_panel(chat_id)
         return
 
-    # وگرنه همین حالا پخش کن
     try:
         path = await _start_stream(chat_id, track)
     except Exception as e:
@@ -177,7 +171,7 @@ async def _play_next(chat_id: int):
         _cleanup_file(prev.get("path"))
 
     track = pop_from_queue(chat_id)
-    if track:  # اگر صفی وجود داشت
+    if track:
         try:
             path = await _start_stream(chat_id, track)
         except Exception as e:
@@ -193,7 +187,7 @@ async def _play_next(chat_id: int):
         })
         _cancel_autoleave(chat_id)
         await _emit_panel(chat_id)
-    else:  # اگر صف خالی بود
+    else:
         clear_now(chat_id)
         await _emit_panel(chat_id)
         _schedule_autoleave(chat_id)
@@ -201,7 +195,8 @@ async def _play_next(chat_id: int):
 
 async def cmd_pause(chat_id: int):
     try:
-        await calls.pause(chat_id)
+        # 🌟 متد مکث در نسخه ۲
+        await calls.pause_stream(chat_id)
     except Exception:
         pass
     now = get_now(chat_id)
@@ -213,7 +208,8 @@ async def cmd_pause(chat_id: int):
 
 async def cmd_resume(chat_id: int):
     try:
-        await calls.resume(chat_id)
+        # 🌟 متد ادامه در نسخه ۲
+        await calls.resume_stream(chat_id)
     except Exception:
         pass
     now = get_now(chat_id)
@@ -240,7 +236,8 @@ async def _leave(chat_id: int, toast: str = ""):
     if now:
         _cleanup_file(now.get("path"))
     try:
-        await calls.leave_call(chat_id)
+        # 🌟 متد لفت در نسخه ۲
+        await calls.leave_group_call(chat_id)
     except Exception:
         pass
     clear_now(chat_id)
@@ -274,25 +271,22 @@ def _cancel_autoleave(chat_id: int):
 
 
 # ════════════════════════════════════════════════════════════
-#  پایانِ طبیعیِ استریم
+#  پایانِ طبیعیِ استریم (v2.3.3)
 # ════════════════════════════════════════════════════════════
-@calls.on_update()
-async def _on_update(_, update):
-    if isinstance(update, StreamEnded):
-        await _play_next(update.chat_id)
+@calls.on_stream_end()
+async def _on_stream_end(chat_id: int, _):
+    # 🌟 ایونت پایان آهنگ در نسخه ۲.۳.۳
+    await _play_next(chat_id)
 
 
 # ════════════════════════════════════════════════════════════
-#  راه‌اندازی (صدا زده می‌شود از main.py)
+#  راه‌اندازی
 # ════════════════════════════════════════════════════════════
 async def start_music_client(bot_instance: AsyncTeleBot):
-    """
-    روشن کردن کلاینت تلتون و ویس‌چت و ثبت ریفرنس ربات رسمی
-    """
     global _bot_instance
     _bot_instance = bot_instance
     
     _sweep_stale_downloads()
     await client.start()
     await calls.start()
-    print("✅ Userbot + PyTgCalls started (Single-Process In-Memory Mode).")
+    print("✅ Userbot + PyTgCalls started (Single-Process Native v2.3.3 File Session).")
