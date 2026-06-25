@@ -157,10 +157,15 @@ def register_userbot_handlers(bot: AsyncTeleBot):
 
 
 async def start_music_event_listener(bot: AsyncTeleBot):
+    """
+    در یک تسکِ پس‌زمینه روی کانال رویدادها می‌نشیند و هر تغییر وضعیت را
+    روی پنلِ مربوطه اعمال می‌کند. با سیستم اتصال مجدد خودکار برای فرار از تایم‌اوت.
+    """
     if not redis_client:
         print("⚠️ Music event listener disabled — Redis not connected.")
         return
 
+    # 🌟 اضافه شدن حلقه بی‌نهایت برای زنده نگه داشتن تسک در صورت تایم‌اوت شبکه
     while True:
         try:
             pubsub = redis_client.pubsub()
@@ -170,8 +175,34 @@ async def start_music_event_listener(bot: AsyncTeleBot):
             async for raw in pubsub.listen():
                 if raw.get("type") != "message":
                     continue
-                # ... ادامه کدهای قبلی (try/except داخلی برای unpack و پنل) ...
-                
+                try:
+                    evt = unpack(raw["data"])
+                    kind = evt.get("event")
+
+                    if kind == "panel":
+                        text, kb = build_panel(
+                            evt.get("state", "idle"),
+                            evt.get("title", ""),
+                            int(evt.get("queue_len", 0)),
+                        )
+                        try:
+                            await bot.edit_message_text(
+                                text, evt["chat_id"], evt["panel_msg_id"],
+                                parse_mode="HTML", reply_markup=kb,
+                            )
+                        except Exception:
+                            pass  # «message is not modified» را نادیده می‌گیریم
+
+                    elif kind == "toast":
+                        try:
+                            await bot.send_message(evt["chat_id"], evt.get("text", ""), parse_mode="HTML")
+                        except Exception:
+                            pass
+
+                except Exception as e:
+                    print(f"💥 Error processing music event: {e}")
+
         except Exception as e:
+            # اگر کانکشن ردیس قطع شد، ارور پرینت می‌شود و 5 ثانیه بعد دوباره وصل می‌شود
             print(f"💥 Music event listener connection dropped: {e}. Reconnecting in 5s...")
             await asyncio.sleep(5)
