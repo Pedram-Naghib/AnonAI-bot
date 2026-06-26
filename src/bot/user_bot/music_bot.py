@@ -1,22 +1,21 @@
 """
 یوزربات موزیک یکپارچه (In-Memory Mode) — سازگار با py-tgcalls==2.3.3 و Telethon.
 
-نکته‌ی مهم درباره‌ی این بازنویسی:
-  نسخه‌ی قبلی این فایل با API قدیمی py-tgcalls (نسخه‌ی 0.9.x) نوشته شده بود
-  (AudioPiped / join_group_call / on_stream_end). این متدها در نسخه‌ی 2.3.3
-  که در requirements.txt نصب می‌شود اصلاً وجود ندارند، بنابراین خودِ import
-  بالای فایل با ModuleNotFoundError می‌شکست و کل ربات هنگام بالا آمدن کرش می‌کرد.
+اصلاحِ مهمِ این نسخه (رفعِ خطای cross-event-loop):
+  در نسخه‌ی قبلی، `client = TelegramClient(...)` و `calls = PyTgCalls(client)`
+  در سطحِ ماژول (هنگام import) ساخته می‌شدند. این import قبل از اجرای
+  `asyncio.run(start_bot())` در main.py رخ می‌دهد، یعنی هنوز event loop اصلی
+  ساخته نشده. py-tgcalls/ntgcalls در زمانِ ساخته‌شدن به یک loop بایند می‌شود،
+  و بعداً `calls.play()` روی loopِ دیگری اجرا می‌شد →
+  خطای «got Future attached to a different loop» و شکستِ هر پخش.
 
-  حالا از API صحیح نسخه‌ی 2.x استفاده می‌کنیم:
-    • from pytgcalls.types import MediaStream, StreamEnded
-    • await calls.play(chat_id, MediaStream(...))
-    • await calls.pause(chat_id) / await calls.resume(chat_id)
-    • await calls.leave_call(chat_id)
-    • @calls.on_update()  → تشخیص پایان آهنگ با isinstance(update, StreamEnded)
+  حالا client و calls «درونِ» start_music_client (روی همان loopِ در حالِ اجرا)
+  ساخته می‌شوند و هندلرِ on_update هم همان‌جا ثبت می‌شود.
 """
 
 import os
 import asyncio
+import traceback
 
 from telethon import TelegramClient
 from telethon.sessions import StringSession
@@ -27,13 +26,6 @@ from pytgcalls.exceptions import NoActiveGroupCall, NotInCallError
 
 from telebot.async_telebot import AsyncTeleBot
 
-# تضمین در دسترس بودن ffmpeg (py-tgcalls برای پخش فایل به ffmpeg نیاز دارد)
-try:
-    import static_ffmpeg
-    static_ffmpeg.add_paths()  # ffmpeg/ffprobe را روی PATH اضافه می‌کند
-except Exception as _e:
-    print(f"⚠️ static_ffmpeg setup skipped: {_e}")
-
 from src.bot.music_protocol import (
     get_now, set_now, clear_now, get_queue_len,
     push_to_queue, pop_from_queue, clear_queue, IDLE_TIMEOUT
@@ -43,19 +35,11 @@ from src.bot.music_protocol import (
 API_ID   = int(os.getenv("API_ID", "0"))
 API_HASH = os.getenv("API_HASH", "")
 DOWNLOAD_DIR = "downloads"
-
-# روی Render فایل‌سیستم موقتی است و کامیت کردن فایل سشن خطرناک است؛
-# اگر USERBOT_SESSION در محیط ست شده باشد از StringSession استفاده می‌کنیم،
-# در غیر این صورت روی VPS از فایل userbot.session استفاده می‌شود.
 _STRING_SESSION = os.getenv("USERBOT_SESSION", "").strip()
-if _STRING_SESSION:
-    print("🔑 Using StringSession from env (USERBOT_SESSION).")
-    client = TelegramClient(StringSession(_STRING_SESSION), API_ID, API_HASH)
-else:
-    print("🔑 Using file session: userbot.session")
-    client = TelegramClient("userbot", API_ID, API_HASH)
 
-calls = PyTgCalls(client)
+# 🌟 این‌ها دیگر در زمانِ import ساخته نمی‌شوند؛ در start_music_client مقداردهی می‌شوند.
+client: TelegramClient = None
+calls:  PyTgCalls = None
 
 _autoleave_tasks: dict = {}
 _last_panel: dict = {}
@@ -107,37 +91,34 @@ async def _emit_toast(chat_id: int, text: str):
 
 
 # ════════════════════════════════════════════════════════════
-#  دانلودِ صوت
+#  دانلودِ صوت (فالبک؛ مسیرِ اصلی، دانلودِ سمتِ ربات است)
 # ════════════════════════════════════════════════════════════
 async def _download_audio(chat_id: int, msg_id: int) -> str:
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
-    # تلتون برای خیلی از عملیات (از جمله get_messages روی چت‌هایی که تازه
-    # join شدن یا هنوز در کش entity نیستن) به access_hash نیاز دارد. اگر
-    # entity در کش نباشد، get_messages معمولاً به‌جای ارور دادن، None یا []
-    # برمی‌گرداند — همان چیزی که قبلاً به‌اشتباه «دانلود نشد» تعبیر می‌شد.
-    # اینجا صراحتاً entity را resolve می‌کنیم تا اگر مشکل واقعی «عضو نبودن»
-    # باشد، خودِ همین خط با خطای روشن (مثل ValueError: Cannot find entity) شکست بخورد.
     try:
         await client.get_entity(chat_id)
     except Exception as e:
         print(f"💥 entity resolve failed for {chat_id}: {e}")
-        raise ValueError(
-            "ENTITY_NOT_FOUND: یوزربات این گروه را در کش خود ندارد. "
-            "مطمئن شو یوزربات واقعاً عضو گروه است؛ اگر تازه اضافه شده، یک بار /restart یا ری‌استارت سرویس کن."
-        )
+        raise ValueError("ENTITY_NOT_FOUND: یوزربات این گروه را در کش خود ندارد.")
 
-    try:
-        msg = await client.get_messages(chat_id, ids=msg_id)
-    except Exception as e:
-        print(f"💥 get_messages failed for {chat_id}/{msg_id}: {e}")
-        raise ValueError(f"GET_MESSAGE_FAILED: {e}")
+    msg = None
+    last_err = None
+    for attempt, delay in enumerate((0, 0.7, 1.5, 2.5), start=1):
+        if delay:
+            await asyncio.sleep(delay)
+        try:
+            msg = await client.get_messages(chat_id, ids=msg_id)
+        except Exception as e:
+            last_err = e
+            print(f"💥 get_messages attempt {attempt} failed for {chat_id}/{msg_id}: {e}")
+            continue
+        if msg:
+            break
 
+    if last_err and not msg:
+        raise ValueError(f"GET_MESSAGE_FAILED: {last_err}")
     if not msg:
-        raise ValueError(
-            "MESSAGE_NOT_FOUND: پیام صوتی پیدا نشد. ممکن است حذف شده باشد یا "
-            "(در گروه‌های عادی غیر سوپرگروه) آیدی پیام بین ربات رسمی و یوزربات یکسان نباشد."
-        )
+        raise ValueError("MESSAGE_NOT_FOUND: پیام صوتی پیدا نشد.")
 
     try:
         path = await client.download_media(msg, file=os.path.join(DOWNLOAD_DIR, f"{chat_id}_{msg_id}"))
@@ -146,8 +127,7 @@ async def _download_audio(chat_id: int, msg_id: int) -> str:
         raise ValueError(f"DOWNLOAD_MEDIA_FAILED: {e}")
 
     if not path:
-        raise ValueError("DOWNLOAD_EMPTY: download_media مسیر خالی برگرداند (پیام شاید audio/voice نبود).")
-
+        raise ValueError("DOWNLOAD_EMPTY: download_media مسیر خالی برگرداند.")
     return path
 
 
@@ -174,16 +154,11 @@ def _sweep_stale_downloads():
 # ════════════════════════════════════════════════════════════
 async def _start_stream(chat_id: int, track: dict) -> str:
     # اولویت با فایلی است که خودِ ربات رسمی دانلود کرده و مسیرش را داده.
-    # این مسیر مطمئن‌ترین حالت است چون ربات قطعاً به پیام دسترسی دارد و هیچ
-    # وابستگی‌ای به خواندنِ پیام از سمت یوزربات (که گاهی خالی برمی‌گرداند) ندارد.
     path = track.get("audio_path")
     if not (path and os.path.exists(path)):
-        # فالبک: اگر ربات نتوانست دانلود کند (مثلاً فایل بزرگ‌تر از ۲۰ مگ)،
-        # یوزربات خودش تلاش می‌کند پیام را بگیرد.
         path = await _download_audio(track["audio_chat_id"], track["audio_msg_id"])
 
     try:
-        # فقط صدا؛ ویدئو نادیده گرفته شود. play خودش وارد ویس‌چت می‌شود.
         await calls.play(
             chat_id,
             MediaStream(path, video_flags=MediaStream.Flags.IGNORE),
@@ -197,6 +172,10 @@ async def _start_stream(chat_id: int, track: dict) -> str:
 async def cmd_play(chat_id: int, audio_chat_id: int, audio_msg_id: int, title: str,
                    requester_id: int, initiator_id: int, panel_msg_id: int,
                    audio_path: str = None):
+    if calls is None:
+        await _emit_toast(chat_id, "⚠️ موتور موزیک هنوز آماده نیست؛ چند لحظه بعد دوباره امتحان کن.")
+        return
+
     track = {
         "audio_chat_id": audio_chat_id,
         "audio_msg_id":  audio_msg_id,
@@ -219,23 +198,26 @@ async def cmd_play(chat_id: int, audio_chat_id: int, audio_msg_id: int, title: s
         await _emit_toast(chat_id, "⚠️ ابتدا یک ویس‌چت در گروه ایجاد کنید، سپس دوباره «پخش» را بزنید.")
         return
     except ValueError as e:
-        # پیام‌های ValueError حالا حاوی دلیل واقعی هستند (entity/get_message/download)
         reason = str(e)
         if reason.startswith("ENTITY_NOT_FOUND"):
-            await _emit_toast(
-                chat_id,
-                "⚠️ یوزربات این گروه را در حافظه‌اش پیدا نکرد. اگر تازه عضو شده، "
-                "یک پیام (هر چیزی) در گروه با اکانت یوزربات بفرست یا سرویس را ری‌استارت کن، سپس دوباره امتحان کن."
-            )
+            await _emit_toast(chat_id, "⚠️ یوزربات این گروه را نمی‌شناسد. مطمئن شو یوزربات عضو گروه است و سرویس را ری‌استارت کن.")
         elif reason.startswith("MESSAGE_NOT_FOUND"):
-            await _emit_toast(chat_id, "⚠️ پیام صوتی پیدا نشد یا حذف شده. دوباره روی یک فایل صوتی تازه ریپلای کن.")
+            await _emit_toast(chat_id, "⚠️ فایل صوتی در دسترس نبود. دوباره روی یک فایل صوتی تازه ریپلای کن.")
         else:
-            await _emit_toast(chat_id, f"⚠️ خطا در دانلود/آماده‌سازی فایل صوتی:\n<code>{reason}</code>")
-        print(f"💥 play error in {chat_id}: {reason}")
+            await _emit_toast(chat_id, f"⚠️ خطا در آماده‌سازی فایل:\n<code>{reason}</code>")
+        print(f"💥 play ValueError in {chat_id}: {reason}")
         return
     except Exception as e:
-        await _emit_toast(chat_id, "⚠️ اتصال به ویس‌چت ناموفق بود. یوزربات عضو گروه است و ویس‌چت باز است؟")
-        print(f"💥 play error in {chat_id}: {e}")
+        # چاپِ کاملِ خطا برای دیباگ (نوع + متن + traceback)
+        print(f"💥 play error in {chat_id}: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        await _emit_toast(
+            chat_id,
+            "⚠️ اتصال به ویس‌چت ناموفق بود.\n"
+            "۱) یوزربات باید عضو گروه باشد.\n"
+            "۲) ویس‌چت گروه باید از قبل باز باشد.\n"
+            f"<code>{type(e).__name__}: {str(e)[:200]}</code>"
+        )
         return
 
     set_now(chat_id, {
@@ -278,6 +260,8 @@ async def _play_next(chat_id: int):
 
 
 async def cmd_pause(chat_id: int):
+    if calls is None:
+        return
     try:
         await calls.pause(chat_id)
     except Exception:
@@ -290,6 +274,8 @@ async def cmd_pause(chat_id: int):
 
 
 async def cmd_resume(chat_id: int):
+    if calls is None:
+        return
     try:
         await calls.resume(chat_id)
     except Exception:
@@ -317,12 +303,13 @@ async def _leave(chat_id: int, toast: str = ""):
     now = get_now(chat_id)
     if now:
         _cleanup_file(now.get("path"))
-    try:
-        await calls.leave_call(chat_id)
-    except NotInCallError:
-        pass
-    except Exception:
-        pass
+    if calls is not None:
+        try:
+            await calls.leave_call(chat_id)
+        except NotInCallError:
+            pass
+        except Exception:
+            pass
     clear_now(chat_id)
     _cancel_autoleave(chat_id)
     await _emit_panel(chat_id)
@@ -356,23 +343,39 @@ def _cancel_autoleave(chat_id: int):
 # ════════════════════════════════════════════════════════════
 #  پایانِ طبیعیِ استریم (py-tgcalls 2.3.3)
 # ════════════════════════════════════════════════════════════
-@calls.on_update()
 async def _on_update(_, update):
-    # فقط پایانِ آهنگ صوتی برایمان مهم است.
     if isinstance(update, StreamEnded) and update.stream_type == StreamEnded.Type.AUDIO:
         await _play_next(update.chat_id)
 
 
 # ════════════════════════════════════════════════════════════
-#  راه‌اندازی
+#  راه‌اندازی — client و calls اینجا (روی loopِ در حالِ اجرا) ساخته می‌شوند
 # ════════════════════════════════════════════════════════════
 async def start_music_client(bot_instance: AsyncTeleBot):
-    global _bot_instance
+    global _bot_instance, client, calls
     _bot_instance = bot_instance
 
     if not API_ID or not API_HASH:
         print("⚠️ API_ID/API_HASH تنظیم نشده‌اند — موتور موزیک غیرفعال ماند.")
         return
+
+    # تضمینِ ffmpeg (py-tgcalls برای پخشِ فایل به ffmpeg نیاز دارد)
+    try:
+        import static_ffmpeg
+        static_ffmpeg.add_paths()
+    except Exception as e:
+        print(f"⚠️ static_ffmpeg setup skipped: {e}")
+
+    # 🌟 ساختِ کلاینت‌ها روی همین loopِ در حالِ اجرا (نه در زمانِ import)
+    if _STRING_SESSION:
+        print("🔑 Using StringSession from env (USERBOT_SESSION).")
+        client = TelegramClient(StringSession(_STRING_SESSION), API_ID, API_HASH)
+    else:
+        print("🔑 Using file session: userbot.session")
+        client = TelegramClient("userbot", API_ID, API_HASH)
+
+    calls = PyTgCalls(client)
+    calls.on_update()(_on_update)  # ثبتِ هندلرِ پایانِ استریم به‌صورتِ برنامه‌ای
 
     _sweep_stale_downloads()
     try:
@@ -381,10 +384,7 @@ async def start_music_client(bot_instance: AsyncTeleBot):
         me = await client.get_me()
         print(f"✅ Userbot + PyTgCalls started (2.3.3). Logged in as: {getattr(me, 'username', None) or me.id}")
 
-        # 🌟 کشِ entity همه‌ی چت‌هایی که یوزربات عضوشان است. بدون این، get_messages
-        # روی گروه‌هایی که در این سشن هنوز "دیده" نشده‌اند می‌تواند None برگرداند
-        # (نه ارور) و خطای گمراه‌کننده‌ی «فایل دانلود نشد» ایجاد کند، حتی وقتی
-        # یوزربات واقعاً عضو گروه است.
+        # کشِ entity همه‌ی چت‌ها تا get_messages/فالبک روی گروه‌های عضو کار کند
         dialog_count = 0
         async for _dialog in client.iter_dialogs():
             dialog_count += 1
@@ -392,3 +392,4 @@ async def start_music_client(bot_instance: AsyncTeleBot):
 
     except Exception as e:
         print(f"💥 Music client failed to start: {e}")
+        traceback.print_exc()
