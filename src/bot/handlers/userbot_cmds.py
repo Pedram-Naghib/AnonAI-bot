@@ -132,7 +132,7 @@ def register_userbot_handlers(bot: AsyncTeleBot):
         user_id = message.from_user.id
 
         # امنیت: فقط سوپریوزرها اجازهٔ شروع پخش دارند
-        if (user_id not in SUPER_USERS) or (chat_id != MUSIC_GROUP_ID):
+        if (user_id not in SUPER_USERS) and (chat_id != MUSIC_GROUP_ID):
             await bot.reply_to(message, "⛔ فقط مدیران اجازهٔ پخش موزیک دارند.")
             return
 
