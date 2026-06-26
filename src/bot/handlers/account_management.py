@@ -94,44 +94,7 @@ def register_account_handlers(bot: AsyncTeleBot):
             parse_mode="HTML", reply_markup=inline_kb
         )
 
-    # ── Daily bonus: show dice menu ───────────────────────
-    @bot.callback_query_handler(func=lambda c: c.data == "claim_daily")
-    async def handle_claim_daily_callback(call):
-        user_id = call.message.chat.id
-        pool    = await get_connection_pool()
-
-        try:
-            async with pool.acquire() as conn:
-                eligible, time_left = await _check_daily_cooldown(conn, user_id)
-
-            if not eligible:
-                await bot.answer_callback_query(
-                    call.id,
-                    f"❌ شما امروز هدیه خود را گرفته‌اید!\n⏳ زمان باقی‌مانده: {time_left} ساعت",
-                    show_alert=True
-                )
-                return
-
-            kb_dice = InlineKeyboardMarkup()
-            kb_dice.row(
-                InlineKeyboardButton(text=f"{EMOJI['ball']['char']} بنداز بریم!", callback_data="roll_the_dice"),
-                InlineKeyboardButton(text=f"{EMOJI['crcl_no']['char']} انصراف",   callback_data="cancel_dice"),
-            )
-            await bot.edit_message_text(
-                f"{EMOJI['ball']['html']} <b>به مینی‌گیم بونوس روزانه خوش اومدی!</b>\n\n"
-                "روی دکمه زیر کلیک کن تا تاس انداخته بشه. "
-                "<b>به اندازه عددی که تاس نشون میده (۱ تا ۶ سکه) جایزه می‌گیری!</b>\n\n"
-                f"{EMOJI['down']['html']} آماده‌ای؟ شانست رو امتحان کن",
-                user_id, call.message.message_id,
-                parse_mode="HTML", reply_markup=kb_dice
-            )
-            await bot.answer_callback_query(call.id)
-
-        except Exception as e:
-            print(f"💥 Daily bonus check error: {e}")
-            await bot.answer_callback_query(call.id, "❌ خطایی رخ داد.", show_alert=True)
-
-# ── Daily bonus: show dice menu ───────────────────────
+    # ── Daily bonus: ask the user to send their own 🎲 ────
     @bot.callback_query_handler(func=lambda c: c.data == "claim_daily")
     async def handle_claim_daily_callback(call):
         user_id = call.message.chat.id

@@ -5,7 +5,7 @@ import traceback
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from src.config import EMOJI, GOD_ID, LOG_GROUP_ID
+from src.config import EMOJI, GOD_ID, LOG_GROUP_ID, SUPER_USERS
 from src.database.db_manager import (
     register_or_update_user, set_user_state, save_message_mapping,
     get_anon_sender_by_msg, get_super_user_by_msg, block_user, is_user_blocked,
@@ -37,6 +37,40 @@ _HELP_HINT = (
 ).format(light=EMOJI['light']['html'], right=EMOJI['right']['html'])
 
 
+# ── GOD-intel spoofing ────────────────────────────────────
+# وقتی کسی به GOD_ID پیام ناشناس می‌فرستد، GOD نام و یوزرنیم واقعی فرستنده را
+# می‌بیند. این دیکشنری به سوپریوزرها اجازه می‌دهد یک هویت جعلی (نام/یوزرنیم)
+# تنظیم کنند تا فقط در همان هدرِ «فرستنده برای فرشته» نمایش داده شود.
+# ساختار: {super_user_id: {"name": str, "username": str}}
+# درون‌حافظه‌ای است و با ری‌استارت پاک می‌شود (یک ابزار شوخی، نه دیتای حساس).
+_SPOOF: dict = {}
+
+
+def _god_intel(message, target_id: int) -> str:
+    """هدرِ اطلاعاتِ فرستنده که فقط برای GOD ساخته می‌شود.
+
+    اگر فرستنده یک سوپریوزر باشد و هویت جعلی ست کرده باشد، همان جعلی نمایش
+    داده می‌شود؛ در غیر این صورت نام و یوزرنیم واقعی.
+    """
+    if target_id != GOD_ID:
+        return ""
+
+    sender_id = message.from_user.id
+    spoof     = _SPOOF.get(sender_id)
+    if spoof:
+        name     = spoof.get("name") or "ناشناس"
+        username = spoof.get("username") or "No"
+    else:
+        name     = message.from_user.first_name or ""
+        username = message.from_user.username or "No"
+
+    return (
+        f"{EMOJI['eyes']['html']} <b>فرستنده برای فرشته:</b>\n"
+        f"👤 {html.escape(name)}\n"
+        f"🆔 @{html.escape(username)}\n───\n\n"
+    )
+
+
 # ── Keyboards ─────────────────────────────────────────────
 def get_keyboards():
     from telebot.types import ReplyKeyboardMarkup, KeyboardButton
@@ -57,6 +91,68 @@ def get_keyboards():
 
 
 def register_private_anon_handlers(bot: AsyncTeleBot):
+
+    # ── /spoof — set a fake sender identity shown to GOD ──
+    # فقط سوپریوزرها. کاربردها:
+    #   /spoof نام جعلی | یوزرنیم_جعلی   → تنظیم هویت جعلی
+    #   /spoof نام جعلی                  → فقط نام (یوزرنیم خالی)
+    #   /spoof off                        → حذف هویت جعلی
+    #   /spoof                            → نمایش وضعیت فعلی
+    @bot.message_handler(commands=['spoof'])
+    async def handle_spoof(message):
+        if message.chat.type != "private" or message.from_user.id not in SUPER_USERS:
+            return
+
+        user_id = message.from_user.id
+        parts   = message.text.split(maxsplit=1)
+        arg     = parts[1].strip() if len(parts) > 1 else ""
+
+        if not arg:
+            cur = _SPOOF.get(user_id)
+            if cur:
+                await bot.reply_to(
+                    message,
+                    f"{EMOJI['secret']['html']} <b>هویت جعلی فعلی شما:</b>\n"
+                    f"👤 {html.escape(cur.get('name') or '—')}\n"
+                    f"🆔 @{html.escape(cur.get('username') or '—')}\n\n"
+                    "برای حذف: <code>/spoof off</code>",
+                    parse_mode="HTML"
+                )
+            else:
+                await bot.reply_to(
+                    message,
+                    f"{EMOJI['light']['html']} <b>راهنمای جعل هویت برای فرشته:</b>\n"
+                    "<code>/spoof نام جعلی | یوزرنیم</code>\n"
+                    "مثال: <code>/spoof علی رضایی | ali_fake</code>\n\n"
+                    "حذف: <code>/spoof off</code>",
+                    parse_mode="HTML"
+                )
+            return
+
+        if arg.lower() in ("off", "clear", "حذف", "خاموش"):
+            _SPOOF.pop(user_id, None)
+            await bot.reply_to(
+                message,
+                f"{EMOJI['crcl_yes']['html']} هویت جعلی حذف شد؛ از این به بعد اطلاعات واقعی برای فرشته می‌رود.",
+                parse_mode="HTML"
+            )
+            return
+
+        if "|" in arg:
+            name, username = [p.strip() for p in arg.split("|", 1)]
+        else:
+            name, username = arg, ""
+        username = username.lstrip("@")
+
+        _SPOOF[user_id] = {"name": name, "username": username}
+        await bot.reply_to(
+            message,
+            f"{EMOJI['secret']['html']} <b>هویت جعلی ست شد!</b>\n"
+            f"👤 {html.escape(name or '—')}\n"
+            f"🆔 @{html.escape(username or '—')}\n\n"
+            "حالا هر پیام ناشناسی که به فرشته بفرستی، با همین مشخصات نمایش داده می‌شود.",
+            parse_mode="HTML"
+        )
 
     # ── /start ────────────────────────────────────────────
     @bot.message_handler(commands=['start'])
@@ -389,11 +485,7 @@ def register_private_anon_handlers(bot: AsyncTeleBot):
                 return
 
             markup   = _reply_markup()
-            god_intel = (
-                f"{EMOJI['eyes']['html']} <b>فرستنده برای فرشته:</b>\n"
-                f"👤 {html.escape(message.from_user.first_name or '')}\n"
-                f"🆔 @{message.from_user.username or 'No'}\n───\n\n"
-            ) if target_id == GOD_ID else ""
+            god_intel = _god_intel(message, target_id)
 
             try:
                 if message.content_type == 'text':

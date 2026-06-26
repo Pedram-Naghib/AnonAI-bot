@@ -254,8 +254,11 @@ async def get_complete_user_context(user_id: int) -> dict:
 async def get_user_id_by_username(username: str):
     pool = await get_connection_pool()
     async with pool.acquire() as conn:
+        # NOTE: use lower(username) = lower($1), NOT ILIKE. Telegram usernames can
+        # contain underscores, and '_' is a single-char wildcard in LIKE/ILIKE — so
+        # ILIKE 'ali_pro' would also match 'aliXpro' and could resolve the wrong user.
         return await conn.fetchval(
-            "SELECT user_id FROM users WHERE username ILIKE $1",
+            "SELECT user_id FROM users WHERE lower(username) = lower($1)",
             username.strip().lstrip('@')
         )
 
@@ -425,6 +428,14 @@ async def join_random_chat_queue(user_id: int, target_gender: str) -> bool:
 
 
 async def leave_random_chat_queue(user_id: int):
+    """Refund the filter cost ONLY if the user is genuinely in the queue right now.
+
+    Previously this refunded based on target_gender unconditionally. Because
+    target_gender is sticky (it isn't reset back to 'any' after a match/cancel),
+    a user could re-send the "cancel search" text while idle and farm +3 coins
+    each time. The `AND chat_status = 'searching'` guard closes that exploit:
+    if they're not actually searching, no row is updated and no coins are minted.
+    """
     pool = await get_connection_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT target_gender FROM users WHERE user_id = $1", user_id)
@@ -434,7 +445,7 @@ async def leave_random_chat_queue(user_id: int):
                 UPDATE users
                 SET chat_status = 'idle', queue_joined_at = NULL,
                     active_partner_id = NULL, coins = coins + $2
-                WHERE user_id = $1
+                WHERE user_id = $1 AND chat_status = 'searching'
             """, user_id, refund)
 
 
