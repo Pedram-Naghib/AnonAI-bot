@@ -70,7 +70,9 @@ async def _emit_panel(chat_id: int):
     text, kb = build_panel(
         now.get("state", "idle"),
         now.get("title", ""),
-        get_queue_len(chat_id)
+        get_queue_len(chat_id),
+        now.get("performer", ""),
+        now.get("duration", 0),
     )
     try:
         await _bot_instance.edit_message_text(
@@ -88,6 +90,25 @@ async def _emit_toast(chat_id: int, text: str):
         await _bot_instance.send_message(chat_id, text, parse_mode="HTML")
     except Exception:
         pass
+
+
+# ════════════════════════════════════════════════════════════
+#  «نقل‌مکانِ» پنل به یک پیامِ تازه (برای دستورِ «پنل»)
+#  وقتی کاربر دوباره پنل را احضار می‌کند، یک پیامِ جدید فرستاده می‌شود و
+#  از این به بعد باید همان پیامِ جدید (نه پیامِ قدیمیِ گم‌شده در چت) آپدیت شود.
+# ════════════════════════════════════════════════════════════
+def repoint_panel(chat_id: int, new_panel_msg_id: int):
+    """پنلِ فعال را به یک پیامِ تازه منتقل می‌کند تا آپدیت‌های بعدی روی آن انجام شود."""
+    _last_panel[chat_id] = new_panel_msg_id
+    now = get_now(chat_id)
+    if now:
+        now["panel_msg_id"] = new_panel_msg_id
+        set_now(chat_id, now)
+
+
+async def refresh_panel(chat_id: int):
+    """آپدیتِ دستیِ پنلِ فعلی (نسخهٔ عمومیِ _emit_panel برای استفاده در هندلرها)."""
+    await _emit_panel(chat_id)
 
 
 # ════════════════════════════════════════════════════════════
@@ -171,7 +192,7 @@ async def _start_stream(chat_id: int, track: dict) -> str:
 
 async def cmd_play(chat_id: int, audio_chat_id: int, audio_msg_id: int, title: str,
                    requester_id: int, initiator_id: int, panel_msg_id: int,
-                   audio_path: str = None):
+                   audio_path: str = None, performer: str = "", duration: int = 0):
     if calls is None:
         await _emit_toast(chat_id, "⚠️ موتور موزیک هنوز آماده نیست؛ چند لحظه بعد دوباره امتحان کن.")
         return
@@ -180,18 +201,32 @@ async def cmd_play(chat_id: int, audio_chat_id: int, audio_msg_id: int, title: s
         "audio_chat_id": audio_chat_id,
         "audio_msg_id":  audio_msg_id,
         "title":         title,
+        "performer":     performer,
+        "duration":      duration,
         "requester_id":  requester_id,
         "audio_path":    audio_path,
     }
-    _last_panel[chat_id] = panel_msg_id
     now = get_now(chat_id)
 
+    # ── حالتِ ۱: چیزی در حال پخش/مکث است → آهنگ به صف می‌رود ──
     if now and now.get("state") in ("playing", "paused"):
         pos = push_to_queue(chat_id, track)
-        await _emit_toast(chat_id, f"🎵 «{track['title']}» به صف اضافه شد (موقعیت {pos}).")
+        # پیامِ «در حال اتصال…»‌ای که تازه ساخته شده را به یک رسیدِ «به صف اضافه شد»
+        # تبدیل می‌کنیم تا پیامِ سرگردان و گمراه‌کننده در چت نماند.
+        try:
+            from src.bot.handlers.userbot_cmds import build_queue_added
+            await _bot_instance.edit_message_text(
+                build_queue_added(title, performer, duration, pos),
+                chat_id, panel_msg_id, parse_mode="HTML"
+            )
+        except Exception:
+            await _emit_toast(chat_id, f"🎵 «{title}» به صف اضافه شد (موقعیت {pos}).")
+        # پنلِ اصلیِ «در حال پخش» را هم رفرش می‌کنیم تا تعدادِ صف به‌روز شود.
         await _emit_panel(chat_id)
         return
 
+    # ── حالتِ ۲: چیزی پخش نمی‌شود → همین آهنگ همین حالا پخش می‌شود ──
+    _last_panel[chat_id] = panel_msg_id
     try:
         path = await _start_stream(chat_id, track)
     except NoActiveGroupCall:

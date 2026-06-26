@@ -3,7 +3,10 @@
 
 نقش این ماژول:
   • گرفتن دستور «پخش» (ریپلای روی یک فایل صوتی) از سوپریوزرها
-  • ساختن پنل فارسی با دکمه‌های شیشه‌ای هوشمند (پخش/توقف پویا)
+  • ساختن پنل فارسی با دکمه‌های شیشه‌ای هوشمند (پخش/توقف پویا) + نام و اطلاعات آهنگ
+  • ریپلای‌کردنِ پنل به پیامِ فرستنده
+  • دستورهای متنیِ «بعدی» و «پایان پخش» (فقط برای آغازگرِ پخش)
+  • دستور «پنل» برای احضارِ دوبارهٔ پنلِ کنترل
   • چک کردن مجوز کلیک روی دکمه‌ها (فقط آغازگر یا سوپریوزرها)
   • فرستادن مستقیم دستورها به توابع یوزربات (بدون واسطهٔ Redis)
 """
@@ -16,21 +19,57 @@ from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from src.config import SUPER_USERS
-from src.bot.music_protocol import get_now
-from src.bot.user_bot.music_bot import cmd_play, cmd_pause, cmd_resume, cmd_skip, cmd_stop
+from src.bot.music_protocol import get_now, get_queue_len
+from src.bot.user_bot.music_bot import (
+    cmd_play, cmd_pause, cmd_resume, cmd_skip, cmd_stop, repoint_panel,
+)
+
+
+# ── گروهی که اجازهٔ پخش در آن داده شده ─────────────────────
+MUSIC_GROUP_ID = -1001434396268
+
+
+# ── کمک‌تابع: قالب‌بندیِ مدت‌زمان (ثانیه → mm:ss) ───────────
+def _fmt_duration(seconds: int) -> str:
+    try:
+        seconds = int(seconds or 0)
+    except (TypeError, ValueError):
+        return ""
+    if seconds <= 0:
+        return ""
+    m, s = divmod(seconds, 60)
+    h, m = divmod(m, 60)
+    if h:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
+
+
+# ── خطِ «اطلاعاتِ آهنگ» (خواننده + مدت‌زمان) ────────────────
+def _info_line(performer: str, duration: int) -> str:
+    parts = []
+    if performer:
+        parts.append(f"👤 {html.escape(performer)}")
+    dur = _fmt_duration(duration)
+    if dur:
+        parts.append(f"⏱ {dur}")
+    return ("\n" + "   ".join(parts)) if parts else ""
+
 
 # ── ساختِ متن و دکمه‌های پنل بر اساس وضعیت ─────────────────
-def build_panel(state: str, title: str, queue_len: int):
+def build_panel(state: str, title: str, queue_len: int,
+                performer: str = "", duration: int = 0):
     """
     خروجی: (متن HTML، کیبوردِ متناسب با وضعیت)
     وضعیت‌ها: playing | paused | idle
     دکمه‌ها هوشمندند؛ یعنی هنگام پخش فقط «توقف» و هنگام مکث فقط «ادامه» دیده می‌شود.
+    حالا نامِ آهنگ + اطلاعاتِ آن (خواننده و مدت‌زمان) هم نمایش داده می‌شود.
     """
     safe_title = html.escape(title or "نامشخص")
+    info       = _info_line(performer, duration)
     queue_line = f"\n\n📋 در صف: <b>{queue_len}</b> آهنگ" if queue_len > 0 else ""
 
     if state == "playing":
-        text = f"🎵 <b>در حال پخش</b>\n🎧 {safe_title}{queue_line}"
+        text = f"🎵 <b>در حال پخش</b>\n🎧 {safe_title}{info}{queue_line}"
         kb = InlineKeyboardMarkup()
         kb.row(
             InlineKeyboardButton("⏸ توقف", callback_data="mus_pause", style="primary"),
@@ -40,7 +79,7 @@ def build_panel(state: str, title: str, queue_len: int):
         return text, kb
 
     if state == "paused":
-        text = f"⏸ <b>متوقف شده</b>\n🎧 {safe_title}{queue_line}"
+        text = f"⏸ <b>متوقف شده</b>\n🎧 {safe_title}{info}{queue_line}"
         kb = InlineKeyboardMarkup()
         kb.row(
             InlineKeyboardButton("▶️ ادامه", callback_data="mus_resume", style="primary"),
@@ -52,6 +91,16 @@ def build_panel(state: str, title: str, queue_len: int):
     # idle / پایان‌یافته
     text = "✅ <b>پخش به پایان رسید.</b>\nاگر تا چند دقیقه آهنگی پخش نشود، از ویس‌چت خارج می‌شوم."
     return text, None
+
+
+# ── رسیدِ «به صف اضافه شد» (جایگزینِ پیامِ «در حال اتصال…») ──
+def build_queue_added(title: str, performer: str, duration: int, position: int) -> str:
+    safe_title = html.escape(title or "نامشخص")
+    info       = _info_line(performer, duration)
+    return (
+        f"➕ <b>به صف اضافه شد</b>\n🎧 {safe_title}{info}"
+        f"\n\n📋 موقعیت در صف: <b>{position}</b>"
+    )
 
 
 # ── چک مجوز: فقط آغازگر یا سوپریوزرها ─────────────────────
@@ -83,20 +132,25 @@ def register_userbot_handlers(bot: AsyncTeleBot):
         user_id = message.from_user.id
 
         # امنیت: فقط سوپریوزرها اجازهٔ شروع پخش دارند
-        if (user_id not in SUPER_USERS) and (chat_id != -1001434396268):
+        if (user_id not in SUPER_USERS) or (chat_id != MUSIC_GROUP_ID):
             await bot.reply_to(message, "⛔ فقط مدیران اجازهٔ پخش موزیک دارند.")
             return
 
-        # استخراجِ فایل صوتیِ ریپلای‌شده + file_id برای دانلودِ سمتِ ربات
+        # استخراجِ فایل صوتیِ ریپلای‌شده + متادیتا (عنوان/خواننده/مدت)
         replied   = message.reply_to_message
         file_id   = None
         file_size = 0
+        performer = ""
+        duration  = 0
         if replied.audio:
             title     = replied.audio.title or replied.audio.file_name or "آهنگ ناشناس"
+            performer = replied.audio.performer or ""
+            duration  = replied.audio.duration or 0
             file_id   = replied.audio.file_id
             file_size = replied.audio.file_size or 0
         elif replied.voice:
             title     = "پیام صوتی"
+            duration  = replied.voice.duration or 0
             file_id   = replied.voice.file_id
             file_size = replied.voice.file_size or 0
         elif replied.document and (replied.document.mime_type or "").startswith("audio"):
@@ -107,9 +161,9 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             await bot.reply_to(message, "❗️ لطفاً روی یک فایل صوتی (آهنگ/ویس) ریپلای کنید.")
             return
 
-        # ساختِ پنل اولیه (در همان گروه) تا آیدی آن را به یوزربات بدهیم
-        panel = await bot.send_message(
-            chat_id,
+        # ساختِ پنل اولیه — به‌صورتِ ریپلای به پیامِ فرستنده — تا آیدی آن را به یوزربات بدهیم
+        panel = await bot.reply_to(
+            message,
             f"🔄 در حال اتصال به ویس‌چت برای پخش «{html.escape(title)}»...",
             parse_mode="HTML",
         )
@@ -143,7 +197,68 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             initiator_id=user_id,
             panel_msg_id=panel.message_id,
             audio_path=local_path,
+            performer=performer,
+            duration=duration,
         ))
+
+    # ── دستورهای متنی: «بعدی» و «پایان پخش» (فقط آغازگرِ پخش) ──
+    @bot.message_handler(
+        func=lambda m: (
+            m.chat.type in ("group", "supergroup")
+            and m.text is not None
+            and m.text.strip() in ("بعدی", "پایان پخش", "/skip", "/stop")
+        ),
+        content_types=["text"],
+    )
+    async def handle_text_controls(message):
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+        cmd     = message.text.strip()
+
+        now = get_now(chat_id)
+        if not now:
+            await bot.reply_to(message, "🔇 الان چیزی در حال پخش نیست.")
+            return
+
+        # امنیت: فقط کسی که پخش را شروع کرده (یا سوپریوزر) اجازه دارد
+        if not await _is_authorized(chat_id, user_id):
+            await bot.reply_to(message, "⛔ فقط کسی که پخش را شروع کرده می‌تواند این کار را انجام دهد.")
+            return
+
+        if cmd in ("بعدی", "/skip"):
+            asyncio.create_task(cmd_skip(chat_id))
+            await bot.reply_to(message, "⏭ رفتم سراغ آهنگِ بعدیِ صف.")
+        else:  # «پایان پخش» یا /stop
+            asyncio.create_task(cmd_stop(chat_id))
+            await bot.reply_to(message, "⛔ پخش متوقف شد و از ویس‌چت خارج می‌شوم.")
+
+    # ── دستور «پنل»: احضارِ دوبارهٔ پنلِ کنترل (ریپلای به فرستنده) ──
+    @bot.message_handler(
+        func=lambda m: (
+            m.chat.type in ("group", "supergroup")
+            and m.text is not None
+            and m.text.strip() in ("پنل", "/panel")
+        ),
+        content_types=["text"],
+    )
+    async def handle_panel_command(message):
+        chat_id = message.chat.id
+
+        now = get_now(chat_id)
+        if not now:
+            await bot.reply_to(message, "🔇 الان چیزی در حال پخش نیست تا پنلی نشان دهم.")
+            return
+
+        text, kb = build_panel(
+            now.get("state", "idle"),
+            now.get("title", ""),
+            get_queue_len(chat_id),
+            now.get("performer", ""),
+            now.get("duration", 0),
+        )
+        sent = await bot.reply_to(message, text, parse_mode="HTML", reply_markup=kb)
+        # از این به بعد، آپدیت‌های موتورِ موزیک روی همین پیامِ تازه انجام می‌شود.
+        repoint_panel(chat_id, sent.message_id)
 
     # ── کال‌بکِ دکمه‌های پنل ───────────────────────────────
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("mus_"))
@@ -160,7 +275,7 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             return
 
         labels = {"pause": "توقف شد", "resume": "ادامه یافت", "skip": "آهنگ بعدی", "stop": "پخش پایان یافت"}
-        
+
         # 🌟 هدایت مستقیم اکشن‌ها به توابع موتور موزیک
         if action == "pause":
             asyncio.create_task(cmd_pause(chat_id))
