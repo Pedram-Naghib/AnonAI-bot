@@ -19,7 +19,6 @@ from src.config import SUPER_USERS
 from src.bot.music_protocol import get_now
 from src.bot.user_bot.music_bot import cmd_play, cmd_pause, cmd_resume, cmd_skip, cmd_stop
 
-
 # ── ساختِ متن و دکمه‌های پنل بر اساس وضعیت ─────────────────
 def build_panel(state: str, title: str, queue_len: int):
     """
@@ -34,20 +33,20 @@ def build_panel(state: str, title: str, queue_len: int):
         text = f"🎵 <b>در حال پخش</b>\n🎧 {safe_title}{queue_line}"
         kb = InlineKeyboardMarkup()
         kb.row(
-            InlineKeyboardButton("⏸ توقف", callback_data="mus_pause"),
-            InlineKeyboardButton("⏭ بعدی", callback_data="mus_skip"),
+            InlineKeyboardButton("⏸ توقف", callback_data="mus_pause", style="primary"),
+            InlineKeyboardButton("⏭ بعدی", callback_data="mus_skip", style="success"),
         )
-        kb.row(InlineKeyboardButton("⛔ پایان پخش", callback_data="mus_stop"))
+        kb.row(InlineKeyboardButton("⛔ پایان پخش", callback_data="mus_stop", style="danger"))
         return text, kb
 
     if state == "paused":
         text = f"⏸ <b>متوقف شده</b>\n🎧 {safe_title}{queue_line}"
         kb = InlineKeyboardMarkup()
         kb.row(
-            InlineKeyboardButton("▶️ ادامه", callback_data="mus_resume"),
-            InlineKeyboardButton("⏭ بعدی", callback_data="mus_skip"),
+            InlineKeyboardButton("▶️ ادامه", callback_data="mus_resume", style="primary"),
+            InlineKeyboardButton("⏭ بعدی", callback_data="mus_skip", style="success"),
         )
-        kb.row(InlineKeyboardButton("⛔ پایان پخش", callback_data="mus_stop"))
+        kb.row(InlineKeyboardButton("⛔ پایان پخش", callback_data="mus_stop", style="danger"))
         return text, kb
 
     # idle / پایان‌یافته
@@ -84,7 +83,7 @@ def register_userbot_handlers(bot: AsyncTeleBot):
         user_id = message.from_user.id
 
         # امنیت: فقط سوپریوزرها اجازهٔ شروع پخش دارند
-        if user_id not in SUPER_USERS:
+        if (user_id not in SUPER_USERS) or (chat_id != -1001434396268):
             await bot.reply_to(message, "⛔ فقط مدیران اجازهٔ پخش موزیک دارند.")
             return
 

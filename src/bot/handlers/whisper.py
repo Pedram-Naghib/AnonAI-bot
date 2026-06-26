@@ -127,8 +127,8 @@ def register_whisper_handlers(bot: AsyncTeleBot):
 
             kb_initial = InlineKeyboardMarkup()
             kb_initial.row(
-                InlineKeyboardButton(text=f"{EMOJI['whisper_wait']['char']} خواندن نجوا", callback_data=f"whopen_{w_id}"),
-                InlineKeyboardButton(text=f"{EMOJI['trash']['char']} حذف",                callback_data=f"whdel_{w_id}"),
+                InlineKeyboardButton(text=f"{EMOJI['whisper_wait']['char']} خواندن نجوا", callback_data=f"whopen_{w_id}", style="primary"),
+                InlineKeyboardButton(text=f"{EMOJI['trash']['char']} حذف", callback_data=f"whdel_{w_id}", style="danger"),
             )
 
             await bot.answer_inline_query(
@@ -160,8 +160,8 @@ def register_whisper_handlers(bot: AsyncTeleBot):
 
             kb_refresh = InlineKeyboardMarkup()
             kb_refresh.row(
-                InlineKeyboardButton(text=f"{EMOJI['whisper_read']['char']} خواندن نجوا", callback_data=f"whopen_{w_id}"),
-                InlineKeyboardButton(text=f"{EMOJI['trash']['char']} حذف",                callback_data=f"whdel_{w_id}"),
+                InlineKeyboardButton(text=f"{EMOJI['whisper_read']['char']} خواندن نجوا", callback_data=f"whopen_{w_id}", style="primary"),
+                InlineKeyboardButton(text=f"{EMOJI['trash']['char']} حذف", callback_data=f"whdel_{w_id}", style="danger"),
             )
 
             if call.data.startswith("whopen_"):
@@ -243,8 +243,8 @@ def register_whisper_handlers(bot: AsyncTeleBot):
 
             kb = InlineKeyboardMarkup()
             kb.row(
-                InlineKeyboardButton(text=f"{EMOJI['whisper_wait']['char']} خواندن نجوا", callback_data=f"whopen_{w_id}"),
-                InlineKeyboardButton(text=f"{EMOJI['trash']['char']} حذف",                callback_data=f"whdel_{w_id}"),
+                InlineKeyboardButton(text=f"{EMOJI['whisper_wait']['char']} خواندن نجوا", callback_data=f"whopen_{w_id}", style="primary"),
+                InlineKeyboardButton(text=f"{EMOJI['trash']['char']} حذف", callback_data=f"whdel_{w_id}", style="danger"),
             )
 
             await bot.edit_message_text(
