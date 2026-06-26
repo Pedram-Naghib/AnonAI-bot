@@ -111,12 +111,44 @@ async def _emit_toast(chat_id: int, text: str):
 # ════════════════════════════════════════════════════════════
 async def _download_audio(chat_id: int, msg_id: int) -> str:
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-    # برای دانلود، یوزربات باید عضو گروه باشد وگرنه get_messages چیزی برنمی‌گرداند.
-    msg = await client.get_messages(chat_id, ids=msg_id)
+
+    # تلتون برای خیلی از عملیات (از جمله get_messages روی چت‌هایی که تازه
+    # join شدن یا هنوز در کش entity نیستن) به access_hash نیاز دارد. اگر
+    # entity در کش نباشد، get_messages معمولاً به‌جای ارور دادن، None یا []
+    # برمی‌گرداند — همان چیزی که قبلاً به‌اشتباه «دانلود نشد» تعبیر می‌شد.
+    # اینجا صراحتاً entity را resolve می‌کنیم تا اگر مشکل واقعی «عضو نبودن»
+    # باشد، خودِ همین خط با خطای روشن (مثل ValueError: Cannot find entity) شکست بخورد.
+    try:
+        await client.get_entity(chat_id)
+    except Exception as e:
+        print(f"💥 entity resolve failed for {chat_id}: {e}")
+        raise ValueError(
+            "ENTITY_NOT_FOUND: یوزربات این گروه را در کش خود ندارد. "
+            "مطمئن شو یوزربات واقعاً عضو گروه است؛ اگر تازه اضافه شده، یک بار /restart یا ری‌استارت سرویس کن."
+        )
+
+    try:
+        msg = await client.get_messages(chat_id, ids=msg_id)
+    except Exception as e:
+        print(f"💥 get_messages failed for {chat_id}/{msg_id}: {e}")
+        raise ValueError(f"GET_MESSAGE_FAILED: {e}")
+
     if not msg:
-        return ""
-    path = await client.download_media(msg, file=os.path.join(DOWNLOAD_DIR, f"{chat_id}_{msg_id}"))
-    return path or ""
+        raise ValueError(
+            "MESSAGE_NOT_FOUND: پیام صوتی پیدا نشد. ممکن است حذف شده باشد یا "
+            "(در گروه‌های عادی غیر سوپرگروه) آیدی پیام بین ربات رسمی و یوزربات یکسان نباشد."
+        )
+
+    try:
+        path = await client.download_media(msg, file=os.path.join(DOWNLOAD_DIR, f"{chat_id}_{msg_id}"))
+    except Exception as e:
+        print(f"💥 download_media failed for {chat_id}/{msg_id}: {e}")
+        raise ValueError(f"DOWNLOAD_MEDIA_FAILED: {e}")
+
+    if not path:
+        raise ValueError("DOWNLOAD_EMPTY: download_media مسیر خالی برگرداند (پیام شاید audio/voice نبود).")
+
+    return path
 
 
 def _cleanup_file(path: str):
@@ -142,8 +174,6 @@ def _sweep_stale_downloads():
 # ════════════════════════════════════════════════════════════
 async def _start_stream(chat_id: int, track: dict) -> str:
     path = await _download_audio(track["audio_chat_id"], track["audio_msg_id"])
-    if not path:
-        raise ValueError("DOWNLOAD_FAILED")
 
     try:
         # فقط صدا؛ ویدئو نادیده گرفته شود. play خودش وارد ویس‌چت می‌شود.
@@ -180,11 +210,19 @@ async def cmd_play(chat_id: int, audio_chat_id: int, audio_msg_id: int, title: s
         await _emit_toast(chat_id, "⚠️ ابتدا یک ویس‌چت در گروه ایجاد کنید، سپس دوباره «پخش» را بزنید.")
         return
     except ValueError as e:
-        if str(e) == "DOWNLOAD_FAILED":
-            await _emit_toast(chat_id, "⚠️ فایل صوتی دانلود نشد. مطمئن شوید یوزربات در این گروه عضو است.")
+        # پیام‌های ValueError حالا حاوی دلیل واقعی هستند (entity/get_message/download)
+        reason = str(e)
+        if reason.startswith("ENTITY_NOT_FOUND"):
+            await _emit_toast(
+                chat_id,
+                "⚠️ یوزربات این گروه را در حافظه‌اش پیدا نکرد. اگر تازه عضو شده، "
+                "یک پیام (هر چیزی) در گروه با اکانت یوزربات بفرست یا سرویس را ری‌استارت کن، سپس دوباره امتحان کن."
+            )
+        elif reason.startswith("MESSAGE_NOT_FOUND"):
+            await _emit_toast(chat_id, "⚠️ پیام صوتی پیدا نشد یا حذف شده. دوباره روی یک فایل صوتی تازه ریپلای کن.")
         else:
-            await _emit_toast(chat_id, "⚠️ خطا در آماده‌سازی پخش.")
-        print(f"💥 play error in {chat_id}: {e}")
+            await _emit_toast(chat_id, f"⚠️ خطا در دانلود/آماده‌سازی فایل صوتی:\n<code>{reason}</code>")
+        print(f"💥 play error in {chat_id}: {reason}")
         return
     except Exception as e:
         await _emit_toast(chat_id, "⚠️ اتصال به ویس‌چت ناموفق بود. یوزربات عضو گروه است و ویس‌چت باز است؟")
@@ -333,5 +371,15 @@ async def start_music_client(bot_instance: AsyncTeleBot):
         await calls.start()
         me = await client.get_me()
         print(f"✅ Userbot + PyTgCalls started (2.3.3). Logged in as: {getattr(me, 'username', None) or me.id}")
+
+        # 🌟 کشِ entity همه‌ی چت‌هایی که یوزربات عضوشان است. بدون این، get_messages
+        # روی گروه‌هایی که در این سشن هنوز "دیده" نشده‌اند می‌تواند None برگرداند
+        # (نه ارور) و خطای گمراه‌کننده‌ی «فایل دانلود نشد» ایجاد کند، حتی وقتی
+        # یوزربات واقعاً عضو گروه است.
+        dialog_count = 0
+        async for _dialog in client.iter_dialogs():
+            dialog_count += 1
+        print(f"📚 Cached {dialog_count} dialogs/entities for the userbot session.")
+
     except Exception as e:
         print(f"💥 Music client failed to start: {e}")
