@@ -173,7 +173,14 @@ def _sweep_stale_downloads():
 #  منطقِ پخش / صف (py-tgcalls 2.3.3)
 # ════════════════════════════════════════════════════════════
 async def _start_stream(chat_id: int, track: dict) -> str:
-    path = await _download_audio(track["audio_chat_id"], track["audio_msg_id"])
+    # اولویت با فایلی است که خودِ ربات رسمی دانلود کرده و مسیرش را داده.
+    # این مسیر مطمئن‌ترین حالت است چون ربات قطعاً به پیام دسترسی دارد و هیچ
+    # وابستگی‌ای به خواندنِ پیام از سمت یوزربات (که گاهی خالی برمی‌گرداند) ندارد.
+    path = track.get("audio_path")
+    if not (path and os.path.exists(path)):
+        # فالبک: اگر ربات نتوانست دانلود کند (مثلاً فایل بزرگ‌تر از ۲۰ مگ)،
+        # یوزربات خودش تلاش می‌کند پیام را بگیرد.
+        path = await _download_audio(track["audio_chat_id"], track["audio_msg_id"])
 
     try:
         # فقط صدا؛ ویدئو نادیده گرفته شود. play خودش وارد ویس‌چت می‌شود.
@@ -188,12 +195,14 @@ async def _start_stream(chat_id: int, track: dict) -> str:
 
 
 async def cmd_play(chat_id: int, audio_chat_id: int, audio_msg_id: int, title: str,
-                   requester_id: int, initiator_id: int, panel_msg_id: int):
+                   requester_id: int, initiator_id: int, panel_msg_id: int,
+                   audio_path: str = None):
     track = {
         "audio_chat_id": audio_chat_id,
         "audio_msg_id":  audio_msg_id,
         "title":         title,
         "requester_id":  requester_id,
+        "audio_path":    audio_path,
     }
     _last_panel[chat_id] = panel_msg_id
     now = get_now(chat_id)

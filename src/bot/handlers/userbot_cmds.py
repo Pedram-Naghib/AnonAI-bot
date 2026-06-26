@@ -8,6 +8,7 @@
   • فرستادن مستقیم دستورها به توابع یوزربات (بدون واسطهٔ Redis)
 """
 
+import os
 import html
 import asyncio
 
@@ -87,14 +88,22 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             await bot.reply_to(message, "⛔ فقط مدیران اجازهٔ پخش موزیک دارند.")
             return
 
-        # استخراجِ فایل صوتیِ ریپلای‌شده (فقط با آیدیِ پیام؛ بدون ذخیرهٔ فایل)
-        replied = message.reply_to_message
+        # استخراجِ فایل صوتیِ ریپلای‌شده + file_id برای دانلودِ سمتِ ربات
+        replied   = message.reply_to_message
+        file_id   = None
+        file_size = 0
         if replied.audio:
-            title = replied.audio.title or replied.audio.file_name or "آهنگ ناشناس"
+            title     = replied.audio.title or replied.audio.file_name or "آهنگ ناشناس"
+            file_id   = replied.audio.file_id
+            file_size = replied.audio.file_size or 0
         elif replied.voice:
-            title = "پیام صوتی"
+            title     = "پیام صوتی"
+            file_id   = replied.voice.file_id
+            file_size = replied.voice.file_size or 0
         elif replied.document and (replied.document.mime_type or "").startswith("audio"):
-            title = replied.document.file_name or "فایل صوتی"
+            title     = replied.document.file_name or "فایل صوتی"
+            file_id   = replied.document.file_id
+            file_size = replied.document.file_size or 0
         else:
             await bot.reply_to(message, "❗️ لطفاً روی یک فایل صوتی (آهنگ/ویس) ریپلای کنید.")
             return
@@ -106,7 +115,26 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             parse_mode="HTML",
         )
 
-        # 🌟 فراخوانی مستقیم تابع پخش یوزربات به صورت تسک پس‌زمینه (بدون درگیر کردن ردیس)
+        # 🌟 دانلودِ فایل توسطِ خودِ ربات رسمی (مطمئن‌ترین راه؛ بدون وابستگی به
+        # خواندنِ پیام از سمت یوزربات که گاهی MESSAGE_NOT_FOUND می‌داد).
+        # محدودیتِ Bot API برای دانلود ۲۰ مگابایت است؛ اگر بزرگ‌تر بود،
+        # local_path خالی می‌ماند و یوزربات خودش فالبک می‌زند.
+        local_path = None
+        BOT_DL_LIMIT = 20 * 1024 * 1024
+        if file_id and (file_size == 0 or file_size <= BOT_DL_LIMIT):
+            try:
+                os.makedirs("downloads", exist_ok=True)
+                finfo = await bot.get_file(file_id)
+                data  = await bot.download_file(finfo.file_path)
+                ext   = os.path.splitext(finfo.file_path or "")[1] or ".audio"
+                local_path = os.path.join("downloads", f"{chat_id}_{replied.message_id}{ext}")
+                with open(local_path, "wb") as f:
+                    f.write(data)
+            except Exception as e:
+                print(f"⚠️ bot-side download failed ({e}); falling back to userbot fetch.")
+                local_path = None
+
+        # 🌟 فراخوانی مستقیم تابع پخش یوزربات به صورت تسک پس‌زمینه
         asyncio.create_task(cmd_play(
             chat_id=chat_id,
             audio_chat_id=chat_id,
@@ -114,7 +142,8 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             title=title,
             requester_id=user_id,
             initiator_id=user_id,
-            panel_msg_id=panel.message_id
+            panel_msg_id=panel.message_id,
+            audio_path=local_path,
         ))
 
     # ── کال‌بکِ دکمه‌های پنل ───────────────────────────────
