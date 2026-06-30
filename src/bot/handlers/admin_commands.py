@@ -24,6 +24,27 @@ def register_admin_handlers(bot: AsyncTeleBot):
         except Exception as e:
             print(f"❌ /id error: {e}")
 
+    # ── /cookie_status — وضعیتِ کوکیِ یوتیوب را همین الان چک کن ──
+    # (نیازی به دیدنِ لاگِ Render نیست؛ هر وقت بخواهی توی پیوی بزن.)
+    @bot.message_handler(
+        commands=['cookie_status'],
+        func=lambda m: m.from_user.id in SUPER_USERS
+    )
+    async def handle_cookie_status(message):
+        try:
+            from src.bot.user_bot.music_bot import COOKIES_FILE, _validate_cookies_file
+            ok, detail = _validate_cookies_file(COOKIES_FILE)
+            icon = "✅" if ok else "🚫"
+            await bot.reply_to(
+                message,
+                f"{icon} <b>وضعیتِ کوکیِ یوتیوب</b>\n"
+                f"مسیر: <code>{html.escape(COOKIES_FILE)}</code>\n"
+                f"نتیجه: {html.escape(detail)}",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            await bot.reply_to(message, f"{EMOJI['bang']['html']} خطا در چکِ وضعیت:\n<code>{e}</code>", parse_mode="HTML")
+
     # ── /gp — send message to group ──────────────────────
     @bot.message_handler(commands=['gp'])
     async def handle_send_msg_to_gp(message):

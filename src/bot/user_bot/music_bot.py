@@ -196,6 +196,35 @@ def _sweep_stale_downloads():
 # ════════════════════════════════════════════════════════════
 COOKIES_FILE = os.getenv("YT_COOKIES_FILE", "").strip() or "yt_cookies.txt"
 
+# می‌شود از بیرونِ این ماژول وضعیتِ کوکی را چک کرد (مثلاً برای لاگ/دیباگ).
+# مقادیر: "missing" | "invalid" | "ok"
+COOKIES_STATUS = "missing"
+
+
+def _validate_cookies_file(path: str) -> tuple:
+    """
+    فایلِ کوکی را با همان پارسرِ http.cookiejar که خودِ yt-dlp استفاده
+    می‌کند می‌خواند تا مطمئن شویم واقعاً فرمتِ Netscape سالم است (نه
+    اینکه فقط فایل وجود دارد). رایج‌ترین دلیلِ خرابی: تبدیلِ تب‌ها به
+    اسپیس هنگامِ کپی‌پیست در یک textarea (مثلاً پنلِ Render) — چون این
+    فرمت با تب جدا می‌شود، نه اسپیس.
+    برمی‌گرداند: (ok: bool, detail: str)
+    """
+    import http.cookiejar
+    if not os.path.isfile(path):
+        return False, "فایل وجود ندارد."
+    if os.path.getsize(path) == 0:
+        return False, "فایل خالی است."
+    try:
+        jar = http.cookiejar.MozillaCookieJar(path)
+        jar.load(ignore_discard=True, ignore_expires=True)
+        if len(jar) == 0:
+            return False, "فایل پارس شد ولی هیچ کوکی‌ای داخلش نبود."
+        return True, f"{len(jar)} کوکی با موفقیت خوانده شد."
+    except Exception as e:
+        # رایج‌ترین خطا همینجا می‌افتد: فرمت خراب (مثلاً تب→اسپیس شده)
+        return False, f"فرمتِ فایل نامعتبر است ({type(e).__name__}): {str(e)[:150]}"
+
 
 def _ensure_cookies_file_from_env():
     """
@@ -205,16 +234,42 @@ def _ensure_cookies_file_from_env():
     یعنی اگر هم فایل دستی گذاشته شده و هم env var ست شده، env var
     آن را بازنویسی می‌کند (منبعِ واحدِ صحت همان چیزی است که در
     تنظیماتِ Render ست شده).
+
+    بعد از نوشتن، فایل را با _validate_cookies_file چک می‌کند و نتیجه
+    را صریحاً در لاگِ استارت‌آپ چاپ می‌کند — این مهم است چون مشکلاتِ
+    فرمتِ کوکی (مثلاً تب‌های تبدیل‌شده به اسپیس در پنلِ Render) باید
+    همینجا، در لاگِ استارت، مشخص شوند؛ نه فقط وقتی کسی «پخش» می‌زند.
     """
+    global COOKIES_STATUS
     content = os.getenv("YT_COOKIES_CONTENT", "").strip()
-    if not content:
-        return
-    try:
-        with open(COOKIES_FILE, "w", encoding="utf-8") as f:
-            f.write(content + "\n")
-        print(f"🍪 yt-dlp cookies written from YT_COOKIES_CONTENT → {COOKIES_FILE}")
-    except Exception as e:
-        print(f"⚠️ Failed to write cookies file from YT_COOKIES_CONTENT: {e}")
+
+    if content:
+        try:
+            with open(COOKIES_FILE, "w", encoding="utf-8") as f:
+                f.write(content + "\n")
+            print(f"🍪 yt-dlp cookies written from YT_COOKIES_CONTENT → {COOKIES_FILE}")
+        except Exception as e:
+            print(f"⚠️ Failed to write cookies file from YT_COOKIES_CONTENT: {e}")
+            COOKIES_STATUS = "missing"
+            return
+
+    ok, detail = _validate_cookies_file(COOKIES_FILE)
+    if ok:
+        COOKIES_STATUS = "ok"
+        print(f"🍪 کوکیِ یوتیوب معتبر است: {detail}")
+    elif os.path.isfile(COOKIES_FILE):
+        COOKIES_STATUS = "invalid"
+        print(f"🚫 کوکیِ یوتیوب نامعتبر است: {detail}")
+        print(
+            "   راهنما: اگر کوکی را از طریقِ YT_COOKIES_CONTENT در Render ست کرده‌ای، "
+            "احتمالاً تب‌های بینِ ستون‌ها هنگامِ پیست به اسپیس تبدیل شده‌اند "
+            "(فرمتِ Netscape باید با تب جدا شود، نه اسپیس). دوباره از افزونهٔ "
+            "مرورگر اکسپورت بگیر و این‌بار، قبل از پیست در Render، مطمئن شو "
+            "ادیتوری که استفاده می‌کنی تب‌ها رو به اسپیس تبدیل نمی‌کنه."
+        )
+    else:
+        COOKIES_STATUS = "missing"
+        print("ℹ️ فایلِ کوکیِ یوتیوب تنظیم نشده — دانلود از یوتیوب با ریسکِ تشخیصِ ربات مواجه می‌شود.")
 
 
 _ensure_cookies_file_from_env()
@@ -244,7 +299,10 @@ def _yt_dlp_search_sync(query: str) -> dict:
         "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
     }
 
-    if os.path.isfile(COOKIES_FILE):
+    # فقط وقتی کوکی واقعاً معتبر است به yt-dlp می‌دهیم؛ دادنِ یک فایلِ
+    # خراب باعثِ یک خطای گمراه‌کننده می‌شد (که می‌توانست با خطای
+    # تشخیصِ ربات اشتباه گرفته شود).
+    if COOKIES_STATUS == "ok":
         ydl_opts["cookiefile"] = COOKIES_FILE
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
