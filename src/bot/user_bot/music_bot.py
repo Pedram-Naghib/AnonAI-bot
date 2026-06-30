@@ -176,7 +176,50 @@ def _sweep_stale_downloads():
 #  از yt-dlp استفاده می‌کند که عملیاتِ همزمان/مسدودکننده دارد،
 #  پس همیشه داخلِ run_in_executor اجرا می‌شود تا event loop اصلی
 #  (که Telethon/PyTgCalls هم روی همان اجرا می‌شوند) بلاک نشود.
+#
+#  ── نکتهٔ مهم دربارهٔ خطای «Sign in to confirm you're not a bot» ──
+#  این خطا از سمتِ خودِ یوتیوب می‌آید (نه باگِ این پروژه): یوتیوب
+#  ترافیکِ سرورها/دیتاسنترها (مثلِ Render) را به‌عنوانِ «ربات» تشخیص
+#  می‌دهد و درخواست را رد می‌کند. تنها راهِ قابل‌اعتماد، فرستادنِ
+#  کوکیِ یک حسابِ واقعیِ یوتیوب همراهِ درخواست است.
+#
+#  دو راه برای دادنِ کوکی به ربات وجود دارد:
+#   ۱) فایل: یک فایلِ cookies.txt (فرمتِ Netscape) از مرورگرِ خودت
+#      اکسپورت کن (افزونهٔ «Get cookies.txt LOCALLY») و در مسیرِ
+#      YT_COOKIES_FILE (پیش‌فرض: yt_cookies.txt کنارِ پروژه) بگذار.
+#      این روش وقتی سرور یک دیسکِ پایدار/قابلِ آپلود داشته باشد خوب است.
+#   ۲) متغیرِ محیطی: کلِ محتوای فایلِ cookies.txt را کپی کن و در
+#      متغیرِ محیطیِ YT_COOKIES_CONTENT بچسبان (مثلاً در پنلِ Render).
+#      این روش برای Render توصیه می‌شود چون نیازی به دیسکِ پایدار یا
+#      آپلودِ دستیِ فایل ندارد — کوکی همراهِ بقیهٔ env varها ست می‌شود
+#      و در زمانِ استارت، خودکار به یک فایلِ موقت نوشته می‌شود.
 # ════════════════════════════════════════════════════════════
+COOKIES_FILE = os.getenv("YT_COOKIES_FILE", "").strip() or "yt_cookies.txt"
+
+
+def _ensure_cookies_file_from_env():
+    """
+    اگر YT_COOKIES_CONTENT ست شده باشد، محتوای آن را یک‌بار (در زمانِ
+    import) در مسیرِ COOKIES_FILE می‌نویسد تا yt-dlp بتواند از آن
+    به‌عنوانِ cookiefile معمولی استفاده کند. env var اولویت دارد —
+    یعنی اگر هم فایل دستی گذاشته شده و هم env var ست شده، env var
+    آن را بازنویسی می‌کند (منبعِ واحدِ صحت همان چیزی است که در
+    تنظیماتِ Render ست شده).
+    """
+    content = os.getenv("YT_COOKIES_CONTENT", "").strip()
+    if not content:
+        return
+    try:
+        with open(COOKIES_FILE, "w", encoding="utf-8") as f:
+            f.write(content + "\n")
+        print(f"🍪 yt-dlp cookies written from YT_COOKIES_CONTENT → {COOKIES_FILE}")
+    except Exception as e:
+        print(f"⚠️ Failed to write cookies file from YT_COOKIES_CONTENT: {e}")
+
+
+_ensure_cookies_file_from_env()
+
+
 def _yt_dlp_search_sync(query: str) -> dict:
     import yt_dlp
 
@@ -196,7 +239,13 @@ def _yt_dlp_search_sync(query: str) -> dict:
         }],
         # یک نتیجه‌ی واحد و کوتاه — جلوگیری از دانلودِ ویدیوهای چندساعته به اشتباه
         "match_filter": yt_dlp.utils.match_filter_func("duration < 1800"),
+        # کلاینتِ android معمولاً دیرتر از کلاینتِ وب به چالشِ ضدِ-رباتِ یوتیوب
+        # برمی‌خورد؛ این یک خطِ دفاعیِ اول است (بدون نیاز به کوکی)، نه تضمین.
+        "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
     }
+
+    if os.path.isfile(COOKIES_FILE):
+        ydl_opts["cookiefile"] = COOKIES_FILE
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(query, download=True)
@@ -225,7 +274,8 @@ async def search_and_download_youtube(query: str) -> dict:
     """
     جست‌وجوی «query» در یوتیوب و دانلودِ بهترین تطابقِ صوتی.
     خروجی: {"path", "title", "performer", "duration"}
-    در صورتِ نبودِ نتیجه یا خطا، Exception با پیامِ قابل‌نمایش raise می‌شود.
+    در صورتِ نبودِ نتیجه یا خطا، Exception با پیامِ قابل‌نمایش raise می‌شود
+    (پیشوندهای ممکن: NO_RESULTS، YT_BOT_CHECK، YTDLP_FAILED).
     """
     loop = asyncio.get_running_loop()
     try:
@@ -234,6 +284,11 @@ async def search_and_download_youtube(query: str) -> dict:
         msg = str(e)
         if "NO_RESULTS" in msg:
             raise ValueError("NO_RESULTS: نتیجه‌ای برای این جست‌وجو پیدا نشد.")
+        if "Sign in to confirm" in msg or "not a bot" in msg:
+            raise ValueError(
+                "YT_BOT_CHECK: یوتیوب این درخواست را به‌عنوانِ ربات تشخیص داده. "
+                "نیاز به فایلِ کوکیِ یک حسابِ واقعیِ یوتیوب روی سرور دارد."
+            )
         print(f"💥 yt-dlp search/download failed for '{query}': {e}")
         raise ValueError(f"YTDLP_FAILED: {msg[:200]}")
 

@@ -4,10 +4,10 @@
 نقش این ماژول:
   • گرفتن دستور «پخش» (ریپلای روی یک فایل صوتی) از سوپریوزرها
   • گرفتن دستور «پخش <اسم آهنگ>» و جست‌وجو/دانلود از یوتیوب (yt-dlp)
-  • ساختن هاب فارسی با دکمه‌های شیشه‌ای هوشمند (پخش/توقف پویا) + نام و اطلاعات آهنگ
-  • ریپلای‌کردنِ هاب به پیامِ فرستنده
+  • ساختن پنل فارسی با دکمه‌های شیشه‌ای هوشمند (پخش/توقف پویا) + نام و اطلاعات آهنگ
+  • ریپلای‌کردنِ پنل به پیامِ فرستنده
   • دستورهای متنیِ «بعدی» و «پایان پخش» (فقط برای آغازگرِ پخش)
-  • دستور «هاب» برای احضارِ دوبارهٔ هابِ کنترل
+  • دستور «پنل» برای احضارِ دوبارهٔ پنلِ کنترل
   • چک کردن مجوز کلیک روی دکمه‌ها (فقط آغازگر یا سوپریوزرها)
   • فرستادن مستقیم دستورها به توابع یوزربات (بدون واسطهٔ Redis)
 """
@@ -60,7 +60,7 @@ def _info_line(performer: str, duration: int) -> str:
     return ("\n" + "   ".join(parts)) if parts else ""
 
 
-# ── ساختِ متن و دکمه‌های هاب بر اساس وضعیت ─────────────────
+# ── ساختِ متن و دکمه‌های پنل بر اساس وضعیت ─────────────────
 def build_panel(state: str, title: str, queue_len: int,
                 performer: str = "", duration: int = 0, with_video: bool = False):
     """
@@ -194,7 +194,7 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             await bot.reply_to(message, "❗️ لطفاً روی یک فایل صوتی یا ویدیویی (آهنگ/ویس/ویدیو/پیام‌ویدیویی) ریپلای کنید.")
             return
 
-        # ساختِ هاب اولیه — به‌صورتِ ریپلای به پیامِ فرستنده — تا آیدی آن را به یوزربات بدهیم
+        # ساختِ پنل اولیه — به‌صورتِ ریپلای به پیامِ فرستنده — تا آیدی آن را به یوزربات بدهیم
         kind = "ویدیو" if with_video else "موزیک"
         panel = await bot.reply_to(
             message,
@@ -278,6 +278,15 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             reason = str(e)
             if reason.startswith("NO_RESULTS"):
                 text = f"❌ چیزی برای «{html.escape(query)}» پیدا نشد."
+            elif reason.startswith("YT_BOT_CHECK"):
+                text = (
+                    "🤖 یوتیوب فعلاً اجازهٔ دانلود از سرور را نمی‌دهد "
+                    "(تشخیص ربات).\n"
+                    "این مشکلِ خودِ یوتیوب است، نه ربات — برای رفع، یک فایلِ "
+                    "کوکیِ حسابِ یوتیوب باید روی سرور تنظیم شود.\n"
+                    "فعلاً می‌تونی به‌جاش فایلِ صوتی رو مستقیم بفرستی و روش "
+                    "ریپلای کنی و بنویسی «پخش»."
+                )
             else:
                 text = f"⚠️ خطا در دانلود از یوتیوب:\n<code>{html.escape(reason[:200])}</code>"
             await bot.edit_message_text(text, chat_id, panel.message_id, parse_mode="HTML")
@@ -340,12 +349,12 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             asyncio.create_task(cmd_stop(chat_id))
             await bot.reply_to(message, "⛔ پخش متوقف شد و از ویس‌چت خارج می‌شوم.")
 
-    # ── دستور «هاب»: احضارِ دوبارهٔ هابِ کنترل (ریپلای به فرستنده) ──
+    # ── دستور «پنل»: احضارِ دوبارهٔ پنلِ کنترل (ریپلای به فرستنده) ──
     @bot.message_handler(
         func=lambda m: (
             m.chat.type in ("group", "supergroup")
             and m.text is not None
-            and m.text.strip() in ("هاب", "/panel")
+            and m.text.strip() in ("پنل", "/panel")
         ),
         content_types=["text"],
     )
@@ -354,7 +363,7 @@ def register_userbot_handlers(bot: AsyncTeleBot):
 
         now = get_now(chat_id)
         if not now:
-            await bot.reply_to(message, "🔇 الان چیزی در حال پخش نیست تا هابی نشان دهم.")
+            await bot.reply_to(message, "🔇 الان چیزی در حال پخش نیست تا پنلی نشان دهم.")
             return
 
         text, kb = build_panel(
@@ -369,7 +378,7 @@ def register_userbot_handlers(bot: AsyncTeleBot):
         # از این به بعد، آپدیت‌های موتورِ موزیک روی همین پیامِ تازه انجام می‌شود.
         repoint_panel(chat_id, sent.message_id)
 
-    # ── کال‌بکِ دکمه‌های هاب ───────────────────────────────
+    # ── کال‌بکِ دکمه‌های پنل ───────────────────────────────
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("mus_"))
     async def handle_music_buttons(call):
         chat_id = call.message.chat.id
@@ -379,7 +388,7 @@ def register_userbot_handlers(bot: AsyncTeleBot):
         # امنیت: کلیک فقط برای آغازگر یا سوپریوزر
         if not await _is_authorized(chat_id, user_id):
             await bot.answer_callback_query(
-                call.id, "⛔ این هاب برای شما نیست!", show_alert=True
+                call.id, "⛔ این پنل برای شما نیست!", show_alert=True
             )
             return
 
@@ -403,7 +412,7 @@ def register_userbot_handlers(bot: AsyncTeleBot):
 async def start_music_event_listener(bot: AsyncTeleBot):
     """
     [DEPRECATED] این تابع در معماری جدید درون‌حافظه‌ای دیگر کاربردی ندارد
-    چون یوزربات مستقیماً هاب‌ها را ویرایش می‌کند. صرفاً جهت جلوگیری از ImportError در main.py باقی مانده است.
+    چون یوزربات مستقیماً پنل‌ها را ویرایش می‌کند. صرفاً جهت جلوگیری از ImportError در main.py باقی مانده است.
     """
     print("🌙 Music event listener (In-Memory Mode) initialized natively.")
     while True:
