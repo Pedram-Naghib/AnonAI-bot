@@ -3,10 +3,11 @@
 
 نقش این ماژول:
   • گرفتن دستور «پخش» (ریپلای روی یک فایل صوتی) از سوپریوزرها
-  • ساختن پنل فارسی با دکمه‌های شیشه‌ای هوشمند (پخش/توقف پویا) + نام و اطلاعات آهنگ
-  • ریپلای‌کردنِ پنل به پیامِ فرستنده
+  • گرفتن دستور «پخش <اسم آهنگ>» و جست‌وجو/دانلود از یوتیوب (yt-dlp)
+  • ساختن هاب فارسی با دکمه‌های شیشه‌ای هوشمند (پخش/توقف پویا) + نام و اطلاعات آهنگ
+  • ریپلای‌کردنِ هاب به پیامِ فرستنده
   • دستورهای متنیِ «بعدی» و «پایان پخش» (فقط برای آغازگرِ پخش)
-  • دستور «پنل» برای احضارِ دوبارهٔ پنلِ کنترل
+  • دستور «هاب» برای احضارِ دوبارهٔ هابِ کنترل
   • چک کردن مجوز کلیک روی دکمه‌ها (فقط آغازگر یا سوپریوزرها)
   • فرستادن مستقیم دستورها به توابع یوزربات (بدون واسطهٔ Redis)
 """
@@ -22,11 +23,15 @@ from src.config import SUPER_USERS
 from src.bot.music_protocol import get_now, get_queue_len
 from src.bot.user_bot.music_bot import (
     cmd_play, cmd_pause, cmd_resume, cmd_skip, cmd_stop, repoint_panel,
+    search_and_download_youtube,
 )
 
 
 # ── گروهی که اجازهٔ پخش در آن داده شده ─────────────────────
 MUSIC_GROUP_ID = -1001434396268
+
+# ── پیشوندهایی که دستورِ «پخش از یوتیوب» را فعال می‌کنند ──
+_YT_PLAY_PREFIXES = ("پخش ", "/play ")
 
 
 # ── کمک‌تابع: قالب‌بندیِ مدت‌زمان (ثانیه → mm:ss) ───────────
@@ -55,21 +60,23 @@ def _info_line(performer: str, duration: int) -> str:
     return ("\n" + "   ".join(parts)) if parts else ""
 
 
-# ── ساختِ متن و دکمه‌های پنل بر اساس وضعیت ─────────────────
+# ── ساختِ متن و دکمه‌های هاب بر اساس وضعیت ─────────────────
 def build_panel(state: str, title: str, queue_len: int,
-                performer: str = "", duration: int = 0):
+                performer: str = "", duration: int = 0, with_video: bool = False):
     """
     خروجی: (متن HTML، کیبوردِ متناسب با وضعیت)
     وضعیت‌ها: playing | paused | idle
     دکمه‌ها هوشمندند؛ یعنی هنگام پخش فقط «توقف» و هنگام مکث فقط «ادامه» دیده می‌شود.
     حالا نامِ آهنگ + اطلاعاتِ آن (خواننده و مدت‌زمان) هم نمایش داده می‌شود.
+    with_video=True یعنی محتوا به‌صورتِ ویدیو هم در ویس‌چت پخش می‌شود (نه فقط صدا).
     """
     safe_title = html.escape(title or "نامشخص")
     info       = _info_line(performer, duration)
     queue_line = f"\n\n📋 در صف: <b>{queue_len}</b> آهنگ" if queue_len > 0 else ""
+    icon       = "🎬" if with_video else "🎧"
 
     if state == "playing":
-        text = f"🎵 <b>در حال پخش</b>\n🎧 {safe_title}{info}{queue_line}"
+        text = f"🎵 <b>در حال پخش</b>\n{icon} {safe_title}{info}{queue_line}"
         kb = InlineKeyboardMarkup()
         kb.row(
             InlineKeyboardButton("⏸ توقف", callback_data="mus_pause", style="primary"),
@@ -79,7 +86,7 @@ def build_panel(state: str, title: str, queue_len: int,
         return text, kb
 
     if state == "paused":
-        text = f"⏸ <b>متوقف شده</b>\n🎧 {safe_title}{info}{queue_line}"
+        text = f"⏸ <b>متوقف شده</b>\n{icon} {safe_title}{info}{queue_line}"
         kb = InlineKeyboardMarkup()
         kb.row(
             InlineKeyboardButton("▶️ ادامه", callback_data="mus_resume", style="primary"),
@@ -117,7 +124,7 @@ async def _is_authorized(chat_id: int, user_id: int) -> bool:
 
 def register_userbot_handlers(bot: AsyncTeleBot):
 
-    # ── دستور «پخش»: ریپلای روی فایل صوتی ─────────────────
+    # ── دستور «پخش»: ریپلای روی فایل صوتی یا ویدیویی ──────
     @bot.message_handler(
         func=lambda m: (
             m.chat.type in ("group", "supergroup")
@@ -136,12 +143,15 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             await bot.reply_to(message, "⛔ فقط مدیران اجازهٔ پخش موزیک دارند.")
             return
 
-        # استخراجِ فایل صوتیِ ریپلای‌شده + متادیتا (عنوان/خواننده/مدت)
-        replied   = message.reply_to_message
-        file_id   = None
-        file_size = 0
-        performer = ""
-        duration  = 0
+        # استخراجِ فایل صوتی/ویدیوییِ ریپلای‌شده + متادیتا (عنوان/خواننده/مدت)
+        # video / video_note (پیام‌های ویدیوییِ گرد) / animation هم پشتیبانی می‌شوند —
+        # در این حالت with_video=True می‌شود تا تصویر هم در ویس‌چت پخش شود.
+        replied    = message.reply_to_message
+        file_id    = None
+        file_size  = 0
+        performer  = ""
+        duration   = 0
+        with_video = False
         if replied.audio:
             title     = replied.audio.title or replied.audio.file_name or "آهنگ ناشناس"
             performer = replied.audio.performer or ""
@@ -153,18 +163,42 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             duration  = replied.voice.duration or 0
             file_id   = replied.voice.file_id
             file_size = replied.voice.file_size or 0
+        elif replied.video:
+            title      = replied.video.file_name or "ویدیو"
+            duration   = replied.video.duration or 0
+            file_id    = replied.video.file_id
+            file_size  = replied.video.file_size or 0
+            with_video = True
+        elif replied.video_note:
+            title      = "پیام ویدیویی"
+            duration   = replied.video_note.duration or 0
+            file_id    = replied.video_note.file_id
+            file_size  = replied.video_note.file_size or 0
+            with_video = True
+        elif replied.animation:
+            title      = replied.animation.file_name or "گیف/انیمیشن"
+            duration   = replied.animation.duration or 0
+            file_id    = replied.animation.file_id
+            file_size  = replied.animation.file_size or 0
+            with_video = True
         elif replied.document and (replied.document.mime_type or "").startswith("audio"):
             title     = replied.document.file_name or "فایل صوتی"
             file_id   = replied.document.file_id
             file_size = replied.document.file_size or 0
+        elif replied.document and (replied.document.mime_type or "").startswith("video"):
+            title      = replied.document.file_name or "ویدیو"
+            file_id    = replied.document.file_id
+            file_size  = replied.document.file_size or 0
+            with_video = True
         else:
-            await bot.reply_to(message, "❗️ لطفاً روی یک فایل صوتی (آهنگ/ویس) ریپلای کنید.")
+            await bot.reply_to(message, "❗️ لطفاً روی یک فایل صوتی یا ویدیویی (آهنگ/ویس/ویدیو/پیام‌ویدیویی) ریپلای کنید.")
             return
 
-        # ساختِ پنل اولیه — به‌صورتِ ریپلای به پیامِ فرستنده — تا آیدی آن را به یوزربات بدهیم
+        # ساختِ هاب اولیه — به‌صورتِ ریپلای به پیامِ فرستنده — تا آیدی آن را به یوزربات بدهیم
+        kind = "ویدیو" if with_video else "موزیک"
         panel = await bot.reply_to(
             message,
-            f"🔄 در حال اتصال به ویس‌چت برای پخش «{html.escape(title)}»...",
+            f"🔄 در حال اتصال به ویس‌چت برای پخش {kind} «{html.escape(title)}»...",
             parse_mode="HTML",
         )
 
@@ -199,6 +233,80 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             audio_path=local_path,
             performer=performer,
             duration=duration,
+            with_video=with_video,
+        ))
+
+    # ── دستور «پخش <اسم آهنگ>»: جست‌وجو و دانلود از یوتیوب ──
+    @bot.message_handler(
+        func=lambda m: (
+            m.chat.type in ("group", "supergroup")
+            and m.text is not None
+            and m.text.strip().startswith(_YT_PLAY_PREFIXES)
+            and m.text.strip() not in ("پخش", "/play")  # خالی → برود سمتِ هندلرِ ریپلای بالا
+        ),
+        content_types=["text"],
+    )
+    async def handle_play_youtube_command(message):
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+
+        if (user_id not in SUPER_USERS) and (chat_id != MUSIC_GROUP_ID):
+            await bot.reply_to(message, "⛔ فقط مدیران اجازهٔ پخش موزیک دارند.")
+            return
+
+        raw = message.text.strip()
+        for prefix in _YT_PLAY_PREFIXES:
+            if raw.startswith(prefix):
+                query = raw[len(prefix):].strip()
+                break
+        else:
+            query = ""
+
+        if not query:
+            await bot.reply_to(message, "❗️ بعد از «پخش» اسم آهنگ رو هم بنویس؛ مثلاً: «پخش shape of you».")
+            return
+
+        panel = await bot.reply_to(
+            message,
+            f"🔎 در حال جست‌وجوی «{html.escape(query)}» در یوتیوب...",
+            parse_mode="HTML",
+        )
+
+        try:
+            result = await search_and_download_youtube(query)
+        except ValueError as e:
+            reason = str(e)
+            if reason.startswith("NO_RESULTS"):
+                text = f"❌ چیزی برای «{html.escape(query)}» پیدا نشد."
+            else:
+                text = f"⚠️ خطا در دانلود از یوتیوب:\n<code>{html.escape(reason[:200])}</code>"
+            await bot.edit_message_text(text, chat_id, panel.message_id, parse_mode="HTML")
+            return
+        except Exception as e:
+            print(f"💥 youtube play unexpected error: {e}")
+            await bot.edit_message_text(
+                "⚠️ خطای غیرمنتظره در جست‌وجوی یوتیوب.", chat_id, panel.message_id
+            )
+            return
+
+        await bot.edit_message_text(
+            f"🔄 در حال اتصال به ویس‌چت برای پخش «{html.escape(result['title'])}»...",
+            chat_id, panel.message_id, parse_mode="HTML",
+        )
+
+        # نکته: audio_chat_id/audio_msg_id اینجا استفاده نمی‌شوند چون audio_path
+        # از قبل توسط yt-dlp آماده شده — cmd_play همیشه اول audio_path را چک می‌کند.
+        asyncio.create_task(cmd_play(
+            chat_id=chat_id,
+            audio_chat_id=chat_id,
+            audio_msg_id=message.message_id,
+            title=result["title"],
+            requester_id=user_id,
+            initiator_id=user_id,
+            panel_msg_id=panel.message_id,
+            audio_path=result["path"],
+            performer=result["performer"],
+            duration=result["duration"],
         ))
 
     # ── دستورهای متنی: «بعدی» و «پایان پخش» (فقط آغازگرِ پخش) ──
@@ -232,12 +340,12 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             asyncio.create_task(cmd_stop(chat_id))
             await bot.reply_to(message, "⛔ پخش متوقف شد و از ویس‌چت خارج می‌شوم.")
 
-    # ── دستور «پنل»: احضارِ دوبارهٔ پنلِ کنترل (ریپلای به فرستنده) ──
+    # ── دستور «هاب»: احضارِ دوبارهٔ هابِ کنترل (ریپلای به فرستنده) ──
     @bot.message_handler(
         func=lambda m: (
             m.chat.type in ("group", "supergroup")
             and m.text is not None
-            and m.text.strip() in ("پنل", "/panel")
+            and m.text.strip() in ("هاب", "/panel")
         ),
         content_types=["text"],
     )
@@ -246,7 +354,7 @@ def register_userbot_handlers(bot: AsyncTeleBot):
 
         now = get_now(chat_id)
         if not now:
-            await bot.reply_to(message, "🔇 الان چیزی در حال پخش نیست تا پنلی نشان دهم.")
+            await bot.reply_to(message, "🔇 الان چیزی در حال پخش نیست تا هابی نشان دهم.")
             return
 
         text, kb = build_panel(
@@ -255,12 +363,13 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             get_queue_len(chat_id),
             now.get("performer", ""),
             now.get("duration", 0),
+            now.get("with_video", False),
         )
         sent = await bot.reply_to(message, text, parse_mode="HTML", reply_markup=kb)
         # از این به بعد، آپدیت‌های موتورِ موزیک روی همین پیامِ تازه انجام می‌شود.
         repoint_panel(chat_id, sent.message_id)
 
-    # ── کال‌بکِ دکمه‌های پنل ───────────────────────────────
+    # ── کال‌بکِ دکمه‌های هاب ───────────────────────────────
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("mus_"))
     async def handle_music_buttons(call):
         chat_id = call.message.chat.id
@@ -270,7 +379,7 @@ def register_userbot_handlers(bot: AsyncTeleBot):
         # امنیت: کلیک فقط برای آغازگر یا سوپریوزر
         if not await _is_authorized(chat_id, user_id):
             await bot.answer_callback_query(
-                call.id, "⛔ این پنل برای شما نیست!", show_alert=True
+                call.id, "⛔ این هاب برای شما نیست!", show_alert=True
             )
             return
 
@@ -294,7 +403,7 @@ def register_userbot_handlers(bot: AsyncTeleBot):
 async def start_music_event_listener(bot: AsyncTeleBot):
     """
     [DEPRECATED] این تابع در معماری جدید درون‌حافظه‌ای دیگر کاربردی ندارد
-    چون یوزربات مستقیماً پنل‌ها را ویرایش می‌کند. صرفاً جهت جلوگیری از ImportError در main.py باقی مانده است.
+    چون یوزربات مستقیماً هاب‌ها را ویرایش می‌کند. صرفاً جهت جلوگیری از ImportError در main.py باقی مانده است.
     """
     print("🌙 Music event listener (In-Memory Mode) initialized natively.")
     while True:

@@ -73,6 +73,7 @@ async def _emit_panel(chat_id: int):
         get_queue_len(chat_id),
         now.get("performer", ""),
         now.get("duration", 0),
+        now.get("with_video", False),
     )
     try:
         await _bot_instance.edit_message_text(
@@ -171,6 +172,73 @@ def _sweep_stale_downloads():
 
 
 # ════════════════════════════════════════════════════════════
+#  جست‌وجو و دانلود از یوتیوب (برای دستورِ «پخش <اسم آهنگ>»)
+#  از yt-dlp استفاده می‌کند که عملیاتِ همزمان/مسدودکننده دارد،
+#  پس همیشه داخلِ run_in_executor اجرا می‌شود تا event loop اصلی
+#  (که Telethon/PyTgCalls هم روی همان اجرا می‌شوند) بلاک نشود.
+# ════════════════════════════════════════════════════════════
+def _yt_dlp_search_sync(query: str) -> dict:
+    import yt_dlp
+
+    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+    out_template = os.path.join(DOWNLOAD_DIR, "yt_%(id)s.%(ext)s")
+
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": out_template,
+        "default_search": "ytsearch1",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "opus",
+        }],
+        # یک نتیجه‌ی واحد و کوتاه — جلوگیری از دانلودِ ویدیوهای چندساعته به اشتباه
+        "match_filter": yt_dlp.utils.match_filter_func("duration < 1800"),
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(query, download=True)
+        # وقتی default_search فعال است، نتیجه درونِ entries قرار می‌گیرد
+        if "entries" in info:
+            entries = [e for e in info["entries"] if e]
+            if not entries:
+                raise ValueError("NO_RESULTS: نتیجه‌ای برای این جست‌وجو پیدا نشد.")
+            info = entries[0]
+        final_path = ydl.prepare_filename(info)
+        # پسوندِ واقعی پس از تبدیلِ پسا-پردازشی ممکن است opus باشد، نه پسوندِ اصلی
+        base, _ = os.path.splitext(final_path)
+        opus_path = base + ".opus"
+        if os.path.exists(opus_path):
+            final_path = opus_path
+
+        return {
+            "path":      final_path,
+            "title":     info.get("title") or "آهنگ ناشناس",
+            "performer": info.get("uploader") or "",
+            "duration":  int(info.get("duration") or 0),
+        }
+
+
+async def search_and_download_youtube(query: str) -> dict:
+    """
+    جست‌وجوی «query» در یوتیوب و دانلودِ بهترین تطابقِ صوتی.
+    خروجی: {"path", "title", "performer", "duration"}
+    در صورتِ نبودِ نتیجه یا خطا، Exception با پیامِ قابل‌نمایش raise می‌شود.
+    """
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(None, _yt_dlp_search_sync, query)
+    except Exception as e:
+        msg = str(e)
+        if "NO_RESULTS" in msg:
+            raise ValueError("NO_RESULTS: نتیجه‌ای برای این جست‌وجو پیدا نشد.")
+        print(f"💥 yt-dlp search/download failed for '{query}': {e}")
+        raise ValueError(f"YTDLP_FAILED: {msg[:200]}")
+
+
+# ════════════════════════════════════════════════════════════
 #  منطقِ پخش / صف (py-tgcalls 2.3.3)
 # ════════════════════════════════════════════════════════════
 async def _start_stream(chat_id: int, track: dict) -> str:
@@ -179,10 +247,15 @@ async def _start_stream(chat_id: int, track: dict) -> str:
     if not (path and os.path.exists(path)):
         path = await _download_audio(track["audio_chat_id"], track["audio_msg_id"])
 
+    # video_flags=IGNORE یعنی فقط صدا پخش می‌شود (حالتِ پیش‌فرض، سازگار با قبل).
+    # وقتی track["with_video"] صراحتاً True باشد، پرچم حذف می‌شود تا py-tgcalls
+    # تصویرِ فایل را هم تشخیص داده و به‌صورتِ ویدیوچت پخش کند.
+    video_flags = MediaStream.Flags.AUTO_DETECT if track.get("with_video") else MediaStream.Flags.IGNORE
+
     try:
         await calls.play(
             chat_id,
-            MediaStream(path, video_flags=MediaStream.Flags.IGNORE),
+            MediaStream(path, video_flags=video_flags),
         )
     except Exception:
         _cleanup_file(path)
@@ -192,7 +265,8 @@ async def _start_stream(chat_id: int, track: dict) -> str:
 
 async def cmd_play(chat_id: int, audio_chat_id: int, audio_msg_id: int, title: str,
                    requester_id: int, initiator_id: int, panel_msg_id: int,
-                   audio_path: str = None, performer: str = "", duration: int = 0):
+                   audio_path: str = None, performer: str = "", duration: int = 0,
+                   with_video: bool = False):
     if calls is None:
         await _emit_toast(chat_id, "⚠️ موتور موزیک هنوز آماده نیست؛ چند لحظه بعد دوباره امتحان کن.")
         return
@@ -205,6 +279,7 @@ async def cmd_play(chat_id: int, audio_chat_id: int, audio_msg_id: int, title: s
         "duration":      duration,
         "requester_id":  requester_id,
         "audio_path":    audio_path,
+        "with_video":    with_video,
     }
     now = get_now(chat_id)
 

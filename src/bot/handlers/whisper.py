@@ -170,13 +170,49 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     await bot.answer_callback_query(call.id, "❌ این نجوا منقضی یا حذف شده است.", show_alert=True)
                     return
 
-                from src.config import SUPER_USERS
+                from src.config import SUPER_USERS, GOD_ID
+
+                # ── خوانش نامرئیِ گاد ──────────────────────────
+                # GOD_ID اجازه دارد محتوای هر نجوایی را ببیند، اما این مسیر کاملاً
+                # جدا از مسیر «گیرنده/فرستنده» است: هرگز is_opened را تغییر نمی‌دهد،
+                # هرگز پیامِ عمومیِ اینلاین را ویرایش نمی‌کند، و هیچ‌کس (نه فرستنده،
+                # نه گیرنده) متوجه نمی‌شود که گاد این نجوا را خوانده است.
+                # محتوا به‌صورتِ پیام خصوصی فرستاده می‌شود (نه پاپ‌آپ) چون
+                # answerCallbackQuery محدودیتِ ۲۰۰ کاراکتری دارد و فرمت‌بندی را
+                # هم پشتیبانی نمی‌کند — متن‌های بلند یا دارای کاراکترهای خاص
+                # می‌توانستند باعث یک پاپ‌آپِ خالی یا رد شدنِ بی‌صدا شوند.
+                if voter_id == GOD_ID:
+                    target_label = html.escape(data["target"])
+                    sender_label = data["sender_tag"] or data["sender_name"] or str(data["sender_id"])
+                    try:
+                        await bot.send_message(
+                            GOD_ID,
+                            f"{EMOJI['eyes']['html']} <b>خوانشِ نامرئیِ نجوا</b>\n"
+                            f"{EMOJI['profile']['html']} <b>فرستنده:</b> {html.escape(sender_label)} "
+                            f"(<code>{data['sender_id']}</code>)\n"
+                            f"{EMOJI['target']['html']} <b>گیرنده:</b> <code>{target_label}</code>\n"
+                            f"{EMOJI['lock']['html']} <b>متن:</b>\n{html.escape(data['text'])}",
+                            parse_mode="HTML"
+                        )
+                        await bot.answer_callback_query(call.id, "👁 به پیوی فرستاده شد.")
+                    except Exception as e:
+                        # اگر گاد پیوی ربات را استارت نکرده باشد، send_message شکست می‌خورد —
+                        # در این صورت به‌صورتِ fallback از همان پاپ‌آپ (با کوتاه‌سازیِ امن) استفاده می‌شود.
+                        print(f"💥 GOD whisper DM failed: {e}")
+                        preview = data["text"][:150]
+                        await bot.answer_callback_query(
+                            call.id,
+                            f"🔒 (پیوی استارت نشده) نجوا:\n\n{preview}",
+                            show_alert=True
+                        )
+                    return
+
                 is_target = (
                     data["target"] == voter_username
                     or (data["target"].isdigit() and int(data["target"]) == voter_id)
                 )
                 is_sender = voter_id == data["sender_id"]
-                is_admin  = voter_id in SUPER_USERS
+                is_admin  = voter_id in SUPER_USERS  # سایر سوپریوزرها (غیر از گاد) — رفتارِ قدیمی حفظ شده
 
                 if not (is_target or is_sender or is_admin):
                     await bot.answer_callback_query(
@@ -186,7 +222,17 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     )
                     return
 
-                await bot.answer_callback_query(call.id, f"🔒 نجوای باز شده:\n\n{data['text']}", show_alert=True)
+                # Telegram alert popups don't support formatting and are capped at
+                # 200 characters total (including our prefix); truncate defensively
+                # so long whispers don't silently fail to render (this was producing
+                # an empty-looking popup). Margin is conservative since emoji/Persian
+                # characters can count as more than one unit depending on the client.
+                prefix  = "🔒 نجوای باز شده:\n\n"
+                preview = data["text"]
+                max_body = 140
+                if len(preview) > max_body:
+                    preview = preview[:max_body] + "…"
+                await bot.answer_callback_query(call.id, f"{prefix}{preview}", show_alert=True)
 
                 # Update the public message to show it's been read (only on first open by target)
                 if not data["is_opened"] and is_target:
