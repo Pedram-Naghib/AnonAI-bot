@@ -281,6 +281,10 @@ def _yt_dlp_search_sync(query: str) -> dict:
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     out_template = os.path.join(DOWNLOAD_DIR, "yt_%(id)s.%(ext)s")
 
+    # این خط را همیشه (نه فقط در استارت‌آپ) چاپ می‌کنیم تا توی لاگ، دقیقاً
+    # کنارِ خطای واقعیِ یوتیوب معلوم باشد که کوکی استفاده شده یا نه.
+    print(f"🎯 yt-dlp search '{query}' | COOKIES_STATUS={COOKIES_STATUS} | COOKIES_FILE={COOKIES_FILE}")
+
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": out_template,
@@ -294,9 +298,11 @@ def _yt_dlp_search_sync(query: str) -> dict:
         }],
         # یک نتیجه‌ی واحد و کوتاه — جلوگیری از دانلودِ ویدیوهای چندساعته به اشتباه
         "match_filter": yt_dlp.utils.match_filter_func("duration < 1800"),
-        # کلاینتِ android معمولاً دیرتر از کلاینتِ وب به چالشِ ضدِ-رباتِ یوتیوب
-        # برمی‌خورد؛ این یک خطِ دفاعیِ اول است (بدون نیاز به کوکی)، نه تضمین.
-        "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
+        # نکته: کلاینتِ android کوکی را می‌خواند ولی این روزها خودش هم
+        # گاهی جداگانه با چالشِ ضدِ-رباتِ یوتیوب مواجه می‌شود؛ کلاینتِ web
+        # همان چیزی است که اصلاً برای احراز هویت با کوکی طراحی شده، پس
+        # اول از همه امتحان می‌شود. android فقط به‌عنوانِ فالبک می‌ماند.
+        "extractor_args": {"youtube": {"player_client": ["web", "android"]}},
     }
 
     # فقط وقتی کوکی واقعاً معتبر است به yt-dlp می‌دهیم؛ دادنِ یک فایلِ
