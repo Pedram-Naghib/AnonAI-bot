@@ -3,10 +3,12 @@
 
 نقش این ماژول:
   • گرفتن دستور «پخش» (ریپلای روی یک فایل صوتی یا ویدیویی) از سوپریوزرها
-  • ساختن پنل فارسی با دکمه‌های شیشه‌ای هوشمند (پخش/توقف پویا) + نام و اطلاعات آهنگ
-  • ریپلای‌کردنِ پنل به پیامِ فرستنده
+  • ساختن هاب فارسی با دکمه‌های شیشه‌ای هوشمند (پخش/توقف پویا) + نام و اطلاعات آهنگ
+  • ریپلای‌کردنِ هاب به پیامِ فرستنده
   • دستورهای متنیِ «بعدی» و «پایان پخش» (فقط برای آغازگرِ پخش)
-  • دستور «پنل» برای احضارِ دوبارهٔ پنلِ کنترل
+  • دستور «هاب» برای احضارِ دوبارهٔ هابِ کنترل
+  • دکمهٔ «نمایش آهنگ‌های لیست» برای دیدنِ ترتیبِ صفِ پخش
+  • دکمهٔ «بستن هاب» برای پاک کردنِ پیامِ هاب
   • چک کردن مجوز کلیک روی دکمه‌ها (فقط آغازگر یا سوپریوزرها)
   • فرستادن مستقیم دستورها به توابع یوزربات (بدون واسطهٔ Redis)
 """
@@ -19,7 +21,7 @@ from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from src.config import SUPER_USERS
-from src.bot.music_protocol import get_now, get_queue_len
+from src.bot.music_protocol import get_now, get_queue_len, peek_queue
 from src.bot.user_bot.music_bot import (
     cmd_play, cmd_pause, cmd_resume, cmd_skip, cmd_stop, repoint_panel,
 )
@@ -55,7 +57,7 @@ def _info_line(performer: str, duration: int) -> str:
     return ("\n" + "   ".join(parts)) if parts else ""
 
 
-# ── ساختِ متن و دکمه‌های پنل بر اساس وضعیت ─────────────────
+# ── ساختِ متن و دکمه‌های هاب بر اساس وضعیت ─────────────────
 def build_panel(state: str, title: str, queue_len: int,
                 performer: str = "", duration: int = 0, with_video: bool = False):
     """
@@ -78,6 +80,8 @@ def build_panel(state: str, title: str, queue_len: int,
             InlineKeyboardButton("⏭ بعدی", callback_data="mus_skip", style="success"),
         )
         kb.row(InlineKeyboardButton("⛔ پایان پخش", callback_data="mus_stop", style="danger"))
+        kb.row(InlineKeyboardButton("📋 نمایش آهنگ‌های لیست", callback_data="mus_queue"))
+        kb.row(InlineKeyboardButton("❌ بستن هاب", callback_data="mus_close", style="danger"))
         return text, kb
 
     if state == "paused":
@@ -88,6 +92,8 @@ def build_panel(state: str, title: str, queue_len: int,
             InlineKeyboardButton("⏭ بعدی", callback_data="mus_skip", style="success"),
         )
         kb.row(InlineKeyboardButton("⛔ پایان پخش", callback_data="mus_stop", style="danger"))
+        kb.row(InlineKeyboardButton("📋 نمایش آهنگ‌های لیست", callback_data="mus_queue"))
+        kb.row(InlineKeyboardButton("❌ بستن هاب", callback_data="mus_close", style="danger"))
         return text, kb
 
     # idle / پایان‌یافته
@@ -189,7 +195,7 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             await bot.reply_to(message, "❗️ لطفاً روی یک فایل صوتی یا ویدیویی (آهنگ/ویس/ویدیو/پیام‌ویدیویی) ریپلای کنید.")
             return
 
-        # ساختِ پنل اولیه — به‌صورتِ ریپلای به پیامِ فرستنده — تا آیدی آن را به یوزربات بدهیم
+        # ساختِ هابِ اولیه — به‌صورتِ ریپلای به پیامِ فرستنده — تا آیدی آن را به یوزربات بدهیم
         kind = "ویدیو" if with_video else "موزیک"
         panel = await bot.reply_to(
             message,
@@ -262,21 +268,21 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             asyncio.create_task(cmd_stop(chat_id))
             await bot.reply_to(message, "⛔ پخش متوقف شد و از ویس‌چت خارج می‌شوم.")
 
-    # ── دستور «پنل»: احضارِ دوبارهٔ پنلِ کنترل (ریپلای به فرستنده) ──
+    # ── دستور «هاب»: احضارِ دوبارهٔ هابِ کنترل (ریپلای به فرستنده) ──
     @bot.message_handler(
         func=lambda m: (
             m.chat.type in ("group", "supergroup")
             and m.text is not None
-            and m.text.strip() in ("پنل", "/panel")
+            and m.text.strip() in ("هاب", "/hub")
         ),
         content_types=["text"],
     )
-    async def handle_panel_command(message):
+    async def handle_hub_command(message):
         chat_id = message.chat.id
 
         now = get_now(chat_id)
         if not now:
-            await bot.reply_to(message, "🔇 الان چیزی در حال پخش نیست تا پنلی نشان دهم.")
+            await bot.reply_to(message, "🔇 الان چیزی در حال پخش نیست تا هابی نشان دهم.")
             return
 
         text, kb = build_panel(
@@ -291,17 +297,60 @@ def register_userbot_handlers(bot: AsyncTeleBot):
         # از این به بعد، آپدیت‌های موتورِ موزیک روی همین پیامِ تازه انجام می‌شود.
         repoint_panel(chat_id, sent.message_id)
 
-    # ── کال‌بکِ دکمه‌های پنل ───────────────────────────────
+    # ── کال‌بکِ دکمه‌های هاب ───────────────────────────────
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("mus_"))
     async def handle_music_buttons(call):
         chat_id = call.message.chat.id
         user_id = call.from_user.id
-        action  = call.data.split("mus_")[-1]  # pause | resume | skip | stop
+        action  = call.data.split("mus_")[-1]  # pause | resume | skip | stop | queue | close
 
-        # امنیت: کلیک فقط برای آغازگر یا سوپریوزر
+        # «نمایش آهنگ‌های لیست» صرفاً اطلاعاتیه و چیزی رو تغییر نمی‌ده —
+        # برای همینم برخلافِ بقیهٔ دکمه‌ها، محدود به آغازگر/ادمین نیست؛
+        # هر عضوِ گروه می‌تونه صفِ پخش رو ببینه.
+        if action == "queue":
+            tracks = peek_queue(chat_id)
+            if not tracks:
+                await bot.answer_callback_query(call.id, "📋 صف خالیه؛ آهنگِ بعدی‌ای در انتظار نیست.", show_alert=True)
+                return
+
+            lines = []
+            for i, t in enumerate(tracks[:15], start=1):  # سقفِ ۱۵ تا برای جا شدن توی پاپ‌آپِ ۲۰۰ کاراکتری
+                t_title = (t.get("title") or "نامشخص")[:30]
+                dur     = _fmt_duration(t.get("duration", 0))
+                line    = f"{i}. {t_title}"
+                if dur:
+                    line += f" ({dur})"
+                lines.append(line)
+
+            text = "📋 آهنگ‌های صف:\n" + "\n".join(lines)
+            if len(tracks) > 15:
+                text += f"\n…و {len(tracks) - 15} مورد دیگر"
+            # محدودیتِ پاپ‌آپِ تلگرام ۲۰۰ کاراکتر است؛ کوتاه‌سازیِ امن
+            if len(text) > 195:
+                text = text[:195] + "…"
+            await bot.answer_callback_query(call.id, text, show_alert=True)
+            return
+
+        # «بستن هاب» هم مثلِ بقیهٔ دکمه‌های کنترلی محدود به آغازگر/ادمین است
+        # چون پیامِ هاب رو برای همه پاک می‌کنه.
+        if action == "close":
+            if not await _is_authorized(chat_id, user_id):
+                await bot.answer_callback_query(
+                    call.id, "⛔ فقط آغازگرِ پخش یا ادمین می‌تونه هاب رو ببنده!", show_alert=True
+                )
+                return
+            try:
+                await bot.delete_message(chat_id, call.message.message_id)
+            except Exception as e:
+                print(f"⚠️ Failed to delete hub message: {e}")
+                await bot.answer_callback_query(call.id, "⚠️ حذفِ پیام ممکن نشد.", show_alert=True)
+                return
+            return
+
+        # امنیت: کلیک فقط برای آغازگر یا سوپریوزر (پخش/توقف/ادامه/بعدی/پایان)
         if not await _is_authorized(chat_id, user_id):
             await bot.answer_callback_query(
-                call.id, "⛔ این پنل برای شما نیست!", show_alert=True
+                call.id, "⛔ این هاب برای شما نیست!", show_alert=True
             )
             return
 
@@ -325,7 +374,7 @@ def register_userbot_handlers(bot: AsyncTeleBot):
 async def start_music_event_listener(bot: AsyncTeleBot):
     """
     [DEPRECATED] این تابع در معماری جدید درون‌حافظه‌ای دیگر کاربردی ندارد
-    چون یوزربات مستقیماً پنل‌ها را ویرایش می‌کند. صرفاً جهت جلوگیری از ImportError در main.py باقی مانده است.
+    چون یوزربات مستقیماً هاب‌ها را ویرایش می‌کند. صرفاً جهت جلوگیری از ImportError در main.py باقی مانده است.
     """
     print("🌙 Music event listener (In-Memory Mode) initialized natively.")
     while True:

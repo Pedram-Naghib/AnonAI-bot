@@ -40,6 +40,14 @@ def get_queue_len(chat_id: int) -> int:
     return len(_music_queue.get(chat_id, []))
 
 
+def peek_queue(chat_id: int) -> list:
+    """
+    گرفتنِ لیستِ آهنگ‌های صف بدونِ تغییر دادنِ صف (فقط خواندن).
+    برای نمایشِ «آهنگ‌های لیست» در منوی کمک/پنل استفاده می‌شود.
+    """
+    return list(_music_queue.get(chat_id, []))
+
+
 def push_to_queue(chat_id: int, track: dict) -> int:
     """اضافه کردن یک آهنگ به انتهای صف گروه و برگرداندن موقعیت آن در صف."""
     if chat_id not in _music_queue:
