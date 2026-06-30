@@ -2,8 +2,7 @@
 سمتِ «ربات رسمی» برای سیستم پخش موزیک در ویس‌چت (نسخهٔ بدون Redis).
 
 نقش این ماژول:
-  • گرفتن دستور «پخش» (ریپلای روی یک فایل صوتی) از سوپریوزرها
-  • گرفتن دستور «پخش <اسم آهنگ>» و جست‌وجو/دانلود از یوتیوب (yt-dlp)
+  • گرفتن دستور «پخش» (ریپلای روی یک فایل صوتی یا ویدیویی) از سوپریوزرها
   • ساختن پنل فارسی با دکمه‌های شیشه‌ای هوشمند (پخش/توقف پویا) + نام و اطلاعات آهنگ
   • ریپلای‌کردنِ پنل به پیامِ فرستنده
   • دستورهای متنیِ «بعدی» و «پایان پخش» (فقط برای آغازگرِ پخش)
@@ -23,15 +22,11 @@ from src.config import SUPER_USERS
 from src.bot.music_protocol import get_now, get_queue_len
 from src.bot.user_bot.music_bot import (
     cmd_play, cmd_pause, cmd_resume, cmd_skip, cmd_stop, repoint_panel,
-    search_and_download_youtube,
 )
 
 
 # ── گروهی که اجازهٔ پخش در آن داده شده ─────────────────────
 MUSIC_GROUP_ID = -1001434396268
-
-# ── پیشوندهایی که دستورِ «پخش از یوتیوب» را فعال می‌کنند ──
-_YT_PLAY_PREFIXES = ("پخش ", "/play ")
 
 
 # ── کمک‌تابع: قالب‌بندیِ مدت‌زمان (ثانیه → mm:ss) ───────────
@@ -234,112 +229,6 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             performer=performer,
             duration=duration,
             with_video=with_video,
-        ))
-
-    # ── دستور «پخش <اسم آهنگ>»: جست‌وجو و دانلود از یوتیوب ──
-    @bot.message_handler(
-        func=lambda m: (
-            m.chat.type in ("group", "supergroup")
-            and m.text is not None
-            and m.text.strip().startswith(_YT_PLAY_PREFIXES)
-            and m.text.strip() not in ("پخش", "/play")  # خالی → برود سمتِ هندلرِ ریپلای بالا
-        ),
-        content_types=["text"],
-    )
-    async def handle_play_youtube_command(message):
-        chat_id = message.chat.id
-        user_id = message.from_user.id
-
-        if (user_id not in SUPER_USERS) and (chat_id != MUSIC_GROUP_ID):
-            await bot.reply_to(message, "⛔ فقط مدیران اجازهٔ پخش موزیک دارند.")
-            return
-
-        raw = message.text.strip()
-        for prefix in _YT_PLAY_PREFIXES:
-            if raw.startswith(prefix):
-                query = raw[len(prefix):].strip()
-                break
-        else:
-            query = ""
-
-        if not query:
-            await bot.reply_to(message, "❗️ بعد از «پخش» اسم آهنگ رو هم بنویس؛ مثلاً: «پخش shape of you».")
-            return
-
-        panel = await bot.reply_to(
-            message,
-            f"🔎 در حال جست‌وجوی «{html.escape(query)}» در یوتیوب...",
-            parse_mode="HTML",
-        )
-
-        try:
-            result = await search_and_download_youtube(query)
-        except ValueError as e:
-            reason = str(e)
-            if reason.startswith("NO_RESULTS"):
-                text = f"❌ چیزی برای «{html.escape(query)}» پیدا نشد."
-            elif reason.startswith("YT_BOT_CHECK"):
-                from src.bot.user_bot.music_bot import COOKIES_STATUS
-                if COOKIES_STATUS == "invalid":
-                    text = (
-                        "🍪 فایلِ کوکیِ یوتیوب روی سرور خراب است (پارس نشد).\n"
-                        "رایج‌ترین دلیل: تب‌های بینِ ستون‌ها هنگامِ پیست در Render "
-                        "به اسپیس تبدیل شده‌اند. کوکی رو دوباره از مرورگر اکسپورت "
-                        "کن و این‌بار با احتیاط (بدون ادیتورِ واسط) توی متغیرِ "
-                        "YT_COOKIES_CONTENT در Render پیست کن.\n"
-                        "فعلاً می‌تونی فایلِ صوتی رو مستقیم بفرستی و روش ریپلای "
-                        "کنی و بنویسی «پخش»."
-                    )
-                elif COOKIES_STATUS == "ok":
-                    text = (
-                        "🤖 با اینکه کوکی معتبر است، یوتیوب همچنان این درخواست "
-                        "رو ربات تشخیص داده.\n"
-                        "این یعنی مشکل از فرمتِ کوکی نیست؛ احتمالاً یا کوکی "
-                        "منقضی شده، یا حسابش به اندازهٔ کافی «قدیمی/معتبر» "
-                        "نیست، یا (محتمل‌تر) آی‌پیِ سرورِ Render توسطِ یوتیوب "
-                        "به‌طورِ کلی مسدود شده — که در این صورت حتی با کوکیِ "
-                        "خوب هم گاهی جواب نمی‌دهد.\n"
-                        "فعلاً می‌تونی فایلِ صوتی رو مستقیم بفرستی و روش ریپلای "
-                        "کنی و بنویسی «پخش»."
-                    )
-                else:
-                    text = (
-                        "🤖 یوتیوب فعلاً اجازهٔ دانلود از سرور را نمی‌دهد "
-                        "(تشخیص ربات).\n"
-                        "این مشکلِ خودِ یوتیوب است، نه ربات — برای رفع، یک فایلِ "
-                        "کوکیِ حسابِ یوتیوب باید روی سرور تنظیم شود.\n"
-                        "فعلاً می‌تونی به‌جاش فایلِ صوتی رو مستقیم بفرستی و روش "
-                        "ریپلای کنی و بنویسی «پخش»."
-                    )
-            else:
-                text = f"⚠️ خطا در دانلود از یوتیوب:\n<code>{html.escape(reason[:200])}</code>"
-            await bot.edit_message_text(text, chat_id, panel.message_id, parse_mode="HTML")
-            return
-        except Exception as e:
-            print(f"💥 youtube play unexpected error: {e}")
-            await bot.edit_message_text(
-                "⚠️ خطای غیرمنتظره در جست‌وجوی یوتیوب.", chat_id, panel.message_id
-            )
-            return
-
-        await bot.edit_message_text(
-            f"🔄 در حال اتصال به ویس‌چت برای پخش «{html.escape(result['title'])}»...",
-            chat_id, panel.message_id, parse_mode="HTML",
-        )
-
-        # نکته: audio_chat_id/audio_msg_id اینجا استفاده نمی‌شوند چون audio_path
-        # از قبل توسط yt-dlp آماده شده — cmd_play همیشه اول audio_path را چک می‌کند.
-        asyncio.create_task(cmd_play(
-            chat_id=chat_id,
-            audio_chat_id=chat_id,
-            audio_msg_id=message.message_id,
-            title=result["title"],
-            requester_id=user_id,
-            initiator_id=user_id,
-            panel_msg_id=panel.message_id,
-            audio_path=result["path"],
-            performer=result["performer"],
-            duration=result["duration"],
         ))
 
     # ── دستورهای متنی: «بعدی» و «پایان پخش» (فقط آغازگرِ پخش) ──
