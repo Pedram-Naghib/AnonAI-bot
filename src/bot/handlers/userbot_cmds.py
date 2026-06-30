@@ -80,7 +80,7 @@ def build_panel(state: str, title: str, queue_len: int,
             InlineKeyboardButton("⏭ بعدی", callback_data="mus_skip", style="success"),
         )
         kb.row(InlineKeyboardButton("⛔ پایان پخش", callback_data="mus_stop", style="danger"))
-        kb.row(InlineKeyboardButton("📋 نمایش آهنگ‌های لیست", callback_data="mus_queue"))
+        kb.row(InlineKeyboardButton("📋 نمایش آهنگ‌های لیست", callback_data="mus_queue", style="primary"))
         kb.row(InlineKeyboardButton("❌ بستن هاب", callback_data="mus_close", style="danger"))
         return text, kb
 
@@ -92,7 +92,7 @@ def build_panel(state: str, title: str, queue_len: int,
             InlineKeyboardButton("⏭ بعدی", callback_data="mus_skip", style="success"),
         )
         kb.row(InlineKeyboardButton("⛔ پایان پخش", callback_data="mus_stop", style="danger"))
-        kb.row(InlineKeyboardButton("📋 نمایش آهنگ‌های لیست", callback_data="mus_queue"))
+        kb.row(InlineKeyboardButton("📋 نمایش آهنگ‌های لیست", callback_data="mus_queue", style="primary"))
         kb.row(InlineKeyboardButton("❌ بستن هاب", callback_data="mus_close", style="danger"))
         return text, kb
 
