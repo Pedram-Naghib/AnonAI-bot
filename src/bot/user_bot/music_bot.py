@@ -79,8 +79,8 @@ async def _emit_panel(chat_id: int):
             text, chat_id, now.get("panel_msg_id"),
             parse_mode="HTML", reply_markup=kb
         )
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"⚠️ _emit_panel edit failed for {chat_id}: {type(e).__name__}: {e}")
 
 
 async def _emit_toast(chat_id: int, text: str):
@@ -429,6 +429,12 @@ async def _leave(chat_id: int, toast: str = ""):
     if now:
         push_to_history(chat_id, now)
         _cleanup_file(now.get("path"))
+        # panel_msg_id را قبل از clear_now نگه می‌داریم تا _emit_panel بتونه
+        # همون پیامِ درست رو ویرایش کنه (بعد از clear_now، now خالیه)
+        panel_msg_id = now.get("panel_msg_id")
+        if panel_msg_id:
+            _last_panel[chat_id] = panel_msg_id
+
     if calls is not None:
         try:
             await calls.leave_call(chat_id)
