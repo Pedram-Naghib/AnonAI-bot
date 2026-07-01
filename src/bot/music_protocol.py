@@ -109,7 +109,7 @@ def get_volume(chat_id: int) -> int:
 
 
 def set_volume(chat_id: int, volume: int) -> int:
-    v = max(1, min(100, volume))  # تلگرام volume=0 را «نامعتبر» رد می‌کند — کف همیشه ۱ است
+    v = max(1, min(200, volume))  # تلگرام تا ۲۰۰٪ (دو برابر) رو مجاز می‌دونه؛ volume=0 نامعتبره
     _music_volume[chat_id] = v
     return v
 
