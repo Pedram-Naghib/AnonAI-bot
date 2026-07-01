@@ -12,8 +12,9 @@ import traceback
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.tl.functions.channels import GetFullChannelRequest
+from telethon.tl.functions.messages import GetFullChatRequest
 from telethon.tl.functions.phone import EditGroupCallParticipantRequest
-from telethon.tl.types import InputPeerSelf
+from telethon.tl.types import InputPeerSelf, Channel, Chat
 
 from pytgcalls import PyTgCalls
 from pytgcalls.types import MediaStream, StreamEnded
@@ -414,12 +415,17 @@ async def cmd_loop(chat_id: int) -> str:
 
 
 async def _get_group_call(chat_id: int):
-    """InputGroupCall را مستقیم از خودِ تلگرام می‌گیرد (GetFullChannelRequest)،
-    بدون تکیه به کشِ داخلیِ pytgcalls (calls._app.get_input_call /
-    cache_user_peer) — همان چیزی که باعث می‌شد ولوم/میوت اصلاً کار نکنند،
-    چون آن کش برای الگوی play() ما هیچ‌وقت به‌طور قابل‌اعتماد پر نمی‌شد."""
+    """InputGroupCall را مستقیم از خودِ تلگرام می‌گیرد، بدون تکیه به کشِ داخلیِ
+    pytgcalls. گروه می‌تونه یا سوپرگروه/کانال باشه (GetFullChannelRequest) یا
+    یه گروهِ معمولیِ قدیمی (GetFullChatRequest) — این دو تا API کاملاً جدا
+    هستن تو تلگرام، برای همینم اول نوعِ entity رو تشخیص می‌دیم."""
     entity = await client.get_entity(chat_id)
-    full = await client(GetFullChannelRequest(entity))
+    if isinstance(entity, Channel):
+        full = await client(GetFullChannelRequest(entity))
+    elif isinstance(entity, Chat):
+        full = await client(GetFullChatRequest(entity.id))
+    else:
+        raise NoActiveGroupCall()
     call = getattr(full.full_chat, "call", None)
     if call is None:
         raise NoActiveGroupCall()
