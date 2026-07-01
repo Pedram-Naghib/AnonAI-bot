@@ -1,16 +1,8 @@
 """
 یوزربات موزیک یکپارچه (In-Memory Mode) — سازگار با py-tgcalls==2.3.3 و Telethon.
 
-اصلاحِ مهمِ این نسخه (رفعِ خطای cross-event-loop):
-  در نسخه‌ی قبلی، `client = TelegramClient(...)` و `calls = PyTgCalls(client)`
-  در سطحِ ماژول (هنگام import) ساخته می‌شدند. این import قبل از اجرای
-  `asyncio.run(start_bot())` در main.py رخ می‌دهد، یعنی هنوز event loop اصلی
-  ساخته نشده. py-tgcalls/ntgcalls در زمانِ ساخته‌شدن به یک loop بایند می‌شود،
-  و بعداً `calls.play()` روی loopِ دیگری اجرا می‌شد →
-  خطای «got Future attached to a different loop» و شکستِ هر پخش.
-
-  حالا client و calls «درونِ» start_music_client (روی همان loopِ در حالِ اجرا)
-  ساخته می‌شوند و هندلرِ on_update هم همان‌جا ثبت می‌شود.
+client و calls درونِ start_music_client (روی همان loopِ در حالِ اجرا) ساخته
+می‌شوند تا از خطای cross-event-loop جلوگیری شود.
 """
 
 import os
@@ -28,26 +20,29 @@ from telebot.async_telebot import AsyncTeleBot
 
 from src.bot.music_protocol import (
     get_now, set_now, clear_now, get_queue_len,
-    push_to_queue, pop_from_queue, clear_queue, IDLE_TIMEOUT
+    push_to_queue, push_to_front_queue, pop_from_queue, clear_queue,
+    shuffle_queue, get_loop, cycle_loop,
+    get_volume, set_volume, adjust_volume,
+    push_to_history, get_history,
+    IDLE_TIMEOUT, LOOP_NONE, LOOP_TRACK, LOOP_QUEUE,
 )
 
 # ── پیکربندی ──────────────────────────────────────────────
-API_ID   = int(os.getenv("API_ID", "0"))
-API_HASH = os.getenv("API_HASH", "")
-DOWNLOAD_DIR = "downloads"
+API_ID          = int(os.getenv("API_ID", "0"))
+API_HASH        = os.getenv("API_HASH", "")
+DOWNLOAD_DIR    = "downloads"
 _STRING_SESSION = os.getenv("USERBOT_SESSION", "").strip()
 
-# 🌟 این‌ها دیگر در زمانِ import ساخته نمی‌شوند؛ در start_music_client مقداردهی می‌شوند.
 client: TelegramClient = None
-calls:  PyTgCalls = None
+calls:  PyTgCalls       = None
 
 _autoleave_tasks: dict = {}
-_last_panel: dict = {}
-_bot_instance = None
+_last_panel:      dict = {}
+_bot_instance           = None
 
 
 # ════════════════════════════════════════════════════════════
-#  ارسالِ رویداد به ربات رسمی (مستقیم)
+#  ارسال رویداد به ربات رسمی
 # ════════════════════════════════════════════════════════════
 async def _emit_panel(chat_id: int):
     if not _bot_instance:
@@ -74,6 +69,10 @@ async def _emit_panel(chat_id: int):
         now.get("performer", ""),
         now.get("duration", 0),
         now.get("with_video", False),
+        now.get("requester_id"),
+        now.get("requester_name", ""),
+        get_loop(chat_id),
+        get_volume(chat_id),
     )
     try:
         await _bot_instance.edit_message_text(
@@ -94,12 +93,10 @@ async def _emit_toast(chat_id: int, text: str):
 
 
 # ════════════════════════════════════════════════════════════
-#  «نقل‌مکانِ» هاب به یک پیامِ تازه (برای دستورِ «هاب»)
-#  وقتی کاربر دوباره هاب را احضار می‌کند، یک پیامِ جدید فرستاده می‌شود و
-#  از این به بعد باید همان پیامِ جدید (نه پیامِ قدیمیِ گم‌شده در چت) آپدیت شود.
+#  نقل‌مکانِ هاب و رفرش
 # ════════════════════════════════════════════════════════════
 def repoint_panel(chat_id: int, new_panel_msg_id: int):
-    """هابِ فعال را به یک پیامِ تازه منتقل می‌کند تا آپدیت‌های بعدی روی آن انجام شود."""
+    """هاب را به پیامِ تازه منتقل می‌کند."""
     _last_panel[chat_id] = new_panel_msg_id
     now = get_now(chat_id)
     if now:
@@ -108,20 +105,18 @@ def repoint_panel(chat_id: int, new_panel_msg_id: int):
 
 
 async def refresh_panel(chat_id: int):
-    """آپدیتِ دستیِ هابِ فعلی (نسخهٔ عمومیِ _emit_panel برای استفاده در هندلرها)."""
     await _emit_panel(chat_id)
 
 
 # ════════════════════════════════════════════════════════════
-#  دانلودِ صوت (فالبک؛ مسیرِ اصلی، دانلودِ سمتِ ربات است)
+#  دانلود صوت (فالبک از طریق یوزربات)
 # ════════════════════════════════════════════════════════════
 async def _download_audio(chat_id: int, msg_id: int) -> str:
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     try:
         await client.get_entity(chat_id)
     except Exception as e:
-        print(f"💥 entity resolve failed for {chat_id}: {e}")
-        raise ValueError("ENTITY_NOT_FOUND: یوزربات این گروه را در کش خود ندارد.")
+        raise ValueError(f"ENTITY_NOT_FOUND: {e}")
 
     msg = None
     last_err = None
@@ -132,24 +127,22 @@ async def _download_audio(chat_id: int, msg_id: int) -> str:
             msg = await client.get_messages(chat_id, ids=msg_id)
         except Exception as e:
             last_err = e
-            print(f"💥 get_messages attempt {attempt} failed for {chat_id}/{msg_id}: {e}")
             continue
         if msg:
             break
 
-    if last_err and not msg:
-        raise ValueError(f"GET_MESSAGE_FAILED: {last_err}")
     if not msg:
-        raise ValueError("MESSAGE_NOT_FOUND: پیام صوتی پیدا نشد.")
+        raise ValueError(f"GET_MESSAGE_FAILED: {last_err}")
 
     try:
-        path = await client.download_media(msg, file=os.path.join(DOWNLOAD_DIR, f"{chat_id}_{msg_id}"))
+        path = await client.download_media(
+            msg, file=os.path.join(DOWNLOAD_DIR, f"{chat_id}_{msg_id}")
+        )
     except Exception as e:
-        print(f"💥 download_media failed for {chat_id}/{msg_id}: {e}")
         raise ValueError(f"DOWNLOAD_MEDIA_FAILED: {e}")
 
     if not path:
-        raise ValueError("DOWNLOAD_EMPTY: download_media مسیر خالی برگرداند.")
+        raise ValueError("DOWNLOAD_EMPTY")
     return path
 
 
@@ -172,95 +165,93 @@ def _sweep_stale_downloads():
 
 
 # ════════════════════════════════════════════════════════════
-#  منطقِ پخش / صف (py-tgcalls 2.3.3)
+#  منطقِ پخش (py-tgcalls 2.3.3)
 # ════════════════════════════════════════════════════════════
 async def _start_stream(chat_id: int, track: dict) -> str:
-    # اولویت با فایلی است که خودِ ربات رسمی دانلود کرده و مسیرش را داده.
     path = track.get("audio_path")
     if not (path and os.path.exists(path)):
         path = await _download_audio(track["audio_chat_id"], track["audio_msg_id"])
 
-    # video_flags=IGNORE یعنی فقط صدا پخش می‌شود (حالتِ پیش‌فرض، سازگار با قبل).
-    # وقتی track["with_video"] صراحتاً True باشد، پرچم حذف می‌شود تا py-tgcalls
-    # تصویرِ فایل را هم تشخیص داده و به‌صورتِ ویدیوچت پخش کند.
-    video_flags = MediaStream.Flags.AUTO_DETECT if track.get("with_video") else MediaStream.Flags.IGNORE
-
+    video_flags = (
+        MediaStream.Flags.AUTO_DETECT if track.get("with_video")
+        else MediaStream.Flags.IGNORE
+    )
     try:
-        await calls.play(
-            chat_id,
-            MediaStream(path, video_flags=video_flags),
-        )
+        await calls.play(chat_id, MediaStream(path, video_flags=video_flags))
     except Exception:
         _cleanup_file(path)
         raise
+
+    # تنظیم ولومِ ذخیره‌شده برای این گروه
+    vol = get_volume(chat_id)
+    if vol != 100:
+        try:
+            await calls.change_volume_call(chat_id, vol)
+        except Exception:
+            pass
+
     return path
 
 
 async def cmd_play(chat_id: int, audio_chat_id: int, audio_msg_id: int, title: str,
                    requester_id: int, initiator_id: int, panel_msg_id: int,
                    audio_path: str = None, performer: str = "", duration: int = 0,
-                   with_video: bool = False):
+                   with_video: bool = False, file_unique_id: str = "",
+                   requester_name: str = ""):
     if calls is None:
         await _emit_toast(chat_id, "⚠️ موتور موزیک هنوز آماده نیست؛ چند لحظه بعد دوباره امتحان کن.")
         return
 
     track = {
-        "audio_chat_id": audio_chat_id,
-        "audio_msg_id":  audio_msg_id,
-        "title":         title,
-        "performer":     performer,
-        "duration":      duration,
-        "requester_id":  requester_id,
-        "audio_path":    audio_path,
-        "with_video":    with_video,
+        "audio_chat_id":  audio_chat_id,
+        "audio_msg_id":   audio_msg_id,
+        "title":          title,
+        "performer":      performer,
+        "duration":       duration,
+        "requester_id":   requester_id,
+        "requester_name": requester_name,
+        "audio_path":     audio_path,
+        "with_video":     with_video,
+        "file_unique_id": file_unique_id,
     }
     now = get_now(chat_id)
 
-    # ── حالتِ ۱: چیزی در حال پخش/مکث است → آهنگ به صف می‌رود ──
+    # حالتِ ۱: چیزی در حال پخش/مکث است → صف
     if now and now.get("state") in ("playing", "paused"):
         pos = push_to_queue(chat_id, track)
-        # پیامِ «در حال اتصال…»‌ای که تازه ساخته شده را به یک رسیدِ «به صف اضافه شد»
-        # تبدیل می‌کنیم تا پیامِ سرگردان و گمراه‌کننده در چت نماند.
         try:
             from src.bot.handlers.userbot_cmds import build_queue_added
             await _bot_instance.edit_message_text(
                 build_queue_added(title, performer, duration, pos),
-                chat_id, panel_msg_id, parse_mode="HTML"
+                chat_id, panel_msg_id, parse_mode="HTML",
+                reply_markup=_queue_added_keyboard(chat_id, pos - 1)
             )
         except Exception:
             await _emit_toast(chat_id, f"🎵 «{title}» به صف اضافه شد (موقعیت {pos}).")
-        # هابِ اصلیِ «در حال پخش» را هم رفرش می‌کنیم تا تعدادِ صف به‌روز شود.
         await _emit_panel(chat_id)
         return
 
-    # ── حالتِ ۲: چیزی پخش نمی‌شود → همین آهنگ همین حالا پخش می‌شود ──
+    # حالتِ ۲: پخش نمی‌شود → همین حالا پخش
     _last_panel[chat_id] = panel_msg_id
     try:
         path = await _start_stream(chat_id, track)
     except NoActiveGroupCall:
-        await _emit_toast(chat_id, "⚠️ ابتدا یک ویس‌چت در گروه ایجاد کنید، سپس دوباره «پخش» را بزنید.")
+        await _emit_toast(chat_id, "⚠️ ابتدا یک ویس‌چت در گروه باز کنید، سپس دوباره «پخش» بزنید.")
         return
     except ValueError as e:
         reason = str(e)
-        if reason.startswith("ENTITY_NOT_FOUND"):
-            await _emit_toast(chat_id, "⚠️ یوزربات این گروه را نمی‌شناسد. مطمئن شو یوزربات عضو گروه است و سرویس را ری‌استارت کن.")
-        elif reason.startswith("MESSAGE_NOT_FOUND"):
-            await _emit_toast(chat_id, "⚠️ فایل صوتی در دسترس نبود. دوباره روی یک فایل صوتی تازه ریپلای کن.")
+        if "ENTITY_NOT_FOUND" in reason:
+            msg = "⚠️ یوزربات این گروه را نمی‌شناسد. مطمئن شو عضو گروه است و سرویس را ری‌استارت کن."
+        elif "MESSAGE_NOT_FOUND" in reason or "GET_MESSAGE" in reason:
+            msg = "⚠️ فایل صوتی پیدا نشد. دوباره روی یک فایل تازه ریپلای کن."
         else:
-            await _emit_toast(chat_id, f"⚠️ خطا در آماده‌سازی فایل:\n<code>{reason}</code>")
-        print(f"💥 play ValueError in {chat_id}: {reason}")
+            msg = f"⚠️ خطا:\n<code>{reason}</code>"
+        await _emit_toast(chat_id, msg)
         return
     except Exception as e:
-        # چاپِ کاملِ خطا برای دیباگ (نوع + متن + traceback)
-        print(f"💥 play error in {chat_id}: {type(e).__name__}: {e}")
         traceback.print_exc()
-        await _emit_toast(
-            chat_id,
-            "⚠️ اتصال به ویس‌چت ناموفق بود.\n"
-            "۱) یوزربات باید عضو گروه باشد.\n"
-            "۲) ویس‌چت گروه باید از قبل باز باشد.\n"
-            f"<code>{type(e).__name__}: {str(e)[:200]}</code>"
-        )
+        await _emit_toast(chat_id,
+            f"⚠️ اتصال به ویس‌چت ناموفق بود.\n<code>{type(e).__name__}: {str(e)[:200]}</code>")
         return
 
     set_now(chat_id, {
@@ -274,10 +265,60 @@ async def cmd_play(chat_id: int, audio_chat_id: int, audio_msg_id: int, title: s
     await _emit_panel(chat_id)
 
 
+def _queue_added_keyboard(chat_id: int, queue_idx: int):
+    """کیبوردِ «پخش بعدی این باشه؟» زیرِ پیامِ اضافه‌شدن به صف."""
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup()
+    kb.row(
+        InlineKeyboardButton(
+            "▶️ پخش بعدی این باشه",
+            callback_data=f"mus_playnext_{queue_idx}"
+        ),
+        InlineKeyboardButton(
+            "✅ همین ترتیب خوبه",
+            callback_data="mus_queue_ok"
+        ),
+    )
+    return kb
+
+
 async def _play_next(chat_id: int):
     prev = get_now(chat_id)
     if prev:
+        push_to_history(chat_id, prev)
+
+    loop_mode = get_loop(chat_id)
+
+    # Loop Track: همان آهنگ را دوباره پخش کن
+    if loop_mode == LOOP_TRACK and prev:
+        try:
+            path = await _start_stream(chat_id, prev)
+        except Exception as e:
+            print(f"💥 loop-track error in {chat_id}: {e}")
+            await _play_next_from_queue(chat_id, prev)
+            return
         _cleanup_file(prev.get("path"))
+        set_now(chat_id, {
+            **prev,
+            "state": "playing",
+            "path":  path,
+        })
+        _cancel_autoleave(chat_id)
+        await _emit_panel(chat_id)
+        return
+
+    # Loop Queue: وقتی صف خالی شد، کل صف را دوباره پر کن
+    if loop_mode == LOOP_QUEUE and not get_queue_len(chat_id) and prev:
+        push_to_queue(chat_id, {k: v for k, v in prev.items()
+                                if k not in ("state", "panel_msg_id", "initiator_id", "path")})
+
+    _cleanup_file(prev.get("path") if prev else None)
+    await _play_next_from_queue(chat_id, prev)
+
+
+async def _play_next_from_queue(chat_id: int, prev: dict):
+    panel_msg_id = (prev.get("panel_msg_id") if prev else None) or _last_panel.get(chat_id)
+    initiator_id = prev.get("initiator_id") if prev else None
 
     track = pop_from_queue(chat_id)
     if track:
@@ -285,13 +326,13 @@ async def _play_next(chat_id: int):
             path = await _start_stream(chat_id, track)
         except Exception as e:
             print(f"💥 next-play error in {chat_id}: {e}")
-            await _play_next(chat_id)
+            await _play_next_from_queue(chat_id, prev)
             return
         set_now(chat_id, {
             **track,
             "state":        "playing",
-            "panel_msg_id": prev.get("panel_msg_id") if prev else _last_panel.get(chat_id),
-            "initiator_id": prev.get("initiator_id") if prev else None,
+            "panel_msg_id": panel_msg_id,
+            "initiator_id": initiator_id,
             "path":         path,
         })
         _cancel_autoleave(chat_id)
@@ -302,6 +343,9 @@ async def _play_next(chat_id: int):
         _schedule_autoleave(chat_id)
 
 
+# ════════════════════════════════════════════════════════════
+#  دستورهای کنترل
+# ════════════════════════════════════════════════════════════
 async def cmd_pause(chat_id: int):
     if calls is None:
         return
@@ -342,16 +386,48 @@ async def cmd_stop(chat_id: int):
     await _leave(chat_id, "⛔ پخش پایان یافت و از ویس‌چت خارج شدم.")
 
 
+async def cmd_shuffle(chat_id: int):
+    shuffle_queue(chat_id)
+    await _emit_panel(chat_id)
+
+
+async def cmd_loop(chat_id: int) -> str:
+    new_mode = cycle_loop(chat_id)
+    await _emit_panel(chat_id)
+    return new_mode
+
+
+async def cmd_volume(chat_id: int, delta: int) -> int:
+    """ولوم را به اندازه‌ی delta تغییر می‌دهد. مقدارِ جدید را برمی‌گرداند."""
+    new_vol = adjust_volume(chat_id, delta)
+    if calls is not None:
+        try:
+            await calls.change_volume_call(chat_id, new_vol)
+        except Exception as e:
+            print(f"⚠️ change_volume_call failed: {e}")
+    await _emit_panel(chat_id)
+    return new_vol
+
+
+async def cmd_move_to_front(chat_id: int, queue_idx: int):
+    """آیتمِ queue_idx را به اول صف می‌برد (پخش بعدی)."""
+    from src.bot.music_protocol import _music_queue
+    q = _music_queue.get(chat_id, [])
+    if 0 <= queue_idx < len(q):
+        track = q.pop(queue_idx)
+        q.insert(0, track)
+    await _emit_panel(chat_id)
+
+
 async def _leave(chat_id: int, toast: str = ""):
     now = get_now(chat_id)
     if now:
+        push_to_history(chat_id, now)
         _cleanup_file(now.get("path"))
     if calls is not None:
         try:
             await calls.leave_call(chat_id)
-        except NotInCallError:
-            pass
-        except Exception:
+        except (NotInCallError, Exception):
             pass
     clear_now(chat_id)
     _cancel_autoleave(chat_id)
@@ -384,7 +460,7 @@ def _cancel_autoleave(chat_id: int):
 
 
 # ════════════════════════════════════════════════════════════
-#  پایانِ طبیعیِ استریم (py-tgcalls 2.3.3)
+#  پایانِ طبیعیِ استریم
 # ════════════════════════════════════════════════════════════
 async def _on_update(_, update):
     if isinstance(update, StreamEnded) and update.stream_type == StreamEnded.Type.AUDIO:
@@ -392,7 +468,7 @@ async def _on_update(_, update):
 
 
 # ════════════════════════════════════════════════════════════
-#  راه‌اندازی — client و calls اینجا (روی loopِ در حالِ اجرا) ساخته می‌شوند
+#  راه‌اندازی
 # ════════════════════════════════════════════════════════════
 async def start_music_client(bot_instance: AsyncTeleBot):
     global _bot_instance, client, calls
@@ -402,14 +478,12 @@ async def start_music_client(bot_instance: AsyncTeleBot):
         print("⚠️ API_ID/API_HASH تنظیم نشده‌اند — موتور موزیک غیرفعال ماند.")
         return
 
-    # تضمینِ ffmpeg (py-tgcalls برای پخشِ فایل به ffmpeg نیاز دارد)
     try:
         import static_ffmpeg
         static_ffmpeg.add_paths()
     except Exception as e:
         print(f"⚠️ static_ffmpeg setup skipped: {e}")
 
-    # 🌟 ساختِ کلاینت‌ها روی همین loopِ در حالِ اجرا (نه در زمانِ import)
     if _STRING_SESSION:
         print("🔑 Using StringSession from env (USERBOT_SESSION).")
         client = TelegramClient(StringSession(_STRING_SESSION), API_ID, API_HASH)
@@ -418,7 +492,7 @@ async def start_music_client(bot_instance: AsyncTeleBot):
         client = TelegramClient("userbot", API_ID, API_HASH)
 
     calls = PyTgCalls(client)
-    calls.on_update()(_on_update)  # ثبتِ هندلرِ پایانِ استریم به‌صورتِ برنامه‌ای
+    calls.on_update()(_on_update)
 
     _sweep_stale_downloads()
     try:
@@ -427,9 +501,8 @@ async def start_music_client(bot_instance: AsyncTeleBot):
         me = await client.get_me()
         print(f"✅ Userbot + PyTgCalls started (2.3.3). Logged in as: {getattr(me, 'username', None) or me.id}")
 
-        # کشِ entity همه‌ی چت‌ها تا get_messages/فالبک روی گروه‌های عضو کار کند
         dialog_count = 0
-        async for _dialog in client.iter_dialogs():
+        async for _ in client.iter_dialogs():
             dialog_count += 1
         print(f"📚 Cached {dialog_count} dialogs/entities for the userbot session.")
 

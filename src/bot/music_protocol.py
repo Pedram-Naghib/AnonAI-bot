@@ -1,69 +1,132 @@
 """
-حافظه موقت درون‌برنامه‌ای (In-Memory State) برای سیستم موزیک ویس‌چت پروژه‌ی ServantBot.
+حافظه موقت درون‌برنامه‌ای (In-Memory State) برای سیستم موزیک ویس‌چت.
 
-با حذف کامل Redis، این فایل به عنوان هسته مدیریت وضعیت و صف آهنگ‌ها عمل می‌کند.
-چون ربات رسمی (Telebot) و یوزربات (Telethon) در یک پروسه مشترک اجرا می‌شوند،
-می‌توانند مستقیماً و بدون نیاز به واسطه، از این توابع برای هماهنگی استفاده کنند.
+این فایل هستهٔ مدیریتِ وضعیت و صف آهنگ‌هاست. ربات رسمی (Telebot) و
+یوزربات (Telethon) در یک پروسهٔ مشترک روی همین دیکشنری‌ها کار می‌کنند.
 """
+
+import random
 
 # ── مدت بیکاری مجاز پیش از خروج خودکار (ثانیه) ─────────────
 IDLE_TIMEOUT = 180  # ۳ دقیقه
 
-# ── ساختارهای داده درون حافظه‌ای (RAM) ──────────────────────
-# ساختار وضعیت فعلی: {chat_id: {track_info_dict}}
-_music_now = {}
+# ── حالت‌های Loop ────────────────────────────────────────────
+LOOP_NONE  = "none"
+LOOP_TRACK = "track"   # تکرارِ یک آهنگ
+LOOP_QUEUE = "queue"   # تکرارِ کل صف
 
-# ساختار صف آهنگ‌ها: {chat_id: [list_of_track_dicts]}
-_music_queue = {}
+# ── ساختارهای داده درون‌حافظه‌ای (RAM) ──────────────────────
+_music_now:     dict = {}   # {chat_id: track_info_dict}
+_music_queue:   dict = {}   # {chat_id: [track_dict, ...]}
+_music_history: dict = {}   # {chat_id: [track_dict, ...]}  (آخرین ۲۰ تا)
+_music_loop:    dict = {}   # {chat_id: "none"|"track"|"queue"}
+_music_volume:  dict = {}   # {chat_id: int 1-100}
+
+HISTORY_MAX = 20
+VOLUME_DEFAULT = 100
+VOLUME_STEP    = 20
 
 
-# ── هِلپرهای مدیریت وضعیت در حال پخش (Now Playing) ──────────
+# ════════════════════════════════════════════════════════════
+#  Now Playing
+# ════════════════════════════════════════════════════════════
 def get_now(chat_id: int) -> dict:
-    """گرفتن اطلاعات آهنگ در حال پخش در گروه."""
     return _music_now.get(chat_id, {})
 
 
 def set_now(chat_id: int, data: dict):
-    """تنظیم یا بروزرسانی وضعیت آهنگ در حال پخش."""
     _music_now[chat_id] = data
 
 
 def clear_now(chat_id: int):
-    """پاک کردن وضعیت در حال پخش گروه (هنگام پایان یا استاپ)."""
-    if chat_id in _music_now:
-        del _music_now[chat_id]
+    _music_now.pop(chat_id, None)
 
 
-# ── هِلپرهای مدیریت صف (Queue Management) ──────────────────
+# ════════════════════════════════════════════════════════════
+#  Queue
+# ════════════════════════════════════════════════════════════
 def get_queue_len(chat_id: int) -> int:
-    """تعداد آهنگ‌های موجود در صف گروه."""
     return len(_music_queue.get(chat_id, []))
 
 
 def peek_queue(chat_id: int) -> list:
-    """
-    گرفتنِ لیستِ آهنگ‌های صف بدونِ تغییر دادنِ صف (فقط خواندن).
-    برای نمایشِ «آهنگ‌های لیست» در منوی کمک/پنل استفاده می‌شود.
-    """
+    """فقط خواندن — صف را تغییر نمی‌دهد."""
     return list(_music_queue.get(chat_id, []))
 
 
 def push_to_queue(chat_id: int, track: dict) -> int:
-    """اضافه کردن یک آهنگ به انتهای صف گروه و برگرداندن موقعیت آن در صف."""
-    if chat_id not in _music_queue:
-        _music_queue[chat_id] = []
-    _music_queue[chat_id].append(track)
+    """اضافه به انتهای صف. موقعیت (۱-based) را برمی‌گرداند."""
+    _music_queue.setdefault(chat_id, []).append(track)
     return len(_music_queue[chat_id])
 
 
+def push_to_front_queue(chat_id: int, track: dict):
+    """درج در ابتدای صف — «پخش بعدی این باشه»."""
+    _music_queue.setdefault(chat_id, []).insert(0, track)
+
+
 def pop_from_queue(chat_id: int) -> dict:
-    """برداشتن اولین آهنگ از ابتدای صف (FIFO). در صورت خالی بودن، دیکشنری خالی برمی‌گرداند."""
-    if chat_id in _music_queue and _music_queue[chat_id]:
-        return _music_queue[chat_id].pop(0)
+    q = _music_queue.get(chat_id)
+    if q:
+        return q.pop(0)
     return {}
 
 
 def clear_queue(chat_id: int):
-    """خالی کردن کامل صف آهنگ‌های گروه."""
-    if chat_id in _music_queue:
-        _music_queue[chat_id] = []
+    _music_queue[chat_id] = []
+
+
+def shuffle_queue(chat_id: int):
+    """قاطی کردنِ ترتیبِ صفِ فعلی."""
+    q = _music_queue.get(chat_id)
+    if q and len(q) > 1:
+        random.shuffle(q)
+
+
+# ════════════════════════════════════════════════════════════
+#  Loop
+# ════════════════════════════════════════════════════════════
+def get_loop(chat_id: int) -> str:
+    return _music_loop.get(chat_id, LOOP_NONE)
+
+
+def cycle_loop(chat_id: int) -> str:
+    """چرخشِ حالت Loop: none → track → queue → none. مقدارِ جدید را برمی‌گرداند."""
+    current = get_loop(chat_id)
+    next_mode = {LOOP_NONE: LOOP_TRACK, LOOP_TRACK: LOOP_QUEUE, LOOP_QUEUE: LOOP_NONE}[current]
+    _music_loop[chat_id] = next_mode
+    return next_mode
+
+
+# ════════════════════════════════════════════════════════════
+#  Volume
+# ════════════════════════════════════════════════════════════
+def get_volume(chat_id: int) -> int:
+    return _music_volume.get(chat_id, VOLUME_DEFAULT)
+
+
+def set_volume(chat_id: int, volume: int) -> int:
+    v = max(1, min(100, volume))
+    _music_volume[chat_id] = v
+    return v
+
+
+def adjust_volume(chat_id: int, delta: int) -> int:
+    return set_volume(chat_id, get_volume(chat_id) + delta)
+
+
+# ════════════════════════════════════════════════════════════
+#  History
+# ════════════════════════════════════════════════════════════
+def push_to_history(chat_id: int, track: dict):
+    h = _music_history.setdefault(chat_id, [])
+    # جلوگیری از تکرارِ متوالیِ همان آهنگ
+    if h and h[0].get("audio_msg_id") == track.get("audio_msg_id"):
+        return
+    h.insert(0, track)
+    if len(h) > HISTORY_MAX:
+        h.pop()
+
+
+def get_history(chat_id: int) -> list:
+    return list(_music_history.get(chat_id, []))

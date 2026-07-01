@@ -1,16 +1,13 @@
 """
-سمتِ «ربات رسمی» برای سیستم پخش موزیک در ویس‌چت (نسخهٔ بدون Redis).
+سمتِ «ربات رسمی» برای سیستم پخش موزیک در ویس‌چت.
 
-نقش این ماژول:
-  • گرفتن دستور «پخش» (ریپلای روی یک فایل صوتی یا ویدیویی) از سوپریوزرها
-  • ساختن هاب فارسی با دکمه‌های شیشه‌ای هوشمند (پخش/توقف پویا) + نام و اطلاعات آهنگ
-  • ریپلای‌کردنِ هاب به پیامِ فرستنده
-  • دستورهای متنیِ «بعدی» و «پایان پخش» (فقط برای آغازگرِ پخش)
-  • دستور «هاب» برای احضارِ دوبارهٔ هابِ کنترل
-  • دکمهٔ «نمایش آهنگ‌های لیست» برای دیدنِ ترتیبِ صفِ پخش
-  • دکمهٔ «بستن هاب» برای پاک کردنِ پیامِ هاب
-  • چک کردن مجوز کلیک روی دکمه‌ها (فقط آغازگر یا سوپریوزرها)
-  • فرستادن مستقیم دستورها به توابع یوزربات (بدون واسطهٔ Redis)
+قابلیت‌ها:
+  • پخش ریپلای روی فایل صوتی/ویدیویی
+  • هاب با دکمه‌های شیشه‌ای: توقف/ادامه/بعدی/پایان/shuffle/loop/ولوم/لیست/بستن
+  • لایک ❤️ / دیسلایک ❌ روی هاب (ذخیره در DB)
+  • دستور «علاقه‌مندی‌ها» برای صف کردن آهنگ‌های لایک‌شده در همین گروه
+  • دستور «تاریخچه» برای دیدن آخرین آهنگ‌های پخش‌شده
+  • «پخش بعدی این باشه» روی پیام اضافه‌شدن به صف
 """
 
 import os
@@ -21,17 +18,30 @@ from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from src.config import SUPER_USERS
-from src.bot.music_protocol import get_now, get_queue_len, peek_queue
+from src.bot.music_protocol import (
+    get_now, get_queue_len, peek_queue, get_history,
+    get_loop, get_volume, LOOP_NONE, LOOP_TRACK, LOOP_QUEUE,
+)
 from src.bot.user_bot.music_bot import (
-    cmd_play, cmd_pause, cmd_resume, cmd_skip, cmd_stop, repoint_panel,
+    cmd_play, cmd_pause, cmd_resume, cmd_skip, cmd_stop,
+    cmd_shuffle, cmd_loop, cmd_volume, cmd_move_to_front,
+    repoint_panel,
 )
 
 
-# ── گروهی که اجازهٔ پخش در آن داده شده ─────────────────────
 MUSIC_GROUP_ID = -1001434396268
 
+_LOOP_ICONS = {LOOP_NONE: "🔁", LOOP_TRACK: "🔂", LOOP_QUEUE: "🔁✅"}
+_LOOP_LABELS = {
+    LOOP_NONE:  "🔁 لوپ: خاموش",
+    LOOP_TRACK: "🔂 لوپ: یک آهنگ",
+    LOOP_QUEUE: "🔁 لوپ: همه صف",
+}
 
-# ── کمک‌تابع: قالب‌بندیِ مدت‌زمان (ثانیه → mm:ss) ───────────
+
+# ════════════════════════════════════════════════════════════
+#  کمک‌توابع
+# ════════════════════════════════════════════════════════════
 def _fmt_duration(seconds: int) -> str:
     try:
         seconds = int(seconds or 0)
@@ -41,12 +51,9 @@ def _fmt_duration(seconds: int) -> str:
         return ""
     m, s = divmod(seconds, 60)
     h, m = divmod(m, 60)
-    if h:
-        return f"{h}:{m:02d}:{s:02d}"
-    return f"{m}:{s:02d}"
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
-# ── خطِ «اطلاعاتِ آهنگ» (خواننده + مدت‌زمان) ────────────────
 def _info_line(performer: str, duration: int) -> str:
     parts = []
     if performer:
@@ -57,51 +64,82 @@ def _info_line(performer: str, duration: int) -> str:
     return ("\n" + "   ".join(parts)) if parts else ""
 
 
-# ── ساختِ متن و دکمه‌های هاب بر اساس وضعیت ─────────────────
+def _requester_line(requester_id: int, requester_name: str) -> str:
+    if not requester_id:
+        return ""
+    name = html.escape(requester_name or "کاربر")
+    return f'\n🎧 درخواست: <a href="tg://user?id={requester_id}">{name}</a>'
+
+
+# ════════════════════════════════════════════════════════════
+#  ساختِ هاب
+# ════════════════════════════════════════════════════════════
 def build_panel(state: str, title: str, queue_len: int,
-                performer: str = "", duration: int = 0, with_video: bool = False):
-    """
-    خروجی: (متن HTML، کیبوردِ متناسب با وضعیت)
-    وضعیت‌ها: playing | paused | idle
-    دکمه‌ها هوشمندند؛ یعنی هنگام پخش فقط «توقف» و هنگام مکث فقط «ادامه» دیده می‌شود.
-    حالا نامِ آهنگ + اطلاعاتِ آن (خواننده و مدت‌زمان) هم نمایش داده می‌شود.
-    with_video=True یعنی محتوا به‌صورتِ ویدیو هم در ویس‌چت پخش می‌شود (نه فقط صدا).
-    """
-    safe_title = html.escape(title or "نامشخص")
-    info       = _info_line(performer, duration)
-    queue_line = f"\n\n📋 در صف: <b>{queue_len}</b> آهنگ" if queue_len > 0 else ""
-    icon       = "🎬" if with_video else "🎧"
+                performer: str = "", duration: int = 0, with_video: bool = False,
+                requester_id: int = None, requester_name: str = "",
+                loop_mode: str = LOOP_NONE, volume: int = 100):
+    safe_title   = html.escape(title or "نامشخص")
+    info         = _info_line(performer, duration)
+    req_line     = _requester_line(requester_id, requester_name)
+    queue_line   = f"\n\n📋 در صف: <b>{queue_len}</b> آهنگ" if queue_len > 0 else ""
+    icon         = "🎬" if with_video else "🎧"
+    vol_bar      = f"🔊 {volume}%"
+    loop_label   = _LOOP_LABELS.get(loop_mode, "🔁 لوپ: خاموش")
 
     if state == "playing":
-        text = f"🎵 <b>در حال پخش</b>\n{icon} {safe_title}{info}{queue_line}"
+        text = f"🎵 <b>در حال پخش</b>\n{icon} {safe_title}{info}{req_line}{queue_line}"
         kb = InlineKeyboardMarkup()
         kb.row(
-            InlineKeyboardButton("⏸ توقف", callback_data="mus_pause", style="primary"),
-            InlineKeyboardButton("⏭ بعدی", callback_data="mus_skip", style="success"),
+            InlineKeyboardButton("⏸ توقف",   callback_data="mus_pause"),
+            InlineKeyboardButton("⏭ بعدی",   callback_data="mus_skip"),
         )
-        kb.row(InlineKeyboardButton("⛔ پایان پخش", callback_data="mus_stop", style="danger"))
-        kb.row(InlineKeyboardButton("📋 نمایش آهنگ‌های لیست", callback_data="mus_queue", style="primary"))
-        kb.row(InlineKeyboardButton("❌ بستن هاب", callback_data="mus_close", style="danger"))
+        kb.row(InlineKeyboardButton("⛔ پایان پخش", callback_data="mus_stop"))
+        kb.row(
+            InlineKeyboardButton("🔀 شافل",        callback_data="mus_shuffle"),
+            InlineKeyboardButton(loop_label,         callback_data="mus_loop"),
+        )
+        kb.row(
+            InlineKeyboardButton("🔉 -20%",          callback_data="mus_vol_down"),
+            InlineKeyboardButton(vol_bar,             callback_data="mus_vol_show"),
+            InlineKeyboardButton("🔊 +20%",          callback_data="mus_vol_up"),
+        )
+        kb.row(
+            InlineKeyboardButton("❤️ لایک",          callback_data="mus_like"),
+            InlineKeyboardButton("💔 دیسلایک",       callback_data="mus_dislike"),
+        )
+        kb.row(InlineKeyboardButton("📋 نمایش آهنگ‌های لیست", callback_data="mus_queue"))
+        kb.row(InlineKeyboardButton("❌ بستن هاب",  callback_data="mus_close"))
         return text, kb
 
     if state == "paused":
-        text = f"⏸ <b>متوقف شده</b>\n{icon} {safe_title}{info}{queue_line}"
+        text = f"⏸ <b>متوقف شده</b>\n{icon} {safe_title}{info}{req_line}{queue_line}"
         kb = InlineKeyboardMarkup()
         kb.row(
-            InlineKeyboardButton("▶️ ادامه", callback_data="mus_resume", style="primary"),
-            InlineKeyboardButton("⏭ بعدی", callback_data="mus_skip", style="success"),
+            InlineKeyboardButton("▶️ ادامه",  callback_data="mus_resume"),
+            InlineKeyboardButton("⏭ بعدی",   callback_data="mus_skip"),
         )
-        kb.row(InlineKeyboardButton("⛔ پایان پخش", callback_data="mus_stop", style="danger"))
-        kb.row(InlineKeyboardButton("📋 نمایش آهنگ‌های لیست", callback_data="mus_queue", style="primary"))
-        kb.row(InlineKeyboardButton("❌ بستن هاب", callback_data="mus_close", style="danger"))
+        kb.row(InlineKeyboardButton("⛔ پایان پخش", callback_data="mus_stop"))
+        kb.row(
+            InlineKeyboardButton("🔀 شافل",        callback_data="mus_shuffle"),
+            InlineKeyboardButton(loop_label,         callback_data="mus_loop"),
+        )
+        kb.row(
+            InlineKeyboardButton("🔉 -20%",          callback_data="mus_vol_down"),
+            InlineKeyboardButton(vol_bar,             callback_data="mus_vol_show"),
+            InlineKeyboardButton("🔊 +20%",          callback_data="mus_vol_up"),
+        )
+        kb.row(
+            InlineKeyboardButton("❤️ لایک",          callback_data="mus_like"),
+            InlineKeyboardButton("💔 دیسلایک",       callback_data="mus_dislike"),
+        )
+        kb.row(InlineKeyboardButton("📋 نمایش آهنگ‌های لیست", callback_data="mus_queue"))
+        kb.row(InlineKeyboardButton("❌ بستن هاب",  callback_data="mus_close"))
         return text, kb
 
-    # idle / پایان‌یافته
     text = "✅ <b>پخش به پایان رسید.</b>\nاگر تا چند دقیقه آهنگی پخش نشود، از ویس‌چت خارج می‌شوم."
     return text, None
 
 
-# ── رسیدِ «به صف اضافه شد» (جایگزینِ پیامِ «در حال اتصال…») ──
 def build_queue_added(title: str, performer: str, duration: int, position: int) -> str:
     safe_title = html.escape(title or "نامشخص")
     info       = _info_line(performer, duration)
@@ -111,21 +149,19 @@ def build_queue_added(title: str, performer: str, duration: int, position: int) 
     )
 
 
-# ── چک مجوز: فقط آغازگر یا سوپریوزرها ─────────────────────
+# ════════════════════════════════════════════════════════════
+#  مجوز
+# ════════════════════════════════════════════════════════════
 async def _is_authorized(chat_id: int, user_id: int) -> bool:
     if user_id in SUPER_USERS:
         return True
-    try:
-        # 🌟 خواندن مستقیم وضعیت فعلی از RAM به جای Redis
-        data = get_now(chat_id)
-        return data.get("initiator_id") == user_id
-    except Exception:
-        return False
+    data = get_now(chat_id)
+    return data.get("initiator_id") == user_id
 
 
 def register_userbot_handlers(bot: AsyncTeleBot):
 
-    # ── دستور «پخش»: ریپلای روی فایل صوتی یا ویدیویی ──────
+    # ── دستور «پخش» ────────────────────────────────────────
     @bot.message_handler(
         func=lambda m: (
             m.chat.type in ("group", "supergroup")
@@ -139,63 +175,67 @@ def register_userbot_handlers(bot: AsyncTeleBot):
         chat_id = message.chat.id
         user_id = message.from_user.id
 
-        # امنیت: فقط سوپریوزرها اجازهٔ شروع پخش دارند
         if (user_id not in SUPER_USERS) and (chat_id != MUSIC_GROUP_ID):
             await bot.reply_to(message, "⛔ فقط مدیران اجازهٔ پخش موزیک دارند.")
             return
 
-        # استخراجِ فایل صوتی/ویدیوییِ ریپلای‌شده + متادیتا (عنوان/خواننده/مدت)
-        # video / video_note (پیام‌های ویدیوییِ گرد) / animation هم پشتیبانی می‌شوند —
-        # در این حالت with_video=True می‌شود تا تصویر هم در ویس‌چت پخش شود.
         replied    = message.reply_to_message
         file_id    = None
         file_size  = 0
         performer  = ""
         duration   = 0
         with_video = False
+        file_unique_id = ""
+
         if replied.audio:
-            title     = replied.audio.title or replied.audio.file_name or "آهنگ ناشناس"
-            performer = replied.audio.performer or ""
-            duration  = replied.audio.duration or 0
-            file_id   = replied.audio.file_id
-            file_size = replied.audio.file_size or 0
+            title          = replied.audio.title or replied.audio.file_name or "آهنگ ناشناس"
+            performer      = replied.audio.performer or ""
+            duration       = replied.audio.duration or 0
+            file_id        = replied.audio.file_id
+            file_size      = replied.audio.file_size or 0
+            file_unique_id = replied.audio.file_unique_id or ""
         elif replied.voice:
-            title     = "پیام صوتی"
-            duration  = replied.voice.duration or 0
-            file_id   = replied.voice.file_id
-            file_size = replied.voice.file_size or 0
+            title          = "پیام صوتی"
+            duration       = replied.voice.duration or 0
+            file_id        = replied.voice.file_id
+            file_size      = replied.voice.file_size or 0
+            file_unique_id = replied.voice.file_unique_id or ""
         elif replied.video:
-            title      = replied.video.file_name or "ویدیو"
-            duration   = replied.video.duration or 0
-            file_id    = replied.video.file_id
-            file_size  = replied.video.file_size or 0
-            with_video = True
+            title          = replied.video.file_name or "ویدیو"
+            duration       = replied.video.duration or 0
+            file_id        = replied.video.file_id
+            file_size      = replied.video.file_size or 0
+            file_unique_id = replied.video.file_unique_id or ""
+            with_video     = True
         elif replied.video_note:
-            title      = "پیام ویدیویی"
-            duration   = replied.video_note.duration or 0
-            file_id    = replied.video_note.file_id
-            file_size  = replied.video_note.file_size or 0
-            with_video = True
+            title          = "پیام ویدیویی"
+            duration       = replied.video_note.duration or 0
+            file_id        = replied.video_note.file_id
+            file_size      = replied.video_note.file_size or 0
+            file_unique_id = replied.video_note.file_unique_id or ""
+            with_video     = True
         elif replied.animation:
-            title      = replied.animation.file_name or "گیف/انیمیشن"
-            duration   = replied.animation.duration or 0
-            file_id    = replied.animation.file_id
-            file_size  = replied.animation.file_size or 0
-            with_video = True
+            title          = replied.animation.file_name or "گیف/انیمیشن"
+            duration       = replied.animation.duration or 0
+            file_id        = replied.animation.file_id
+            file_size      = replied.animation.file_size or 0
+            file_unique_id = replied.animation.file_unique_id or ""
+            with_video     = True
         elif replied.document and (replied.document.mime_type or "").startswith("audio"):
-            title     = replied.document.file_name or "فایل صوتی"
-            file_id   = replied.document.file_id
-            file_size = replied.document.file_size or 0
+            title          = replied.document.file_name or "فایل صوتی"
+            file_id        = replied.document.file_id
+            file_size      = replied.document.file_size or 0
+            file_unique_id = replied.document.file_unique_id or ""
         elif replied.document and (replied.document.mime_type or "").startswith("video"):
-            title      = replied.document.file_name or "ویدیو"
-            file_id    = replied.document.file_id
-            file_size  = replied.document.file_size or 0
-            with_video = True
+            title          = replied.document.file_name or "ویدیو"
+            file_id        = replied.document.file_id
+            file_size      = replied.document.file_size or 0
+            file_unique_id = replied.document.file_unique_id or ""
+            with_video     = True
         else:
-            await bot.reply_to(message, "❗️ لطفاً روی یک فایل صوتی یا ویدیویی (آهنگ/ویس/ویدیو/پیام‌ویدیویی) ریپلای کنید.")
+            await bot.reply_to(message, "❗️ لطفاً روی یک فایل صوتی یا ویدیویی ریپلای کنید.")
             return
 
-        # ساختِ هابِ اولیه — به‌صورتِ ریپلای به پیامِ فرستنده — تا آیدی آن را به یوزربات بدهیم
         kind = "ویدیو" if with_video else "موزیک"
         panel = await bot.reply_to(
             message,
@@ -203,10 +243,6 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             parse_mode="HTML",
         )
 
-        # 🌟 دانلودِ فایل توسطِ خودِ ربات رسمی (مطمئن‌ترین راه؛ بدون وابستگی به
-        # خواندنِ پیام از سمت یوزربات که گاهی MESSAGE_NOT_FOUND می‌داد).
-        # محدودیتِ Bot API برای دانلود ۲۰ مگابایت است؛ اگر بزرگ‌تر بود،
-        # local_path خالی می‌ماند و یوزربات خودش فالبک می‌زند.
         local_path = None
         BOT_DL_LIMIT = 20 * 1024 * 1024
         if file_id and (file_size == 0 or file_size <= BOT_DL_LIMIT):
@@ -222,7 +258,8 @@ def register_userbot_handlers(bot: AsyncTeleBot):
                 print(f"⚠️ bot-side download failed ({e}); falling back to userbot fetch.")
                 local_path = None
 
-        # 🌟 فراخوانی مستقیم تابع پخش یوزربات به صورت تسک پس‌زمینه
+        requester_name = message.from_user.first_name or ""
+
         asyncio.create_task(cmd_play(
             chat_id=chat_id,
             audio_chat_id=chat_id,
@@ -235,9 +272,11 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             performer=performer,
             duration=duration,
             with_video=with_video,
+            file_unique_id=file_unique_id,
+            requester_name=requester_name,
         ))
 
-    # ── دستورهای متنی: «بعدی» و «پایان پخش» (فقط آغازگرِ پخش) ──
+    # ── دستورهای متنیِ کنترل ────────────────────────────────
     @bot.message_handler(
         func=lambda m: (
             m.chat.type in ("group", "supergroup")
@@ -251,12 +290,10 @@ def register_userbot_handlers(bot: AsyncTeleBot):
         user_id = message.from_user.id
         cmd     = message.text.strip()
 
-        now = get_now(chat_id)
-        if not now:
+        if not get_now(chat_id):
             await bot.reply_to(message, "🔇 الان چیزی در حال پخش نیست.")
             return
 
-        # امنیت: فقط کسی که پخش را شروع کرده (یا سوپریوزر) اجازه دارد
         if not await _is_authorized(chat_id, user_id):
             await bot.reply_to(message, "⛔ فقط کسی که پخش را شروع کرده می‌تواند این کار را انجام دهد.")
             return
@@ -264,11 +301,11 @@ def register_userbot_handlers(bot: AsyncTeleBot):
         if cmd in ("بعدی", "/skip"):
             asyncio.create_task(cmd_skip(chat_id))
             await bot.reply_to(message, "⏭ رفتم سراغ آهنگِ بعدیِ صف.")
-        else:  # «پایان پخش» یا /stop
+        else:
             asyncio.create_task(cmd_stop(chat_id))
             await bot.reply_to(message, "⛔ پخش متوقف شد و از ویس‌چت خارج می‌شوم.")
 
-    # ── دستور «هاب»: احضارِ دوبارهٔ هابِ کنترل (ریپلای به فرستنده) ──
+    # ── دستور «هاب» ────────────────────────────────────────
     @bot.message_handler(
         func=lambda m: (
             m.chat.type in ("group", "supergroup")
@@ -279,7 +316,6 @@ def register_userbot_handlers(bot: AsyncTeleBot):
     )
     async def handle_hub_command(message):
         chat_id = message.chat.id
-
         now = get_now(chat_id)
         if not now:
             await bot.reply_to(message, "🔇 الان چیزی در حال پخش نیست تا هابی نشان دهم.")
@@ -292,90 +328,255 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             now.get("performer", ""),
             now.get("duration", 0),
             now.get("with_video", False),
+            now.get("requester_id"),
+            now.get("requester_name", ""),
+            get_loop(chat_id),
+            get_volume(chat_id),
         )
         sent = await bot.reply_to(message, text, parse_mode="HTML", reply_markup=kb)
-        # از این به بعد، آپدیت‌های موتورِ موزیک روی همین پیامِ تازه انجام می‌شود.
         repoint_panel(chat_id, sent.message_id)
+
+    # ── دستور «علاقه‌مندی‌ها» ──────────────────────────────
+    @bot.message_handler(
+        func=lambda m: (
+            m.chat.type in ("group", "supergroup")
+            and m.text is not None
+            and m.text.strip() in ("علاقه‌مندی‌ها", "علاقمندی ها", "/favorites", "/favs")
+        ),
+        content_types=["text"],
+    )
+    async def handle_favorites_command(message):
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+
+        from src.database.db_manager import music_get_favorites
+        favs = await music_get_favorites(user_id, chat_id)
+        if not favs:
+            await bot.reply_to(message, "💔 هنوز هیچ آهنگی رو توی این گروه لایک نکردی.")
+            return
+
+        now = get_now(chat_id)
+        panel = await bot.reply_to(
+            message,
+            f"❤️ در حال اضافه کردن <b>{len(favs)}</b> آهنگِ علاقه‌مندی به صف...",
+            parse_mode="HTML",
+        )
+
+        added = 0
+        for fav in favs:
+            from src.bot.music_protocol import push_to_queue as _ptq
+            _ptq(chat_id, {
+                "audio_chat_id":  chat_id,
+                "audio_msg_id":   fav["msg_id"],
+                "title":          fav["title"] or "آهنگ ناشناس",
+                "performer":      fav["performer"] or "",
+                "duration":       fav["duration"] or 0,
+                "requester_id":   user_id,
+                "requester_name": message.from_user.first_name or "",
+                "audio_path":     None,
+                "with_video":     False,
+                "file_unique_id": fav["file_unique_id"],
+            })
+            added += 1
+
+        await bot.edit_message_text(
+            f"❤️ <b>{added}</b> آهنگ از علاقه‌مندی‌هات به صف اضافه شد.",
+            chat_id, panel.message_id, parse_mode="HTML"
+        )
+
+        if not now:
+            # اگر هیچ چیزی پخش نمی‌شود، اولی را شروع کنیم
+            from src.bot.music_protocol import pop_from_queue as _pfq
+            first = _pfq(chat_id)
+            if first:
+                asyncio.create_task(cmd_play(
+                    chat_id=chat_id,
+                    audio_chat_id=first["audio_chat_id"],
+                    audio_msg_id=first["audio_msg_id"],
+                    title=first["title"],
+                    requester_id=user_id,
+                    initiator_id=user_id,
+                    panel_msg_id=panel.message_id,
+                    audio_path=first.get("audio_path"),
+                    performer=first["performer"],
+                    duration=first["duration"],
+                    file_unique_id=first.get("file_unique_id", ""),
+                    requester_name=first.get("requester_name", ""),
+                ))
+
+    # ── دستور «تاریخچه» ────────────────────────────────────
+    @bot.message_handler(
+        func=lambda m: (
+            m.chat.type in ("group", "supergroup")
+            and m.text is not None
+            and m.text.strip() in ("تاریخچه", "/history")
+        ),
+        content_types=["text"],
+    )
+    async def handle_history_command(message):
+        chat_id = message.chat.id
+        history = get_history(chat_id)
+        if not history:
+            await bot.reply_to(message, "📜 هنوز آهنگی پخش نشده.")
+            return
+
+        lines = []
+        for i, t in enumerate(history[:10], start=1):
+            t_title = html.escape((t.get("title") or "نامشخص")[:35])
+            dur     = _fmt_duration(t.get("duration", 0))
+            line    = f"{i}. {t_title}"
+            if dur:
+                line += f" ({dur})"
+            lines.append(line)
+
+        await bot.reply_to(
+            message,
+            f"📜 <b>تاریخچهٔ پخش (آخرین {len(lines)}):</b>\n" + "\n".join(lines),
+            parse_mode="HTML"
+        )
 
     # ── کال‌بکِ دکمه‌های هاب ───────────────────────────────
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("mus_"))
     async def handle_music_buttons(call):
         chat_id = call.message.chat.id
         user_id = call.from_user.id
-        action  = call.data.split("mus_")[-1]  # pause | resume | skip | stop | queue | close
+        data    = call.data[4:]  # strip "mus_"
 
-        # «نمایش آهنگ‌های لیست» صرفاً اطلاعاتیه و چیزی رو تغییر نمی‌ده —
-        # برای همینم برخلافِ بقیهٔ دکمه‌ها، محدود به آغازگر/ادمین نیست؛
-        # هر عضوِ گروه می‌تونه صفِ پخش رو ببینه.
-        if action == "queue":
+        # ── دکمه‌های بدونِ نیاز به مجوز ──────────────────
+        if data == "queue":
             tracks = peek_queue(chat_id)
             if not tracks:
-                await bot.answer_callback_query(call.id, "📋 صف خالیه؛ آهنگِ بعدی‌ای در انتظار نیست.", show_alert=True)
+                await bot.answer_callback_query(call.id, "📋 صف خالیه.", show_alert=True)
                 return
-
             lines = []
-            for i, t in enumerate(tracks[:15], start=1):  # سقفِ ۱۵ تا برای جا شدن توی پاپ‌آپِ ۲۰۰ کاراکتری
-                t_title = (t.get("title") or "نامشخص")[:30]
+            for i, t in enumerate(tracks[:15], start=1):
+                t_title = (t.get("title") or "نامشخص")[:28]
                 dur     = _fmt_duration(t.get("duration", 0))
                 line    = f"{i}. {t_title}"
                 if dur:
                     line += f" ({dur})"
                 lines.append(line)
-
             text = "📋 آهنگ‌های صف:\n" + "\n".join(lines)
             if len(tracks) > 15:
                 text += f"\n…و {len(tracks) - 15} مورد دیگر"
-            # محدودیتِ پاپ‌آپِ تلگرام ۲۰۰ کاراکتر است؛ کوتاه‌سازیِ امن
             if len(text) > 195:
                 text = text[:195] + "…"
             await bot.answer_callback_query(call.id, text, show_alert=True)
             return
 
-        # «بستن هاب» هم مثلِ بقیهٔ دکمه‌های کنترلی محدود به آغازگر/ادمین است
-        # چون پیامِ هاب رو برای همه پاک می‌کنه.
-        if action == "close":
+        if data == "vol_show":
+            vol = get_volume(chat_id)
+            await bot.answer_callback_query(call.id, f"🔊 ولوم فعلی: {vol}%")
+            return
+
+        if data == "queue_ok":
+            await bot.answer_callback_query(call.id, "✅ ترتیب حفظ شد.")
+            return
+
+        # ── پخش بعدی این باشه ─────────────────────────────
+        if data.startswith("playnext_"):
             if not await _is_authorized(chat_id, user_id):
-                await bot.answer_callback_query(
-                    call.id, "⛔ فقط آغازگرِ پخش یا ادمین می‌تونه هاب رو ببنده!", show_alert=True
-                )
+                await bot.answer_callback_query(call.id, "⛔ فقط آغازگر یا ادمین!", show_alert=True)
+                return
+            try:
+                idx = int(data.split("playnext_")[-1])
+                asyncio.create_task(cmd_move_to_front(chat_id, idx))
+                await bot.answer_callback_query(call.id, "▶️ این آهنگ بعدی پخش می‌شه!")
+                # پیامِ «به صف اضافه شد» را ویرایش می‌کنیم تا دکمه‌ها حذف شوند
+                try:
+                    await bot.edit_message_reply_markup(
+                        call.message.chat.id, call.message.message_id, reply_markup=None
+                    )
+                except Exception:
+                    pass
+            except Exception as e:
+                await bot.answer_callback_query(call.id, f"خطا: {e}", show_alert=True)
+            return
+
+        # ── بستن هاب ──────────────────────────────────────
+        if data == "close":
+            if not await _is_authorized(chat_id, user_id):
+                await bot.answer_callback_query(call.id, "⛔ فقط آغازگر یا ادمین!", show_alert=True)
                 return
             try:
                 await bot.delete_message(chat_id, call.message.message_id)
             except Exception as e:
-                print(f"⚠️ Failed to delete hub message: {e}")
-                await bot.answer_callback_query(call.id, "⚠️ حذفِ پیام ممکن نشد.", show_alert=True)
+                await bot.answer_callback_query(call.id, "⚠️ حذف ممکن نشد.", show_alert=True)
+            return
+
+        # ── لایک / دیسلایک ────────────────────────────────
+        if data in ("like", "dislike"):
+            now = get_now(chat_id)
+            if not now:
+                await bot.answer_callback_query(call.id, "چیزی پخش نمی‌شود.", show_alert=True)
                 return
+            fuid = now.get("file_unique_id", "")
+            if not fuid:
+                await bot.answer_callback_query(call.id, "⚠️ این فایل قابل ذخیره نیست.", show_alert=True)
+                return
+
+            from src.database.db_manager import music_like, music_dislike
+            if data == "like":
+                await music_like(
+                    user_id, chat_id,
+                    now.get("audio_msg_id", 0),
+                    fuid,
+                    now.get("title", ""),
+                    now.get("performer", ""),
+                    now.get("duration", 0),
+                )
+                await bot.answer_callback_query(call.id, "❤️ به علاقه‌مندی‌هات اضافه شد!")
+            else:
+                await music_dislike(user_id, chat_id, fuid)
+                asyncio.create_task(cmd_skip(chat_id))
+                await bot.answer_callback_query(call.id, "💔 رد شد و دیگر برات پخش نمی‌شه.")
             return
 
-        # امنیت: کلیک فقط برای آغازگر یا سوپریوزر (پخش/توقف/ادامه/بعدی/پایان)
+        # ── دکمه‌های نیازمند مجوز ─────────────────────────
         if not await _is_authorized(chat_id, user_id):
-            await bot.answer_callback_query(
-                call.id, "⛔ این هاب برای شما نیست!", show_alert=True
-            )
+            await bot.answer_callback_query(call.id, "⛔ این هاب برای شما نیست!", show_alert=True)
             return
 
-        labels = {"pause": "توقف شد", "resume": "ادامه یافت", "skip": "آهنگ بعدی", "stop": "پخش پایان یافت"}
+        labels = {
+            "pause":    "⏸ توقف شد",
+            "resume":   "▶️ ادامه یافت",
+            "skip":     "⏭ آهنگ بعدی",
+            "stop":     "⛔ پخش پایان یافت",
+            "shuffle":  "🔀 صف قاطی شد!",
+            "vol_up":   "🔊 صدا بیشتر شد",
+            "vol_down": "🔉 صدا کمتر شد",
+        }
 
-        # 🌟 هدایت مستقیم اکشن‌ها به توابع موتور موزیک
-        if action == "pause":
+        if data == "pause":
             asyncio.create_task(cmd_pause(chat_id))
-        elif action == "resume":
+        elif data == "resume":
             asyncio.create_task(cmd_resume(chat_id))
-        elif action == "skip":
+        elif data == "skip":
             asyncio.create_task(cmd_skip(chat_id))
-        elif action == "stop":
+        elif data == "stop":
             asyncio.create_task(cmd_stop(chat_id))
+        elif data == "shuffle":
+            asyncio.create_task(cmd_shuffle(chat_id))
+        elif data == "loop":
+            new_mode = await cmd_loop(chat_id)
+            loop_names = {LOOP_NONE: "خاموش", LOOP_TRACK: "یک آهنگ", LOOP_QUEUE: "همهٔ صف"}
+            await bot.answer_callback_query(call.id, f"🔁 لوپ: {loop_names.get(new_mode, new_mode)}")
+            return
+        elif data == "vol_up":
+            asyncio.create_task(cmd_volume(chat_id, +20))
+        elif data == "vol_down":
+            asyncio.create_task(cmd_volume(chat_id, -20))
+        else:
+            await bot.answer_callback_query(call.id)
+            return
 
-        await bot.answer_callback_query(call.id, f"✅ {labels.get(action, 'انجام شد')}")
+        await bot.answer_callback_query(call.id, labels.get(data, "✅ انجام شد"))
 
     print("🎵 Userbot music bridge handlers registered.")
 
 
 async def start_music_event_listener(bot: AsyncTeleBot):
-    """
-    [DEPRECATED] این تابع در معماری جدید درون‌حافظه‌ای دیگر کاربردی ندارد
-    چون یوزربات مستقیماً هاب‌ها را ویرایش می‌کند. صرفاً جهت جلوگیری از ImportError در main.py باقی مانده است.
-    """
+    """[DEPRECATED] — باقی مانده جهت جلوگیری از ImportError در main.py."""
     print("🌙 Music event listener (In-Memory Mode) initialized natively.")
     while True:
         await asyncio.sleep(3600)

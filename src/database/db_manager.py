@@ -178,6 +178,31 @@ async def init_db():
             )
             print("🔢 Backfilled lifetime message counters from message_map.")
 
+        # Music: Like/Dislike system
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS music_favorites (
+                user_id        BIGINT,
+                chat_id        BIGINT,
+                msg_id         BIGINT,
+                file_unique_id TEXT,
+                title          TEXT,
+                performer      TEXT,
+                duration       INT  DEFAULT 0,
+                added_at       TIMESTAMPTZ DEFAULT NOW(),
+                PRIMARY KEY (user_id, chat_id, file_unique_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS music_blacklist (
+                user_id        BIGINT,
+                chat_id        BIGINT,
+                file_unique_id TEXT,
+                PRIMARY KEY (user_id, chat_id, file_unique_id)
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_music_fav_lookup ON music_favorites (user_id, chat_id);")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_music_bl_lookup  ON music_blacklist  (user_id, chat_id);")
+
     print("🚀 Database initialized successfully.")
 
 
@@ -656,3 +681,58 @@ async def get_all_user_ids_for_broadcast() -> list:
             "SELECT user_id FROM users WHERE anon_state != 'blocked_bot'"
         )
         return [row['user_id'] for row in rows]
+
+# ── Music Like / Dislike ───────────────────────────────────
+async def music_like(user_id: int, chat_id: int, msg_id: int,
+                     file_unique_id: str, title: str, performer: str, duration: int):
+    """ذخیره‌ی یک آهنگ در علاقه‌مندی‌های کاربر برای همین گروه."""
+    pool = await get_connection_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO music_favorites
+                (user_id, chat_id, msg_id, file_unique_id, title, performer, duration)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (user_id, chat_id, file_unique_id) DO UPDATE
+                SET msg_id = EXCLUDED.msg_id,
+                    title  = EXCLUDED.title,
+                    performer = EXCLUDED.performer,
+                    added_at  = NOW()
+        """, user_id, chat_id, msg_id, file_unique_id, title, performer, duration)
+
+
+async def music_dislike(user_id: int, chat_id: int, file_unique_id: str):
+    """اضافه کردن آهنگ به لیستِ سیاهِ کاربر برای این گروه (دیگر Autoplay نمی‌زند)."""
+    pool = await get_connection_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO music_blacklist (user_id, chat_id, file_unique_id)
+            VALUES ($1, $2, $3) ON CONFLICT DO NOTHING
+        """, user_id, chat_id, file_unique_id)
+        # از علاقه‌مندی‌ها هم حذف می‌شود اگر قبلاً لایک شده بود
+        await conn.execute("""
+            DELETE FROM music_favorites
+            WHERE user_id=$1 AND chat_id=$2 AND file_unique_id=$3
+        """, user_id, chat_id, file_unique_id)
+
+
+async def music_get_favorites(user_id: int, chat_id: int) -> list:
+    """گرفتنِ لیستِ آهنگ‌های علاقه‌مندیِ کاربر برای یک گروهِ خاص."""
+    pool = await get_connection_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT msg_id, file_unique_id, title, performer, duration
+            FROM music_favorites
+            WHERE user_id=$1 AND chat_id=$2
+            ORDER BY added_at DESC
+        """, user_id, chat_id)
+        return [dict(r) for r in rows]
+
+
+async def music_is_blacklisted(user_id: int, chat_id: int, file_unique_id: str) -> bool:
+    """آیا این آهنگ در لیستِ سیاهِ کاربر برای این گروه هست؟"""
+    pool = await get_connection_pool()
+    async with pool.acquire() as conn:
+        return bool(await conn.fetchval("""
+            SELECT 1 FROM music_blacklist
+            WHERE user_id=$1 AND chat_id=$2 AND file_unique_id=$3
+        """, user_id, chat_id, file_unique_id))
