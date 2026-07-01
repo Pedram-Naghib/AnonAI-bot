@@ -9,7 +9,9 @@
 
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from src.config import EMOJI
+from src.config import EMOJI, GROUP_CHAT_ID
+
+MUSIC_GROUP_ID = GROUP_CHAT_ID
 
 
 # ── متنِ معرفیِ کوتاه (صفحهٔ اول) ──────────────────────────
@@ -20,17 +22,18 @@ def _build_intro_text() -> str:
     )
 
 
-def _intro_keyboard() -> InlineKeyboardMarkup:
+def _intro_keyboard(in_music_group: bool = False) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup()
     kb.row(InlineKeyboardButton(f"{EMOJI['mail']['char']} پیامِ ناشناس", callback_data="help_anon"))
     kb.row(InlineKeyboardButton(f"{EMOJI['lock']['char']} نجوا", callback_data="help_whisper"))
-    kb.row(InlineKeyboardButton(f"{EMOJI['fire']['char']} موزیک و ویدیو", callback_data="help_music"))
+    if in_music_group:
+        kb.row(InlineKeyboardButton(f"{EMOJI['fire']['char']} موزیک و ویدیو", callback_data="help_music"))
     kb.row(InlineKeyboardButton(f"{EMOJI['crcl_no']['char']} بستن", callback_data="help_close", style="danger"))
     return kb
 
 
 # ── متنِ هر بخش + دکمهٔ بازگشت/بستن ─────────────────────────
-def _back_keyboard() -> InlineKeyboardMarkup:
+def _back_keyboard(in_music_group: bool = False) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup()
     kb.row(InlineKeyboardButton(f"{EMOJI['left']['char']} بازگشت", callback_data="help_back"))
     kb.row(InlineKeyboardButton(f"{EMOJI['crcl_no']['char']} بستن", callback_data="help_close", style="danger"))
@@ -60,13 +63,16 @@ def _build_whisper_text(bot_username: str) -> str:
 
 def _build_music_text() -> str:
     return (
-        f"{EMOJI['fire']['html']} <b>موزیک و ویدیو در ویس‌چت</b>\n\n"
+        f"{EMOJI['fire']['html']} <b>موزیک و ویدیو در ویس‌چت</b>\n"
+        "⭐️ <i>این قابلیت فقط در این گروه در دسترسه.</i>\n\n"
         "روی یک فایلِ صوتی، ویس، ویدیو یا پیامِ ویدیویی ریپلای کن و بنویس:\n"
         "<code>پخش</code>\n\n"
         "<u>کنترلِ پخش (فقط برای کسی که پخش رو شروع کرده یا ادمین‌ها):</u>\n"
         "• <code>بعدی</code> — رفتن سراغِ آهنگِ بعدیِ صف\n"
         "• <code>پایان پخش</code> — توقفِ کامل و خروج از ویس‌چت\n"
-        "• <code>هاب</code> — نمایشِ دوبارهٔ هابِ کنترل با دکمه‌های شیشه‌ای\n\n"
+        "• <code>هاب</code> — نمایشِ دوبارهٔ هابِ کنترل با دکمه‌های شیشه‌ای\n"
+        "• <code>علاقه‌مندی‌ها</code> — پخشِ آهنگ‌هایی که لایک کردی\n"
+        "• <code>تاریخچه</code> — لیست آخرین آهنگ‌های پخش‌شده\n\n"
         "نکته: قبل از «پخش»، باید خودِ ویس‌چتِ گروه از قبل باز باشه."
     )
 
@@ -84,11 +90,12 @@ def register_help_handlers(bot: AsyncTeleBot):
     )
     async def handle_help_command(message):
         try:
+            in_music_group = (message.chat.id == MUSIC_GROUP_ID)
             await bot.reply_to(
                 message,
                 _build_intro_text(),
                 parse_mode="HTML",
-                reply_markup=_intro_keyboard(),
+                reply_markup=_intro_keyboard(in_music_group),
                 disable_web_page_preview=True,
             )
         except Exception as e:
@@ -98,6 +105,7 @@ def register_help_handlers(bot: AsyncTeleBot):
     @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("help_"))
     async def handle_help_buttons(call):
         action = call.data.split("help_")[-1]  # anon | whisper | music | back | close
+        in_music_group = (call.message.chat.id == MUSIC_GROUP_ID)
 
         try:
             if action == "close":
@@ -113,7 +121,7 @@ def register_help_handlers(bot: AsyncTeleBot):
                 await bot.edit_message_text(
                     _build_intro_text(),
                     call.message.chat.id, call.message.message_id,
-                    parse_mode="HTML", reply_markup=_intro_keyboard(),
+                    parse_mode="HTML", reply_markup=_intro_keyboard(in_music_group),
                 )
                 await bot.answer_callback_query(call.id)
                 return
@@ -124,6 +132,9 @@ def register_help_handlers(bot: AsyncTeleBot):
                 bot_info = await bot.get_me()
                 text = _build_whisper_text(bot_info.username)
             elif action == "music":
+                if not in_music_group:
+                    await bot.answer_callback_query(call.id, "⛔ این بخش فقط در گروه کودکستان در دسترسه!", show_alert=True)
+                    return
                 text = _build_music_text()
             else:
                 await bot.answer_callback_query(call.id)

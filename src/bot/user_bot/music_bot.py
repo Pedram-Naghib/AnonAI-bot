@@ -291,16 +291,21 @@ async def _play_next(chat_id: int):
 
     # Loop Track: همان آهنگ را دوباره پخش کن
     if loop_mode == LOOP_TRACK and prev:
+        # audio_path فایلِ دیسکی است که احتمالاً در پخشِ قبلی پاک شده —
+        # حذفش می‌کنیم تا _start_stream مجبور بشه دوباره از یوزربات دانلود کنه.
+        track_for_loop = {**prev, "audio_path": None}
         try:
-            path = await _start_stream(chat_id, prev)
+            _cleanup_file(prev.get("path"))
+            path = await _start_stream(chat_id, track_for_loop)
         except Exception as e:
             print(f"💥 loop-track error in {chat_id}: {e}")
             await _play_next_from_queue(chat_id, prev)
             return
-        _cleanup_file(prev.get("path"))
         set_now(chat_id, {
-            **prev,
+            **track_for_loop,
             "state": "playing",
+            "panel_msg_id": prev.get("panel_msg_id"),
+            "initiator_id": prev.get("initiator_id"),
             "path":  path,
         })
         _cancel_autoleave(chat_id)
@@ -310,7 +315,7 @@ async def _play_next(chat_id: int):
     # Loop Queue: وقتی صف خالی شد، کل صف را دوباره پر کن
     if loop_mode == LOOP_QUEUE and not get_queue_len(chat_id) and prev:
         push_to_queue(chat_id, {k: v for k, v in prev.items()
-                                if k not in ("state", "panel_msg_id", "initiator_id", "path")})
+                                if k not in ("state", "panel_msg_id", "initiator_id", "path", "audio_path")})
 
     _cleanup_file(prev.get("path") if prev else None)
     await _play_next_from_queue(chat_id, prev)

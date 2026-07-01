@@ -90,38 +90,13 @@ def build_panel(state: str, title: str, queue_len: int,
         text = f"🎵 <b>در حال پخش</b>\n{icon} {safe_title}{info}{req_line}{queue_line}"
         kb = InlineKeyboardMarkup()
         kb.row(
-            InlineKeyboardButton("⏸ توقف",   callback_data="mus_pause", style="primary"),
-            InlineKeyboardButton("⏭ بعدی",   callback_data="mus_skip", style="primary"),
+            InlineKeyboardButton("⏸ توقف",   callback_data="mus_pause"),
+            InlineKeyboardButton("⏭ بعدی",   callback_data="mus_skip"),
         )
-        kb.row(InlineKeyboardButton("⏹️ پایان پخش", callback_data="mus_stop", style="primary"))
+        kb.row(InlineKeyboardButton("⛔ پایان پخش", callback_data="mus_stop"))
         kb.row(
-            InlineKeyboardButton("🔀 شافل",        callback_data="mus_shuffle", style="success"),
-            InlineKeyboardButton(loop_label,         callback_data="mus_loop", style="success"),
-        )
-        kb.row(
-            InlineKeyboardButton("🔉 -10%",          callback_data="mus_vol_down"),
-            InlineKeyboardButton(vol_bar,             callback_data="mus_vol_show"),
-            InlineKeyboardButton("🔊 +10%",          callback_data="mus_vol_up"),
-        )
-        kb.row(
-            InlineKeyboardButton("❤️ لایک",          callback_data="mus_like"),
-            InlineKeyboardButton("💔 دیسلایک",       callback_data="mus_dislike"),
-        )
-        kb.row(InlineKeyboardButton("📋 نمایش آهنگ‌های لیست", callback_data="mus_queue"))
-        kb.row(InlineKeyboardButton("❌ بستن هاب",  callback_data="mus_close", style="danger"))
-        return text, kb
-
-    if state == "paused":
-        text = f"⏸ <b>متوقف شده</b>\n{icon} {safe_title}{info}{req_line}{queue_line}"
-        kb = InlineKeyboardMarkup()
-        kb.row(
-            InlineKeyboardButton("▶️ ادامه",  callback_data="mus_resume", style="primary"),
-            InlineKeyboardButton("⏭ بعدی",   callback_data="mus_skip", style="primary"),
-        )
-        kb.row(InlineKeyboardButton("⏹️ پایان پخش", callback_data="mus_stop", style="primary"))
-        kb.row(
-            InlineKeyboardButton("🔀 شافل",        callback_data="mus_shuffle", style="success"),
-            InlineKeyboardButton(loop_label,         callback_data="mus_loop", style="success"),
+            InlineKeyboardButton("🔀 شافل",        callback_data="mus_shuffle"),
+            InlineKeyboardButton(loop_label,         callback_data="mus_loop"),
         )
         kb.row(
             InlineKeyboardButton("🔉 -20%",          callback_data="mus_vol_down"),
@@ -133,11 +108,38 @@ def build_panel(state: str, title: str, queue_len: int,
             InlineKeyboardButton("💔 دیسلایک",       callback_data="mus_dislike"),
         )
         kb.row(InlineKeyboardButton("📋 نمایش آهنگ‌های لیست", callback_data="mus_queue"))
-        kb.row(InlineKeyboardButton("❌ بستن هاب",  callback_data="mus_close", style="danger"))
+        kb.row(InlineKeyboardButton("❌ بستن هاب",  callback_data="mus_close"))
+        return text, kb
+
+    if state == "paused":
+        text = f"⏸ <b>متوقف شده</b>\n{icon} {safe_title}{info}{req_line}{queue_line}"
+        kb = InlineKeyboardMarkup()
+        kb.row(
+            InlineKeyboardButton("▶️ ادامه",  callback_data="mus_resume"),
+            InlineKeyboardButton("⏭ بعدی",   callback_data="mus_skip"),
+        )
+        kb.row(InlineKeyboardButton("⛔ پایان پخش", callback_data="mus_stop"))
+        kb.row(
+            InlineKeyboardButton("🔀 شافل",        callback_data="mus_shuffle"),
+            InlineKeyboardButton(loop_label,         callback_data="mus_loop"),
+        )
+        kb.row(
+            InlineKeyboardButton("🔉 -20%",          callback_data="mus_vol_down"),
+            InlineKeyboardButton(vol_bar,             callback_data="mus_vol_show"),
+            InlineKeyboardButton("🔊 +20%",          callback_data="mus_vol_up"),
+        )
+        kb.row(
+            InlineKeyboardButton("❤️ لایک",          callback_data="mus_like"),
+            InlineKeyboardButton("💔 دیسلایک",       callback_data="mus_dislike"),
+        )
+        kb.row(InlineKeyboardButton("📋 نمایش آهنگ‌های لیست", callback_data="mus_queue"))
+        kb.row(InlineKeyboardButton("❌ بستن هاب",  callback_data="mus_close"))
         return text, kb
 
     text = "✅ <b>پخش به پایان رسید.</b>\nاگر تا چند دقیقه آهنگی پخش نشود، از ویس‌چت خارج می‌شوم."
-    return text, None
+    kb = InlineKeyboardMarkup()
+    kb.row(InlineKeyboardButton("🚪 اخراج از ویس‌چت", callback_data="mus_kick", style="danger"))
+    return text, kb
 
 
 def build_queue_added(title: str, performer: str, duration: int, position: int) -> str:
@@ -491,6 +493,20 @@ def register_userbot_handlers(bot: AsyncTeleBot):
                     pass
             except Exception as e:
                 await bot.answer_callback_query(call.id, f"خطا: {e}", show_alert=True)
+            return
+
+        # ── اخراج از ویس‌چت (وقتی هاب idle است) ──────────────
+        if data == "kick":
+            if not await _is_authorized(chat_id, user_id):
+                await bot.answer_callback_query(call.id, "⛔ فقط آغازگر یا ادمین!", show_alert=True)
+                return
+            from src.bot.user_bot.music_bot import cmd_stop
+            asyncio.create_task(cmd_stop(chat_id))
+            try:
+                await bot.delete_message(chat_id, call.message.message_id)
+            except Exception:
+                pass
+            await bot.answer_callback_query(call.id, "🚪 یوزربات از ویس‌چت خارج شد.")
             return
 
         # ── بستن هاب ──────────────────────────────────────
