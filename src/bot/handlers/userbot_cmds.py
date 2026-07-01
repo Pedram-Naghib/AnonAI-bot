@@ -20,7 +20,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from src.config import SUPER_USERS
 from src.bot.music_protocol import (
     get_now, get_queue_len, peek_queue, get_history,
-    get_loop, get_volume, VOLUME_STEP, LOOP_NONE, LOOP_TRACK, LOOP_QUEUE,
+    get_loop, get_volume, is_muted, VOLUME_STEP, LOOP_NONE, LOOP_TRACK, LOOP_QUEUE,
 )
 from src.bot.user_bot.music_bot import (
     cmd_play, cmd_pause, cmd_resume, cmd_skip, cmd_stop,
@@ -77,15 +77,14 @@ def _requester_line(requester_id: int, requester_name: str) -> str:
 def build_panel(state: str, title: str, queue_len: int,
                 performer: str = "", duration: int = 0, with_video: bool = False,
                 requester_id: int = None, requester_name: str = "",
-                loop_mode: str = LOOP_NONE, volume: int = 100):
+                loop_mode: str = LOOP_NONE, volume: int = 100, muted: bool = False):
     safe_title   = html.escape(title or "نامشخص")
     info         = _info_line(performer, duration)
     req_line     = _requester_line(requester_id, requester_name)
     queue_line   = f"\n\n📋 در صف: <b>{queue_len}</b> آهنگ" if queue_len > 0 else ""
     icon         = "🎬" if with_video else "🎧"
-    is_muted     = (volume == 0)
-    vol_line     = "\n🔇 بی‌صدا" if is_muted else f"\n🔊 صدا: {volume}%"
-    mute_label   = "🔇 پخشِ صدا" if is_muted else "🔈 قطع صدا"
+    vol_line     = "\n🔈 بی‌صدا" if muted else f"\n🔊 صدا: {volume}%"
+    # mute_label   = "🔇 پخشِ صدا" if muted else "🔇 قطع صدا"
     loop_label   = _LOOP_LABELS.get(loop_mode, "🔁 لوپ: خاموش")
 
     if state == "playing":
@@ -102,7 +101,7 @@ def build_panel(state: str, title: str, queue_len: int,
         )
         kb.row(
             InlineKeyboardButton(f"🔉 -{VOLUME_STEP}%", callback_data="mus_vol_down"),
-            InlineKeyboardButton(mute_label,             callback_data="mus_mute", style="success" if is_muted else None),
+            InlineKeyboardButton("🔇 قطع صدا",             callback_data="mus_mute", style="danger" if muted else None),
             InlineKeyboardButton(f"🔊 +{VOLUME_STEP}%", callback_data="mus_vol_up"),
         )
         kb.row(
@@ -127,7 +126,7 @@ def build_panel(state: str, title: str, queue_len: int,
         )
         kb.row(
             InlineKeyboardButton(f"🔉 -{VOLUME_STEP}%", callback_data="mus_vol_down"),
-            InlineKeyboardButton(mute_label,             callback_data="mus_mute", style="success" if is_muted else None),
+            InlineKeyboardButton("🔇 قطع صدا",             callback_data="mus_mute", style="danger" if muted else None),
             InlineKeyboardButton(f"🔊 +{VOLUME_STEP}%", callback_data="mus_vol_up"),
         )
         kb.row(
@@ -336,6 +335,7 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             now.get("requester_name", ""),
             get_loop(chat_id),
             get_volume(chat_id),
+            is_muted(chat_id),
         )
         sent = await bot.reply_to(message, text, parse_mode="HTML", reply_markup=kb)
         repoint_panel(chat_id, sent.message_id)
@@ -603,9 +603,10 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             return
         elif data == "mute":
             try:
-                new_vol = await cmd_mute(chat_id)
+                muted = await cmd_mute(chat_id)
                 await bot.answer_callback_query(
-                    call.id, "🔇 صدا قطع شد." if new_vol == 0 else f"🔊 صدا وصل شد ({new_vol}%)."
+                    call.id,
+                    "🔇 صدا قطع شد." if muted else f"🔊 صدا وصل شد ({get_volume(chat_id)}%)."
                 )
             except Exception as e:
                 print(f"💥 mute error: {e}")

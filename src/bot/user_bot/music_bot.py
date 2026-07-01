@@ -11,6 +11,7 @@ import traceback
 
 from telethon import TelegramClient
 from telethon.sessions import StringSession
+from telethon.tl.functions.phone import EditGroupCallParticipantRequest
 
 from pytgcalls import PyTgCalls
 from pytgcalls.types import MediaStream, StreamEnded
@@ -22,7 +23,7 @@ from src.bot.music_protocol import (
     get_now, set_now, clear_now, get_queue_len,
     push_to_queue, push_to_front_queue, pop_from_queue, clear_queue,
     shuffle_queue, get_loop, cycle_loop,
-    get_volume, set_volume, adjust_volume, toggle_mute,
+    get_volume, set_volume, adjust_volume, is_muted, toggle_mute, unmute,
     push_to_history, get_history,
     IDLE_TIMEOUT, LOOP_NONE, LOOP_TRACK, LOOP_QUEUE,
 )
@@ -73,6 +74,7 @@ async def _emit_panel(chat_id: int):
         now.get("requester_name", ""),
         get_loop(chat_id),
         get_volume(chat_id),
+        is_muted(chat_id),
     )
     try:
         await _bot_instance.edit_message_text(
@@ -182,13 +184,19 @@ async def _start_stream(chat_id: int, track: dict) -> str:
         _cleanup_file(path)
         raise
 
-    # تنظیم ولومِ ذخیره‌شده برای این گروه
-    vol = get_volume(chat_id)
-    if vol != 100:
+    # تنظیمِ ولوم/بی‌صدایِ ذخیره‌شده برای این گروه
+    if is_muted(chat_id):
         try:
-            await calls.change_volume_call(chat_id, vol)
-        except Exception:
-            pass
+            await _set_call_muted(chat_id, True)
+        except Exception as e:
+            print(f"⚠️ mute-on-start failed: {e}")
+    else:
+        vol = get_volume(chat_id)
+        if vol != 100:
+            try:
+                await calls.change_volume_call(chat_id, vol)
+            except Exception:
+                pass
 
     return path
 
@@ -406,11 +414,37 @@ async def cmd_loop(chat_id: int) -> str:
     return new_mode
 
 
+async def _set_call_muted(chat_id: int, muted: bool):
+    """بی‌صدا/صدادار کردنِ واقعیِ خودمان در ویس‌چت — مستقیم با فلگِ muted خودِ
+    تلگرام (نه با volume=0، که تلگرام آن را «نامعتبر» رد می‌کند). pytgcalls در
+    change_volume_call همیشه muted=False می‌فرستد و کاری برای بی‌صدای واقعی
+    نمی‌کند، برای همین اینجا از همان بلوک‌های داخلیِ pytgcalls (get_input_call
+    و cache_user_peer) برای ساختنِ یک EditGroupCallParticipantRequest دستی
+    استفاده می‌کنیم — دقیقاً همان چیزی که change_volume_call خودش هم از آن‌ها
+    برای volume استفاده می‌کند."""
+    input_call = await calls._app.get_input_call(chat_id)
+    if input_call is None:
+        raise NoActiveGroupCall()
+    participant = calls.cache_user_peer.get(chat_id)
+    if participant is None:
+        raise RuntimeError("no cached participant peer for this chat")
+    await client(EditGroupCallParticipantRequest(
+        call=input_call,
+        participant=participant,
+        muted=muted,
+    ))
+
+
 async def cmd_volume(chat_id: int, delta: int) -> int:
-    """ولوم را به اندازه‌ی delta تغییر می‌دهد. مقدارِ جدید را برمی‌گرداند."""
+    """ولوم را به اندازه‌ی delta تغییر می‌دهد. اگر بی‌صدا بود، اول صدادارش می‌کند
+    (چون کاربری که دکمه‌ی + / - را می‌زند قطعاً می‌خواهد صدا رو بشنود).
+    مقدارِ جدیدِ ولوم را برمی‌گرداند."""
     new_vol = adjust_volume(chat_id, delta)
     if calls is not None:
         try:
+            if is_muted(chat_id):
+                unmute(chat_id)
+                await _set_call_muted(chat_id, False)
             await calls.change_volume_call(chat_id, new_vol)
         except Exception as e:
             print(f"⚠️ change_volume_call failed: {e}")
@@ -418,16 +452,19 @@ async def cmd_volume(chat_id: int, delta: int) -> int:
     return new_vol
 
 
-async def cmd_mute(chat_id: int) -> int:
-    """بی‌صدا/صدادار می‌کند (toggle). مقدارِ جدیدِ ولوم را برمی‌گرداند (۰ یعنی بی‌صدا)."""
-    new_vol = toggle_mute(chat_id)
+async def cmd_mute(chat_id: int) -> bool:
+    """بی‌صدا/صدادار می‌کند (toggle). حالتِ جدید (True یعنی الان بی‌صداست) را برمی‌گرداند."""
+    muted = toggle_mute(chat_id)
     if calls is not None:
         try:
-            await calls.change_volume_call(chat_id, new_vol)
+            await _set_call_muted(chat_id, muted)
+            if not muted:
+                # موقعِ صدادار کردن، ولومِ ذخیره‌شده رو هم دوباره اعمال می‌کنیم
+                await calls.change_volume_call(chat_id, get_volume(chat_id))
         except Exception as e:
-            print(f"⚠️ change_volume_call (mute) failed: {e}")
+            print(f"⚠️ mute toggle failed: {e}")
     await _emit_panel(chat_id)
-    return new_vol
+    return muted
 
 
 async def cmd_move_to_front(chat_id: int, queue_idx: int):
