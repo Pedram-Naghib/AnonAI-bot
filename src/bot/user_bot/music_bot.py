@@ -187,14 +187,15 @@ async def _start_stream(chat_id: int, track: dict) -> str:
         _cleanup_file(path)
         raise
 
-    # تنظیمِ ولوم/بی‌صدایِ ذخیره‌شده برای این گروه
+    # تنظیمِ ولوم/بی‌صدایِ ذخیره‌شده برای این گروه. نکته‌ی مهم: جوین‌شدنِ
+    # یوزربات به ویس‌چت ظاهراً همیشه با muted=True شروع می‌شه (پیش‌فرضِ
+    # pytgcalls برای این الگوی استریم) — پس همیشه صریحاً muted رو ست می‌کنیم،
+    # نه فقط وقتی خودمون فکر می‌کنیم قبلاً میوت بوده.
     try:
         if is_muted(chat_id):
             await _edit_own_participant(chat_id, muted=True)
         else:
-            vol = get_volume(chat_id)
-            if vol != 100:
-                await _edit_own_participant(chat_id, volume=vol)
+            await _edit_own_participant(chat_id, muted=False, volume=get_volume(chat_id))
     except Exception as e:
         print(f"⚠️ volume/mute-on-start failed: {type(e).__name__}: {e}")
 
@@ -468,16 +469,15 @@ async def _edit_own_participant(chat_id: int, muted: bool = None, volume: int = 
 
 
 async def cmd_volume(chat_id: int, delta: int) -> int:
-    """ولوم را به اندازه‌ی delta تغییر می‌دهد. اگر بی‌صدا بود، اول صدادارش می‌کند
-    (چون کاربری که دکمه‌ی + / - را می‌زند قطعاً می‌خواهد صدا رو بشنود).
+    """ولوم را به اندازه‌ی delta تغییر می‌دهد. همیشه صریحاً muted=False هم می‌فرستد
+    (نه فقط بر اساسِ حالتِ داخلیِ ما) چون فهمیدیم جوین‌شدنِ اولیه با muted=True
+    اتفاق می‌افته و اگه اون فلگ رو صریحاً پاک نکنیم صدا اصلاً شنیده نمی‌شه.
     مقدارِ جدیدِ ولوم را برمی‌گرداند."""
     new_vol = adjust_volume(chat_id, delta)
     if calls is not None:
         try:
-            was_muted = is_muted(chat_id)
-            if was_muted:
-                unmute(chat_id)
-            await _edit_own_participant(chat_id, muted=False if was_muted else None, volume=new_vol)
+            unmute(chat_id)
+            await _edit_own_participant(chat_id, muted=False, volume=new_vol)
         except Exception as e:
             print(f"⚠️ cmd_volume failed: {type(e).__name__}: {e}")
     await _emit_panel(chat_id)
