@@ -24,7 +24,7 @@ _music_volume:  dict = {}   # {chat_id: int 1-100}
 
 HISTORY_MAX = 20
 VOLUME_DEFAULT = 100
-VOLUME_STEP    = 20
+VOLUME_STEP    = 10
 
 
 # ════════════════════════════════════════════════════════════
