@@ -22,7 +22,7 @@ from src.bot.music_protocol import (
     get_now, set_now, clear_now, get_queue_len,
     push_to_queue, push_to_front_queue, pop_from_queue, clear_queue,
     shuffle_queue, get_loop, cycle_loop,
-    get_volume, set_volume, adjust_volume,
+    get_volume, set_volume, adjust_volume, toggle_mute,
     push_to_history, get_history,
     IDLE_TIMEOUT, LOOP_NONE, LOOP_TRACK, LOOP_QUEUE,
 )
@@ -219,12 +219,16 @@ async def cmd_play(chat_id: int, audio_chat_id: int, audio_msg_id: int, title: s
     # حالتِ ۱: چیزی در حال پخش/مکث است → صف
     if now and now.get("state") in ("playing", "paused"):
         pos = push_to_queue(chat_id, track)
+        # دکمه‌های «پخش بعدی این باشه / همین ترتیب خوبه» فقط وقتی معنی دارند
+        # که صف بیشتر از یک آهنگ داشته باشد — اگر این تنها آهنگِ صف باشد
+        # (pos == 1) به‌هرحال همان بعدی پخش می‌شود و پرسیدن لازم نیست.
+        kb = _queue_added_keyboard(chat_id, pos - 1) if pos > 1 else None
         try:
             from src.bot.handlers.userbot_cmds import build_queue_added
             await _bot_instance.edit_message_text(
                 build_queue_added(title, performer, duration, pos),
                 chat_id, panel_msg_id, parse_mode="HTML",
-                reply_markup=_queue_added_keyboard(chat_id, pos - 1)
+                reply_markup=kb
             )
         except Exception:
             await _emit_toast(chat_id, f"🎵 «{title}» به صف اضافه شد (موقعیت {pos}).")
@@ -410,6 +414,18 @@ async def cmd_volume(chat_id: int, delta: int) -> int:
             await calls.change_volume_call(chat_id, new_vol)
         except Exception as e:
             print(f"⚠️ change_volume_call failed: {e}")
+    await _emit_panel(chat_id)
+    return new_vol
+
+
+async def cmd_mute(chat_id: int) -> int:
+    """بی‌صدا/صدادار می‌کند (toggle). مقدارِ جدیدِ ولوم را برمی‌گرداند (۰ یعنی بی‌صدا)."""
+    new_vol = toggle_mute(chat_id)
+    if calls is not None:
+        try:
+            await calls.change_volume_call(chat_id, new_vol)
+        except Exception as e:
+            print(f"⚠️ change_volume_call (mute) failed: {e}")
     await _emit_panel(chat_id)
     return new_vol
 

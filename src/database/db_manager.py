@@ -203,6 +203,20 @@ async def init_db():
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_music_fav_lookup ON music_favorites (user_id, chat_id);")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_music_bl_lookup  ON music_blacklist  (user_id, chat_id);")
 
+        # Whisper: quick-access recent contacts (people you whispered to, or who
+        # whispered to you). Keyed per-owner so each user's list is independent;
+        # label (name/username) is resolved live via a join with `users` at read
+        # time rather than stored, so it stays fresh if the contact renames.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS whisper_contacts (
+                owner_id   BIGINT,
+                contact_id BIGINT,
+                last_used  TIMESTAMPTZ DEFAULT NOW(),
+                PRIMARY KEY (owner_id, contact_id)
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_whisper_contacts_recent ON whisper_contacts (owner_id, last_used DESC);")
+
     print("🚀 Database initialized successfully.")
 
 
@@ -285,6 +299,54 @@ async def get_user_id_by_username(username: str):
         return await conn.fetchval(
             "SELECT user_id FROM users WHERE lower(username) = lower($1)",
             username.strip().lstrip('@')
+        )
+
+
+# ── Whisper quick-access contacts ─────────────────────────
+async def upsert_whisper_contact(owner_id: int, contact_id: int):
+    """Record/refresh that `owner_id` recently whispered with `contact_id`
+    (either direction — sender adding a recipient, or a recipient opening a
+    whisper). Self-contacts are skipped since they're not useful suggestions."""
+    if not contact_id or owner_id == contact_id:
+        return
+    pool = await get_connection_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO whisper_contacts (owner_id, contact_id, last_used)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (owner_id, contact_id) DO UPDATE SET last_used = NOW()
+        """, owner_id, contact_id)
+
+
+async def get_recent_whisper_contacts(owner_id: int, limit: int = 5) -> list:
+    """Most recent whisper contacts for `owner_id`, newest first. Label prefers
+    @username (what you'd type to target them) and falls back to first_name,
+    then the raw id if the contact was never registered."""
+    pool = await get_connection_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT wc.contact_id, u.first_name, u.username
+            FROM whisper_contacts wc
+            LEFT JOIN users u ON u.user_id = wc.contact_id
+            WHERE wc.owner_id = $1
+            ORDER BY wc.last_used DESC
+            LIMIT $2
+        """, owner_id, limit)
+        return [
+            {
+                "contact_id": r["contact_id"],
+                "label": (f"@{r['username']}" if r["username"] else r["first_name"]) or str(r["contact_id"]),
+            }
+            for r in rows
+        ]
+
+
+async def remove_whisper_contact(owner_id: int, contact_id: int):
+    pool = await get_connection_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM whisper_contacts WHERE owner_id = $1 AND contact_id = $2",
+            owner_id, contact_id
         )
 
 

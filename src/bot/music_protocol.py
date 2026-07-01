@@ -16,11 +16,12 @@ LOOP_TRACK = "track"   # تکرارِ یک آهنگ
 LOOP_QUEUE = "queue"   # تکرارِ کل صف
 
 # ── ساختارهای داده درون‌حافظه‌ای (RAM) ──────────────────────
-_music_now:     dict = {}   # {chat_id: track_info_dict}
-_music_queue:   dict = {}   # {chat_id: [track_dict, ...]}
-_music_history: dict = {}   # {chat_id: [track_dict, ...]}  (آخرین ۲۰ تا)
-_music_loop:    dict = {}   # {chat_id: "none"|"track"|"queue"}
-_music_volume:  dict = {}   # {chat_id: int 1-100}
+_music_now:      dict = {}   # {chat_id: track_info_dict}
+_music_queue:    dict = {}   # {chat_id: [track_dict, ...]}
+_music_history:  dict = {}   # {chat_id: [track_dict, ...]}  (آخرین ۲۰ تا)
+_music_loop:     dict = {}   # {chat_id: "none"|"track"|"queue"}
+_music_volume:   dict = {}   # {chat_id: int 0-100 — 0 یعنی بی‌صدا}
+_music_pre_mute: dict = {}   # {chat_id: int}  ولومِ قبل از زدنِ دکمهٔ بی‌صدا، برای بازگردانی
 
 HISTORY_MAX = 20
 VOLUME_DEFAULT = 100
@@ -106,13 +107,28 @@ def get_volume(chat_id: int) -> int:
 
 
 def set_volume(chat_id: int, volume: int) -> int:
-    v = max(1, min(100, volume))
+    v = max(0, min(100, volume))  # 0 مجاز است — یعنی بی‌صدا
     _music_volume[chat_id] = v
     return v
 
 
 def adjust_volume(chat_id: int, delta: int) -> int:
     return set_volume(chat_id, get_volume(chat_id) + delta)
+
+
+def is_muted(chat_id: int) -> bool:
+    return get_volume(chat_id) == 0
+
+
+def toggle_mute(chat_id: int) -> int:
+    """اگر بی‌صدا نیست: ولومِ فعلی را برای بازگردانی ذخیره می‌کند و صدا را می‌بَرد رو صفر.
+    اگر بی‌صداست: همان ولومِ ذخیره‌شده (یا پیش‌فرض) را برمی‌گرداند. ولومِ جدید را برمی‌گرداند."""
+    current = get_volume(chat_id)
+    if current == 0:
+        restored = _music_pre_mute.pop(chat_id, VOLUME_DEFAULT)
+        return set_volume(chat_id, restored)
+    _music_pre_mute[chat_id] = current
+    return set_volume(chat_id, 0)
 
 
 # ════════════════════════════════════════════════════════════

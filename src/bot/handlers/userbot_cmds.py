@@ -20,11 +20,11 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from src.config import SUPER_USERS
 from src.bot.music_protocol import (
     get_now, get_queue_len, peek_queue, get_history,
-    get_loop, get_volume, LOOP_NONE, LOOP_TRACK, LOOP_QUEUE,
+    get_loop, get_volume, VOLUME_STEP, LOOP_NONE, LOOP_TRACK, LOOP_QUEUE,
 )
 from src.bot.user_bot.music_bot import (
     cmd_play, cmd_pause, cmd_resume, cmd_skip, cmd_stop,
-    cmd_shuffle, cmd_loop, cmd_volume, cmd_move_to_front,
+    cmd_shuffle, cmd_loop, cmd_volume, cmd_mute, cmd_move_to_front,
     repoint_panel,
 )
 
@@ -83,11 +83,13 @@ def build_panel(state: str, title: str, queue_len: int,
     req_line     = _requester_line(requester_id, requester_name)
     queue_line   = f"\n\n📋 در صف: <b>{queue_len}</b> آهنگ" if queue_len > 0 else ""
     icon         = "🎬" if with_video else "🎧"
-    vol_bar      = f"🔊 {volume}%"
+    is_muted     = (volume == 0)
+    vol_line     = "\n🔇 بی‌صدا" if is_muted else f"\n🔊 صدا: {volume}%"
+    mute_label   = "🔇 پخشِ صدا" if is_muted else "🔈 قطع صدا"
     loop_label   = _LOOP_LABELS.get(loop_mode, "🔁 لوپ: خاموش")
 
     if state == "playing":
-        text = f"🎵 <b>در حال پخش</b>\n{icon} {safe_title}{info}{req_line}{queue_line}"
+        text = f"🎵 <b>در حال پخش</b>\n{icon} {safe_title}{info}{req_line}{vol_line}{queue_line}"
         kb = InlineKeyboardMarkup()
         kb.row(
             InlineKeyboardButton("⏸ توقف",   callback_data="mus_pause", style="primary"),
@@ -99,9 +101,9 @@ def build_panel(state: str, title: str, queue_len: int,
             InlineKeyboardButton(loop_label,         callback_data="mus_loop", style="success"),
         )
         kb.row(
-            InlineKeyboardButton("🔉 -20%",          callback_data="mus_vol_down"),
-            InlineKeyboardButton(vol_bar,             callback_data="mus_vol_show"),
-            InlineKeyboardButton("🔊 +20%",          callback_data="mus_vol_up"),
+            InlineKeyboardButton(f"🔉 -{VOLUME_STEP}%", callback_data="mus_vol_down"),
+            InlineKeyboardButton(mute_label,             callback_data="mus_mute", style="success" if is_muted else None),
+            InlineKeyboardButton(f"🔊 +{VOLUME_STEP}%", callback_data="mus_vol_up"),
         )
         kb.row(
             InlineKeyboardButton("❤️ لایک",          callback_data="mus_like"),
@@ -112,7 +114,7 @@ def build_panel(state: str, title: str, queue_len: int,
         return text, kb
 
     if state == "paused":
-        text = f"⏸ <b>متوقف شده</b>\n{icon} {safe_title}{info}{req_line}{queue_line}"
+        text = f"⏸ <b>متوقف شده</b>\n{icon} {safe_title}{info}{req_line}{vol_line}{queue_line}"
         kb = InlineKeyboardMarkup()
         kb.row(
             InlineKeyboardButton("▶️ ادامه",  callback_data="mus_resume", style="primary"),
@@ -124,9 +126,9 @@ def build_panel(state: str, title: str, queue_len: int,
             InlineKeyboardButton(loop_label,         callback_data="mus_loop", style="success"),
         )
         kb.row(
-            InlineKeyboardButton("🔉 -20%",          callback_data="mus_vol_down"),
-            InlineKeyboardButton(vol_bar,             callback_data="mus_vol_show"),
-            InlineKeyboardButton("🔊 +20%",          callback_data="mus_vol_up"),
+            InlineKeyboardButton(f"🔉 -{VOLUME_STEP}%", callback_data="mus_vol_down"),
+            InlineKeyboardButton(mute_label,             callback_data="mus_mute", style="success" if is_muted else None),
+            InlineKeyboardButton(f"🔊 +{VOLUME_STEP}%", callback_data="mus_vol_up"),
         )
         kb.row(
             InlineKeyboardButton("❤️ لایک",          callback_data="mus_like"),
@@ -466,12 +468,19 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             await bot.answer_callback_query(call.id, text, show_alert=True)
             return
 
-        if data == "vol_show":
-            vol = get_volume(chat_id)
-            await bot.answer_callback_query(call.id, f"🔊 ولوم فعلی: {vol}%")
-            return
-
         if data == "queue_ok":
+            try:
+                base_text = call.message.html_text or ""
+            except Exception:
+                base_text = ""
+            new_text = f"{base_text}\n\n☑️ <i>ترتیبِ صف حفظ شد.</i>"
+            try:
+                await bot.edit_message_text(
+                    new_text, call.message.chat.id, call.message.message_id,
+                    parse_mode="HTML", reply_markup=None
+                )
+            except Exception:
+                pass
             await bot.answer_callback_query(call.id, "✅ ترتیب حفظ شد.")
             return
 
@@ -483,14 +492,21 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             try:
                 idx = int(data.split("playnext_")[-1])
                 asyncio.create_task(cmd_move_to_front(chat_id, idx))
-                await bot.answer_callback_query(call.id, "▶️ این آهنگ بعدی پخش می‌شه!")
-                # پیامِ «به صف اضافه شد» را ویرایش می‌کنیم تا دکمه‌ها حذف شوند
+                # پیامِ «به صف اضافه شد» را ویرایش می‌کنیم: دکمه‌ها حذف می‌شوند و
+                # متن نشان می‌دهد که ربات تصمیمِ کاربر را متوجه شده.
                 try:
-                    await bot.edit_message_reply_markup(
-                        call.message.chat.id, call.message.message_id, reply_markup=None
+                    base_text = call.message.html_text or ""
+                except Exception:
+                    base_text = ""
+                new_text = f"{base_text}\n\n▶️ <i>این آهنگ بعدی پخش می‌شه!</i>"
+                try:
+                    await bot.edit_message_text(
+                        new_text, call.message.chat.id, call.message.message_id,
+                        parse_mode="HTML", reply_markup=None
                     )
                 except Exception:
                     pass
+                await bot.answer_callback_query(call.id, "▶️ این آهنگ بعدی پخش می‌شه!")
             except Exception as e:
                 await bot.answer_callback_query(call.id, f"خطا: {e}", show_alert=True)
             return
@@ -558,8 +574,6 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             "skip":     "⏭ آهنگ بعدی",
             "stop":     "⏹️ پخش پایان یافت",
             "shuffle":  "🔀 صف قاطی شد!",
-            "vol_up":   "🔊 صدا بیشتر شد",
-            "vol_down": "🔉 صدا کمتر شد",
         }
 
         if data == "pause":
@@ -577,10 +591,26 @@ def register_userbot_handlers(bot: AsyncTeleBot):
             loop_names = {LOOP_NONE: "خاموش", LOOP_TRACK: "یک آهنگ", LOOP_QUEUE: "همهٔ صف"}
             await bot.answer_callback_query(call.id, f"🔁 لوپ: {loop_names.get(new_mode, new_mode)}")
             return
-        elif data == "vol_up":
-            asyncio.create_task(cmd_volume(chat_id, +20))
-        elif data == "vol_down":
-            asyncio.create_task(cmd_volume(chat_id, -20))
+        elif data in ("vol_up", "vol_down"):
+            # مستقیم await می‌شود (نه fire-and-forget) تا مقدارِ واقعیِ ولوم بعد از
+            # تغییر معلوم باشه و تو toast نشون داده بشه — نه یه پیامِ ژنریک.
+            try:
+                new_vol = await cmd_volume(chat_id, VOLUME_STEP if data == "vol_up" else -VOLUME_STEP)
+                await bot.answer_callback_query(call.id, f"🔊 {new_vol}%")
+            except Exception as e:
+                print(f"💥 vol_up/down error: {e}")
+                await bot.answer_callback_query(call.id, "⚠️ تغییر صدا انجام نشد.")
+            return
+        elif data == "mute":
+            try:
+                new_vol = await cmd_mute(chat_id)
+                await bot.answer_callback_query(
+                    call.id, "🔇 صدا قطع شد." if new_vol == 0 else f"🔊 صدا وصل شد ({new_vol}%)."
+                )
+            except Exception as e:
+                print(f"💥 mute error: {e}")
+                await bot.answer_callback_query(call.id, "⚠️ تغییر صدا انجام نشد.")
+            return
         else:
             await bot.answer_callback_query(call.id)
             return
