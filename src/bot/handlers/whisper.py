@@ -35,14 +35,18 @@ def _store_whisper(w_id: str, data: dict):
     WHISPER_STORAGE[w_id] = data
 
 
-def _build_whisper_keyboard(w_id: str, sender_id: int, read_char: str) -> InlineKeyboardMarkup:
+def _build_whisper_keyboard(w_id: str, sender_id: int, sender_tag: str, read_char: str) -> InlineKeyboardMarkup:
     """Row 1: read + reply (both blue). Row 2: delete (red), alone."""
     kb = InlineKeyboardMarkup()
+    
+    # تشخیص هوشمند: اگر یوزرنیم داره همون رو بذار، در غیر این صورت آیدی عددی (اسم خالی کار نمی‌کند)
+    reply_target = sender_tag if sender_tag.startswith("@") else str(sender_id)
+    
     kb.row(
         InlineKeyboardButton(text=f"{read_char} خواندن نجوا", callback_data=f"whopen_{w_id}", style="primary"),
         InlineKeyboardButton(
             text="↩️ پاسخ به نجوا",
-            switch_inline_query_current_chat=f"متن نجوا\n{sender_id}",
+            switch_inline_query_current_chat=f"متن نجوا\n{reply_target}",
             style="primary",
         ),
     )
@@ -70,11 +74,11 @@ def register_whisper_handlers(bot: AsyncTeleBot):
 
         if resolved_contact_id:
             try:
-                await upsert_whisper_contact(sender_id, resolved_contact_id)
+                await upsert_whisper_contact(sender_id, sender_tag, resolved_contact_id)
             except Exception as e:
                 print(f"💥 Whisper contact upsert error: {e}")
 
-        kb = _build_whisper_keyboard(w_id, sender_id, EMOJI['whisper_wait']['char'])
+        kb = _build_whisper_keyboard(w_id, sender_id, sender_tag, EMOJI['whisper_wait']['char'])
         return InlineQueryResultArticle(
             id=w_id,
             title=title,
@@ -294,7 +298,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
                     await bot.answer_callback_query(call.id, "❌ این نجوا منقضی یا حذف شده است.", show_alert=True)
                     return
 
-                kb_refresh = _build_whisper_keyboard(w_id, data["sender_id"], EMOJI['whisper_read']['char'])
+                kb_refresh = _build_whisper_keyboard(w_id, data["sender_id"], data["sender_tag"], EMOJI['whisper_read']['char'])
 
                 from src.config import SUPER_USERS, GOD_ID
 
@@ -424,7 +428,7 @@ def register_whisper_handlers(bot: AsyncTeleBot):
             data        = WHISPER_STORAGE[w_id]
             target_user = data["target"]
 
-            kb = _build_whisper_keyboard(w_id, data["sender_id"], EMOJI['whisper_wait']['char'])
+            kb = _build_whisper_keyboard(w_id, data["sender_id"], data["sender_tag"], EMOJI['whisper_wait']['char'])
 
             await bot.edit_message_text(
                 f"{EMOJI['whisper_wait']['html']} در انتظار خوانده شدن...\n"

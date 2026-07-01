@@ -11,10 +11,6 @@ import traceback
 
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from telethon.tl.functions.channels import GetFullChannelRequest
-from telethon.tl.functions.messages import GetFullChatRequest
-from telethon.tl.functions.phone import EditGroupCallParticipantRequest, GetGroupParticipantsRequest
-from telethon.tl.types import InputPeerSelf, Channel, Chat
 
 from pytgcalls import PyTgCalls
 from pytgcalls.types import MediaStream, StreamEnded
@@ -42,7 +38,7 @@ calls:  PyTgCalls       = None
 
 _autoleave_tasks: dict = {}
 _last_panel:      dict = {}
-_bot_instance           = None
+_bot_instance          = None
 
 
 # ════════════════════════════════════════════════════════════
@@ -183,21 +179,14 @@ async def _start_stream(chat_id: int, track: dict) -> str:
     )
     try:
         await calls.play(chat_id, MediaStream(path, video_flags=video_flags))
+        
+        # 🌟 اعمال ولوم با یک وقفه کوتاه برای سینک شدن با سرور
+        if not is_muted(chat_id):
+            await asyncio.sleep(1) 
+            await calls.change_volume_call(chat_id, get_volume(chat_id))
     except Exception:
         _cleanup_file(path)
         raise
-
-    # تنظیمِ ولوم/بی‌صدایِ ذخیره‌شده برای این گروه. نکته‌ی مهم: جوین‌شدنِ
-    # یوزربات به ویس‌چت ظاهراً همیشه با muted=True شروع می‌شه (پیش‌فرضِ
-    # pytgcalls برای این الگوی استریم) — پس همیشه صریحاً muted رو ست می‌کنیم،
-    # نه فقط وقتی خودمون فکر می‌کنیم قبلاً میوت بوده.
-    try:
-        if is_muted(chat_id):
-            await _edit_own_participant(chat_id, muted=True)
-        else:
-            await _edit_own_participant(chat_id, muted=False, volume=get_volume(chat_id))
-    except Exception as e:
-        print(f"⚠️ volume/mute-on-start failed: {type(e).__name__}: {e}")
 
     return path
 
@@ -228,9 +217,6 @@ async def cmd_play(chat_id: int, audio_chat_id: int, audio_msg_id: int, title: s
     # حالتِ ۱: چیزی در حال پخش/مکث است → صف
     if now and now.get("state") in ("playing", "paused"):
         pos = push_to_queue(chat_id, track)
-        # دکمه‌های «پخش بعدی این باشه / همین ترتیب خوبه» فقط وقتی معنی دارند
-        # که صف بیشتر از یک آهنگ داشته باشد — اگر این تنها آهنگِ صف باشد
-        # (pos == 1) به‌هرحال همان بعدی پخش می‌شود و پرسیدن لازم نیست.
         kb = _queue_added_keyboard(chat_id, pos - 1) if pos > 1 else None
         try:
             from src.bot.handlers.userbot_cmds import build_queue_added
@@ -304,8 +290,6 @@ async def _play_next(chat_id: int):
 
     # Loop Track: همان آهنگ را دوباره پخش کن
     if loop_mode == LOOP_TRACK and prev:
-        # audio_path فایلِ دیسکی است که احتمالاً در پخشِ قبلی پاک شده —
-        # حذفش می‌کنیم تا _start_stream مجبور بشه دوباره از یوزربات دانلود کنه.
         track_for_loop = {**prev, "audio_path": None}
         try:
             _cleanup_file(prev.get("path"))
@@ -415,69 +399,13 @@ async def cmd_loop(chat_id: int) -> str:
     return new_mode
 
 
-async def _get_group_call(chat_id: int):
-    """InputGroupCall را مستقیم از خودِ تلگرام می‌گیرد، بدون تکیه به کشِ داخلیِ
-    pytgcalls. گروه می‌تونه یا سوپرگروه/کانال باشه (GetFullChannelRequest) یا
-    یه گروهِ معمولیِ قدیمی (GetFullChatRequest) — این دو تا API کاملاً جدا
-    هستن تو تلگرام، برای همینم اول نوعِ entity رو تشخیص می‌دیم."""
-    entity = await client.get_entity(chat_id)
-    if isinstance(entity, Channel):
-        full = await client(GetFullChannelRequest(entity))
-    elif isinstance(entity, Chat):
-        full = await client(GetFullChatRequest(entity.id))
-    else:
-        raise NoActiveGroupCall()
-    call = getattr(full.full_chat, "call", None)
-    if call is None:
-        raise NoActiveGroupCall()
-    return call
-
-
-async def _edit_own_participant(chat_id: int, muted: bool = None, volume: int = None):
-    """تغییرِ ولوم/بی‌صدایِ خودمان (یوزربات) در ویس‌چت — مستقیم با
-    EditGroupCallParticipantRequest و participant=InputPeerSelf، کاملاً
-    مستقل از pytgcalls. volume باید ۱ تا ۲۰۰ باشد (خودِ تلگرام در ۲۰۰ سقف
-    می‌گذارد)؛ ۰ را «نامعتبر» رد می‌کند، برای همین بی‌صدا شدن همیشه با
-    muted=True انجام می‌شود، نه volume=0."""
-    call = await _get_group_call(chat_id)
-    kwargs = {}
-    if muted is not None:
-        kwargs["muted"] = muted
-    if volume is not None:
-        kwargs["volume"] = max(1, min(200, volume)) * 100
-    await client(EditGroupCallParticipantRequest(
-        call=call,
-        participant=InputPeerSelf(),
-        **kwargs,
-    ))
-
-    # تشخیصی: چون قبلاً دیده بودیم درخواست بدونِ خطا موفق می‌شد ولی هیچ اثری
-    # نداشت، بلافاصله وضعیتِ خودمون رو از سرور می‌خونیم تا معلوم شه تلگرام
-    # واقعاً ثبتش کرده یا نه، و اصلاً یوزربات به‌عنوانِ participant دیده می‌شه یا نه.
-    try:
-        parts = await client(GetGroupParticipantsRequest(
-            call=call, ids=[InputPeerSelf()], sources=[], offset="", limit=1
-        ))
-        if parts.participants:
-            p = parts.participants[0]
-            print(f"🔎 self-participant after edit → muted={p.muted}, volume={p.volume}")
-        else:
-            print("🔎 self-participant after edit → NOT FOUND in call's participant list "
-                  "(یوزربات اصلاً به‌عنوانِ participant ثبت نشده — یعنی ریشه‌ی مشکل همینه)")
-    except Exception as e:
-        print(f"🔎 participant verify failed: {type(e).__name__}: {e}")
-
-
 async def cmd_volume(chat_id: int, delta: int) -> int:
-    """ولوم را به اندازه‌ی delta تغییر می‌دهد. همیشه صریحاً muted=False هم می‌فرستد
-    (نه فقط بر اساسِ حالتِ داخلیِ ما) چون فهمیدیم جوین‌شدنِ اولیه با muted=True
-    اتفاق می‌افته و اگه اون فلگ رو صریحاً پاک نکنیم صدا اصلاً شنیده نمی‌شه.
-    مقدارِ جدیدِ ولوم را برمی‌گرداند."""
+    """ولوم را به اندازه‌ی delta تغییر می‌دهد با موتور pytgcalls"""
     new_vol = adjust_volume(chat_id, delta)
     if calls is not None:
         try:
             unmute(chat_id)
-            await _edit_own_participant(chat_id, muted=False, volume=new_vol)
+            await calls.change_volume_call(chat_id, new_vol)
         except Exception as e:
             print(f"⚠️ cmd_volume failed: {type(e).__name__}: {e}")
     await _emit_panel(chat_id)
@@ -485,16 +413,16 @@ async def cmd_volume(chat_id: int, delta: int) -> int:
 
 
 async def cmd_mute(chat_id: int) -> bool:
-    """بی‌صدا/صدادار می‌کند (toggle). حالتِ جدید (True یعنی الان بی‌صداست) را برمی‌گرداند."""
+    """بی‌صدا/صدادار کردن از طریق استاپ موقت/تغییر ولوم"""
     muted = toggle_mute(chat_id)
     if calls is not None:
         try:
             if muted:
-                await _edit_own_participant(chat_id, muted=True)
+                await calls.pause(chat_id)
             else:
-                # موقعِ صدادار کردن، هم فلگِ muted رو برمی‌داریم هم ولومِ
-                # ذخیره‌شده رو تو همون یک درخواست دوباره اعمال می‌کنیم
-                await _edit_own_participant(chat_id, muted=False, volume=get_volume(chat_id))
+                await calls.resume(chat_id)
+                await asyncio.sleep(0.5)
+                await calls.change_volume_call(chat_id, get_volume(chat_id))
         except Exception as e:
             print(f"⚠️ cmd_mute failed: {type(e).__name__}: {e}")
     await _emit_panel(chat_id)
@@ -516,8 +444,6 @@ async def _leave(chat_id: int, toast: str = ""):
     if now:
         push_to_history(chat_id, now)
         _cleanup_file(now.get("path"))
-        # panel_msg_id را قبل از clear_now نگه می‌داریم تا _emit_panel بتونه
-        # همون پیامِ درست رو ویرایش کنه (بعد از clear_now، now خالیه)
         panel_msg_id = now.get("panel_msg_id")
         if panel_msg_id:
             _last_panel[chat_id] = panel_msg_id

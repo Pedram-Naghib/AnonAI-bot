@@ -159,7 +159,8 @@ async def _is_authorized(chat_id: int, user_id: int) -> bool:
     if user_id in SUPER_USERS:
         return True
     data = get_now(chat_id)
-    return data.get("initiator_id") == user_id
+    # 🌟 کلمه initiator_id به requester_id تغییر کرد
+    return data.get("requester_id") == user_id
 
 
 def register_userbot_handlers(bot: AsyncTeleBot):
