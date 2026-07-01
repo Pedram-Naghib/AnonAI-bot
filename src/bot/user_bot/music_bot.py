@@ -81,7 +81,12 @@ async def _emit_panel(chat_id: int):
             parse_mode="HTML", reply_markup=kb
         )
     except Exception as e:
-        print(f"⚠️ _emit_panel edit failed for {chat_id}: {type(e).__name__}: {e}")
+        # 🌟 فیلتر کردن ارورِ تکراری بودن پیام (کد 400)
+        error_msg = str(e).lower()
+        if "message is not modified" in error_msg or "exactly the same" in error_msg:
+            pass 
+        else:
+            print(f"⚠️ _emit_panel edit failed for {chat_id}: {type(e).__name__}: {e}")
 
 
 async def _emit_toast(chat_id: int, text: str):
@@ -180,7 +185,7 @@ async def _start_stream(chat_id: int, track: dict) -> str:
     try:
         await calls.play(chat_id, MediaStream(path, video_flags=video_flags))
         
-        # 🌟 اعمال ولوم با یک وقفه کوتاه برای سینک شدن با سرور
+        # اعمال ولوم با یک وقفه کوتاه برای سینک شدن با سرور
         if not is_muted(chat_id):
             await asyncio.sleep(1) 
             await calls.change_volume_call(chat_id, get_volume(chat_id))
@@ -214,7 +219,6 @@ async def cmd_play(chat_id: int, audio_chat_id: int, audio_msg_id: int, title: s
     }
     now = get_now(chat_id)
 
-    # حالتِ ۱: چیزی در حال پخش/مکث است → صف
     if now and now.get("state") in ("playing", "paused"):
         pos = push_to_queue(chat_id, track)
         kb = _queue_added_keyboard(chat_id, pos - 1) if pos > 1 else None
@@ -230,7 +234,6 @@ async def cmd_play(chat_id: int, audio_chat_id: int, audio_msg_id: int, title: s
         await _emit_panel(chat_id)
         return
 
-    # حالتِ ۲: پخش نمی‌شود → همین حالا پخش
     _last_panel[chat_id] = panel_msg_id
     try:
         path = await _start_stream(chat_id, track)
@@ -265,7 +268,6 @@ async def cmd_play(chat_id: int, audio_chat_id: int, audio_msg_id: int, title: s
 
 
 def _queue_added_keyboard(chat_id: int, queue_idx: int):
-    """کیبوردِ «پخش بعدی این باشه؟» زیرِ پیامِ اضافه‌شدن به صف."""
     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
     kb = InlineKeyboardMarkup()
     kb.row(
@@ -288,7 +290,6 @@ async def _play_next(chat_id: int):
 
     loop_mode = get_loop(chat_id)
 
-    # Loop Track: همان آهنگ را دوباره پخش کن
     if loop_mode == LOOP_TRACK and prev:
         track_for_loop = {**prev, "audio_path": None}
         try:
@@ -309,7 +310,6 @@ async def _play_next(chat_id: int):
         await _emit_panel(chat_id)
         return
 
-    # Loop Queue: وقتی صف خالی شد، کل صف را دوباره پر کن
     if loop_mode == LOOP_QUEUE and not get_queue_len(chat_id) and prev:
         push_to_queue(chat_id, {k: v for k, v in prev.items()
                                 if k not in ("state", "panel_msg_id", "initiator_id", "path", "audio_path")})
@@ -401,13 +401,22 @@ async def cmd_loop(chat_id: int) -> str:
 
 async def cmd_volume(chat_id: int, delta: int) -> int:
     """ولوم را به اندازه‌ی delta تغییر می‌دهد با موتور pytgcalls"""
+    old_vol = get_volume(chat_id)
     new_vol = adjust_volume(chat_id, delta)
+    
+    # 🌟 جلوگیری از ارسال ریکوئست الکی و خطای 400
+    if old_vol == new_vol:
+        return new_vol
+        
     if calls is not None:
         try:
             unmute(chat_id)
             await calls.change_volume_call(chat_id, new_vol)
+            # یک وقفه ریز برای اعمال روی استریم
+            await asyncio.sleep(0.5) 
         except Exception as e:
             print(f"⚠️ cmd_volume failed: {type(e).__name__}: {e}")
+            
     await _emit_panel(chat_id)
     return new_vol
 
