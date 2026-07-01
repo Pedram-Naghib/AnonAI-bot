@@ -13,7 +13,7 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon.tl.functions.messages import GetFullChatRequest
-from telethon.tl.functions.phone import EditGroupCallParticipantRequest
+from telethon.tl.functions.phone import EditGroupCallParticipantRequest, GetGroupParticipantsRequest
 from telethon.tl.types import InputPeerSelf, Channel, Chat
 
 from pytgcalls import PyTgCalls
@@ -449,6 +449,22 @@ async def _edit_own_participant(chat_id: int, muted: bool = None, volume: int = 
         participant=InputPeerSelf(),
         **kwargs,
     ))
+
+    # تشخیصی: چون قبلاً دیده بودیم درخواست بدونِ خطا موفق می‌شد ولی هیچ اثری
+    # نداشت، بلافاصله وضعیتِ خودمون رو از سرور می‌خونیم تا معلوم شه تلگرام
+    # واقعاً ثبتش کرده یا نه، و اصلاً یوزربات به‌عنوانِ participant دیده می‌شه یا نه.
+    try:
+        parts = await client(GetGroupParticipantsRequest(
+            call=call, ids=[InputPeerSelf()], sources=[], offset="", limit=1
+        ))
+        if parts.participants:
+            p = parts.participants[0]
+            print(f"🔎 self-participant after edit → muted={p.muted}, volume={p.volume}")
+        else:
+            print("🔎 self-participant after edit → NOT FOUND in call's participant list "
+                  "(یوزربات اصلاً به‌عنوانِ participant ثبت نشده — یعنی ریشه‌ی مشکل همینه)")
+    except Exception as e:
+        print(f"🔎 participant verify failed: {type(e).__name__}: {e}")
 
 
 async def cmd_volume(chat_id: int, delta: int) -> int:
